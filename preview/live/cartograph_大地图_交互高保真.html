@@ -10,17 +10,17 @@
 #mapArea,#map{position:fixed;inset:0;width:100%;height:100%}#mapArea{cursor:grab;touch-action:none;background:#e4d7bb}#mapArea.dragging{cursor:grabbing}#map{display:block;image-rendering:auto}#mapArea:after{content:"";position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px #1c2a2226}
 #markerLayer{position:absolute;inset:0;pointer-events:none}.marker{position:absolute;transform:translate(-50%,-100%);display:flex;gap:5px;align-items:center;white-space:nowrap;filter:drop-shadow(0 2px 2px #162b2638)}.markIcon{display:flex;align-items:center;justify-content:center;width:26px;height:26px;background:#fdf5e6;border:2px solid #304c45;border-radius:50%;font-size:14px;color:#253e38;box-shadow:0 2px 8px #162b2666}.markLabel{color:#253b34;background:#f7f4e6f0;padding:4px 7px;border-radius:5px;border:1px solid #2943342c;font-size:12px;font-weight:750;letter-spacing:.2px;text-shadow:0 1px #fff5;box-shadow:0 3px 10px #1f2d241b}.marker.ancient .markIcon{background:#eee1bd;border-color:#6a4f39;color:#4a3023}.marker.ancient .markLabel{background:#e9d4a8eb;border-color:#6a4f3960;color:#513c29;font-family:Georgia,"Microsoft YaHei",serif}
 .appbar{position:fixed;z-index:5;top:20px;right:22px;display:flex;align-items:center;gap:6px;padding:7px;background:#1b2c24ed;border:1px solid #dfc99c42;border-radius:12px;box-shadow:var(--shadow)}.tool{height:46px;min-width:52px;padding:5px 9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#eee8d9;background:transparent;border:1px solid transparent;border-radius:8px;font-size:12px;font-weight:650}.tool:hover,.tool.active{background:#4a6252;border-color:#dfc99c38}.tool svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.tool.close{color:#f6d6bc}.sep{height:26px;width:1px;background:#eadcb12e;margin:0 2px}
-.switcher{position:fixed;z-index:5;top:90px;right:22px;display:flex;align-items:center;gap:5px;padding:6px;background:#20332be8;border:1px solid #d9c99b51;box-shadow:var(--shadow);border-radius:11px}.switcher button{border:0;background:transparent;color:#d4dfd2;border-radius:7px;padding:9px 14px;white-space:nowrap;font-size:14px;font-weight:750}.switcher button.selected{background:#edddb7;color:#293b30;box-shadow:0 2px 9px #07181244}.switcher .caption{color:#d0dccb;font-size:11px;margin:0 7px 0 5px;white-space:nowrap}
+
 .overlayWindow{position:fixed;z-index:7;right:22px;top:93px;width:min(350px,calc(100vw - 28px));max-height:min(650px,calc(100vh - 110px));overflow-y:auto;border:1px solid #d8caa05b;border-radius:13px;background:linear-gradient(160deg,#283e33f5,#182b23f7);box-shadow:var(--shadow);padding:19px}.overlayWindow.hidden,.modalBackdrop.hidden,.toast.hidden,.contextMenu.hidden{display:none}.panelLabel{font-size:10px;color:#dfc799;letter-spacing:2.2px;font-weight:800;text-transform:uppercase}.panelTitle{font-size:20px;line-height:1.6;font-weight:800;margin:3px 0}.panelSubtitle{color:#b9c8ba;font-size:12px;line-height:1.8;margin:0 0 12px}.smallClose{position:absolute;right:12px;top:12px;border:0;background:#ffffff12;color:#fff;border-radius:7px;width:28px;height:28px;font-size:19px}.resource{display:grid;grid-template-columns:1fr auto;gap:5px 8px;padding:11px 0;border-bottom:1px solid var(--line)}.resource small{color:#bac7b5;font-size:12px}.resource strong{font-size:14px;color:#f3d399}.btn{border:1px solid #f7d2a93c;background:#435748;color:#f6eddf;padding:10px 14px;border-radius:8px;font-weight:700}.btn:hover{background:#576d59}.btn.primary{background:#dac293;color:#23362b;border-color:#ead4a8}.btn.primary:hover{background:#f4d8a3}.panelGroup{margin-top:14px;display:grid;gap:8px}.panelGroup button{text-align:left;padding:10px 12px}.layerRow{display:flex;align-items:center;justify-content:space-between;padding:12px 3px;gap:14px;border-bottom:1px solid #ffffff14;min-height:48px}.layerRow span{color:#eeeadd;font-size:13px;font-weight:700}.layerRow small{display:block;color:#adbfb2;font-size:11px;margin-top:4px}.layerRow input{accent-color:#eccb88;width:18px;height:18px}.markList{display:flex;flex-direction:column;gap:7px}.markList button{text-align:left;display:flex;align-items:center;gap:9px;border:1px solid #ffffff16;background:#385042;color:#f8edd9;border-radius:8px;padding:10px}.markList button:hover{background:#536e57}.markList b{font-size:13px}.markList small{font-size:10px;color:#bbc7b8;display:block;margin-top:3px}
 .modalBackdrop{position:fixed;inset:0;z-index:10;background:#0a1712b8;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px)}.modal{width:min(780px,100%);max-height:95vh;overflow-y:auto;background:linear-gradient(152deg,#2b4135,#1b3026);border:1px solid #dcc7a874;border-radius:16px;box-shadow:0 30px 90px #000b;padding:27px 28px}.modalHeading{display:flex;justify-content:space-between;gap:15px;align-items:start}.modalHeading h2{font-size:23px;line-height:1.4;margin:4px 0 3px}.modalHeading p{font-size:12px;color:#b8caba;margin:3px 0 0;line-height:1.7}.modalHeading button{background:#ffffff16;color:#fff;border:0;border-radius:7px;font-size:22px;width:32px;height:32px}.settingCaption{color:#f0d29e;font-size:11px;font-weight:850;letter-spacing:1px;margin:24px 0 10px}.styleCards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.styleCard{border:2px solid #ffffff2c;border-radius:11px;overflow:hidden;background:#253c31;color:#fff;text-align:left;padding:0;min-width:0;transition:border .15s,transform .15s}.styleCard:hover{border-color:#c7b38c}.styleCard.chosen{border-color:#eed09a;box-shadow:0 0 0 2px #edcf9b2e}.miniPreview{height:112px;position:relative;overflow:hidden}.miniPreview canvas{height:100%;width:100%;display:block}.miniPreview .chip{position:absolute;top:8px;right:8px;background:#23362bdc;color:#f9eacf;font-size:10px;border-radius:4px;padding:4px 6px}.styleCard strong{display:block;font-size:16px;margin:12px 13px 4px}.styleCard small{display:block;color:#c0cbbf;font-size:11px;line-height:1.7;margin:0 13px 13px;min-height:38px;font-size:12px}.modalFooter{display:flex;justify-content:space-between;align-items:center;gap:9px;margin-top:21px;border-top:1px solid #ffffff1f;padding-top:18px}.modalFooter small{font-size:11px;color:#becdbb;line-height:1.6}.settingsToggle{display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:10px 0;border-bottom:1px solid #ffffff12}.settingsToggle input{accent-color:#efd293}.settingsToggle b{font-size:12px}.settingInput{background:#20362d;border:1px solid #c6b68f7b;border-radius:7px;color:#fff;padding:10px;font-size:14px;width:100%;outline:none}.settingInput:focus{border-color:#f1d6a3}
-.toast{position:fixed;z-index:20;left:50%;bottom:35px;transform:translateX(-50%);background:#1e3429f5;border:1px solid #e4d09b80;color:#f5e8d5;box-shadow:var(--shadow);padding:11px 20px;border-radius:10px;max-width:calc(100vw - 30px);font-size:13px;font-weight:650;text-align:center}.mapFlag{position:fixed;z-index:4;left:20px;bottom:20px;color:#f1f1e3;font-size:11px;background:#1b3329bb;border:1px solid #e3d4ba62;border-radius:8px;padding:8px 11px;pointer-events:none;box-shadow:0 5px 25px #20332a42}.mapFlag b{display:block;font-size:12px;margin-bottom:3px;color:#f5d9a4}.comp-label{position:fixed;z-index:4;top:154px;padding:8px 12px;font-size:13px;font-weight:800;border-radius:8px;box-shadow:0 4px 22px #2224;pointer-events:none;white-space:nowrap}.comp-label.left{left:23px;background:#d6e8dbed;color:#1e5548}.comp-label.right{right:23px;top:154px;background:#dfc69eeb;color:#503927}.compareHandle{position:fixed;z-index:3;width:2px;background:linear-gradient(transparent 0,#ffe9c8 8%,#ffe9c8 92%,transparent);top:0;bottom:0;cursor:col-resize;box-shadow:0 0 0 1px #1b392948}.compareHandle:before{content:"⇆";position:absolute;top:51%;left:50%;transform:translate(-50%,-50%);display:grid;place-items:center;width:43px;height:43px;border-radius:50%;background:#f3e5cc;color:#2a4336;border:2px solid #a98c62;box-shadow:0 5px 20px #101a176a;font-size:23px}.compareHandle.hidden,.comp-label.hidden{display:none}.contextMenu{position:fixed;z-index:8;background:#20382dcf;color:#f8eee0;padding:6px;border-radius:10px;border:1px solid #f4d3a75a;box-shadow:0 12px 42px #101d18a8;width:176px}.contextMenu button{display:block;width:100%;text-align:left;padding:10px;border:0;border-radius:7px;background:none;color:inherit;font-size:12px}.contextMenu button:hover{background:#ffffff25}
-@media(max-width:850px){.appbar{right:8px;top:8px;gap:0;padding:4px}.tool{width:43px;min-width:0;height:45px;font-size:10px;padding:3px}.tool svg{width:17px;height:17px}.switcher{right:8px;top:67px}.switcher .caption{display:none}.switcher button{padding:8px 10px;font-size:11px}.overlayWindow{right:8px;top:118px;max-height:calc(100vh - 132px)}.comp-label.right{top:119px;right:12px}.comp-label.left{top:119px;left:10px}.mapFlag{left:8px;bottom:8px;font-size:9px}.modal{padding:18px}.miniPreview{height:92px}}
-.compareControls{position:fixed;z-index:6;top:92px;left:22px;display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:10px;background:#20332be8;border:1px solid #dfc99c70;box-shadow:var(--shadow)}
-.compareControls.hidden{display:none}.compareControls label{color:#f5e7cc;font-size:12px;font-weight:700}.compareControls select{margin-left:5px;background:#304b3b;color:#f9eed9;border:1px solid #d9c69f60;border-radius:7px;padding:7px 10px;font-size:12px}.compareControls .tip{color:#c7d0be;font-size:11px}
+.toast{position:fixed;z-index:20;left:50%;bottom:35px;transform:translateX(-50%);background:#1e3429f5;border:1px solid #e4d09b80;color:#f5e8d5;box-shadow:var(--shadow);padding:11px 20px;border-radius:10px;max-width:calc(100vw - 30px);font-size:13px;font-weight:650;text-align:center}.mapFlag{position:fixed;z-index:4;left:20px;bottom:20px;color:#f1f1e3;font-size:11px;background:#1b3329bb;border:1px solid #e3d4ba62;border-radius:8px;padding:8px 11px;pointer-events:none;box-shadow:0 5px 25px #20332a42}.mapFlag b{display:block;font-size:12px;margin-bottom:3px;color:#f5d9a4}.contextMenu{position:fixed;z-index:8;background:#20382dcf;color:#f8eee0;padding:6px;border-radius:10px;border:1px solid #f4d3a75a;box-shadow:0 12px 42px #101d18a8;width:176px}.contextMenu button{display:block;width:100%;text-align:left;padding:10px;border:0;border-radius:7px;background:none;color:inherit;font-size:12px}.contextMenu button:hover{background:#ffffff25}
+@media(max-width:850px){.appbar{right:8px;top:8px;gap:0;padding:4px}.tool{width:43px;min-width:0;height:45px;font-size:10px;padding:3px}.tool svg{width:17px;height:17px}.overlayWindow{right:8px;top:118px;max-height:calc(100vh - 132px)}.mapFlag{left:8px;bottom:8px;font-size:9px}.modal{padding:18px}.miniPreview{height:92px}}
+
+
 .marker.pixel .markIcon{border-radius:5px;background:#f3eccf;border:2px solid #263b30;box-shadow:2px 2px 0 #102d2180}.marker.pixel .markLabel{background:#f3eccf;border-radius:1px;border:2px solid #375745;box-shadow:2px 2px 0 #203c2a88;font-family:monospace;font-size:12px}
 @media(max-width:940px){.styleCards{grid-template-columns:repeat(3,minmax(0,1fr))}.miniPreview{height:88px}.styleCard strong{font-size:14px}.styleCard small{font-size:11px;min-height:65px}}
-@media(max-width:640px){.styleCards{grid-template-columns:1fr}.styleCard{display:grid;grid-template-columns:105px 1fr;grid-template-rows:auto auto;align-items:center}.miniPreview{grid-row:1/3;height:91px}.styleCard strong{margin:8px 10px 0;font-size:15px}.styleCard small{margin:2px 10px 8px;min-height:unset}.compareControls{left:8px;top:113px;gap:5px;padding:5px}.compareControls .tip{display:none}.compareControls label{font-size:10px}.compareControls select{font-size:11px;padding:5px}}
-@media(max-width:520px){.tool{width:36px}.tool span{font-size:9px}.switcher{top:59px}.switcher button{padding:8px 8px}.styleCards{gap:7px}.styleCard small{font-size:10px}.styleCard strong{font-size:13px}.modalHeading h2{font-size:20px}.overlayWindow{top:111px}.comp-label.right{right:9px;top:110px}.comp-label.left{top:110px}}
+@media(max-width:640px){.styleCards{grid-template-columns:1fr}.styleCard{display:grid;grid-template-columns:105px 1fr;grid-template-rows:auto auto;align-items:center}.miniPreview{grid-row:1/3;height:91px}.styleCard strong{margin:8px 10px 0;font-size:15px}.styleCard small{margin:2px 10px 8px;min-height:unset}}
+@media(max-width:520px){.tool{width:36px}.tool span{font-size:9px}.styleCards{gap:7px}.styleCard small{font-size:10px}.styleCard strong{font-size:13px}.modalHeading h2{font-size:20px}.overlayWindow{top:111px}}
 
 /* Compass player arrow follows world coordinates, independent of selection. */
 .playerArrow{position:fixed;z-index:4;pointer-events:none;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);filter:drop-shadow(0 2px 3px #061b13df)}
@@ -112,6 +112,21 @@
 .maskMeter{height:9px;border-radius:99px;background:#10271e;border:1px solid #ffffff10;overflow:hidden;margin-top:6px}
 .maskMeter i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#89b798,#d3d6a7);transition:width .45s ease}
 .maskMeter.color i{background:linear-gradient(90deg,#84bad0 0%,#8ec19c 35%,#e8c777 74%,#df9d85 100%)}
+.pixelReview{position:fixed;z-index:5;top:20px;left:22px;display:flex;align-items:center;gap:13px;padding:7px 8px 7px 13px;border:1px solid #d8caa05b;border-radius:12px;background:#20332bf5;box-shadow:0 5px 23px #15281e59}
+.pixelReview[hidden],.pixelDivider[hidden]{display:none}
+.pixelReviewTitle{display:flex;align-items:center;gap:7px;white-space:nowrap;color:#f2dfb4;font-size:13px;font-weight:750}
+.pixelReviewTitle svg{width:19px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.pixelReviewButtons{display:flex;gap:3px;padding:3px;background:#14271e;border-radius:7px}
+.pixelReview button{padding:6px 9px;border:0;border-radius:5px;background:none;color:#d4dfd1;font-size:12px;font-weight:650;white-space:nowrap}
+.pixelReview button:hover{background:#425a48}.pixelReview button[aria-pressed="true"]{background:#e7d2a4;color:#273b2e}
+.pixelDivider{position:fixed;inset:0;z-index:3;pointer-events:none}
+.pixelSeam{position:absolute;left:50%;top:0;bottom:0;width:2px;background:#f8e3b8;box-shadow:0 0 0 1px #1b39295c;transform:translateX(-50%)}
+.pixelDivider input{position:absolute;top:50%;left:0;width:100%;height:38px;margin:0;transform:translateY(-50%);appearance:none;background:transparent;pointer-events:none}
+.pixelDivider input::-webkit-slider-thumb{appearance:none;width:38px;height:38px;border:2px solid #9c865f;border-radius:50%;background:#f5e4bc url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23273b2e' stroke-width='1.7'%3E%3Cpath d='m9 8-4 4 4 4m6-8 4 4-4 4'/%3E%3C/svg%3E") center/24px no-repeat;box-shadow:0 3px 10px #12231980;cursor:ew-resize;pointer-events:auto;touch-action:none}
+.pixelDivider input::-moz-range-thumb{width:34px;height:34px;border:2px solid #9c865f;border-radius:50%;background:#f5e4bc;cursor:ew-resize;pointer-events:auto;touch-action:none}
+.pixelSide{position:absolute;top:84px;padding:6px 9px;border:1px solid #e2c99970;border-radius:6px;background:#23392eea;color:#f3e4c1;font-size:11px;font-weight:750;white-space:nowrap}
+.pixelSide.left{left:22px}.pixelSide.right{right:22px}
+@media(max-width:820px){.pixelReview{left:8px;top:64px}.pixelSide{top:119px}.pixelSide.left{left:8px}.pixelSide.right{right:8px}}
 </style>
 </head>
 <body>
@@ -136,11 +151,20 @@
  <div class="sep"></div>
  <button class="tool close" data-act="exit" title="返回游戏"><svg><use href="#s-close"/></svg><span>返回</span></button>
 </div>
-<!-- 比较模式底层实现保留，正常游戏界面无快速切换条。全部风格入口统一在设置内。 -->
-<div class="switcher" style="display:none" aria-hidden="true"><button data-mode="pixel">像素</button><button data-mode="realistic">写实</button><button data-mode="illustrated">手绘</button><button data-mode="compare">左右对照</button></div>
-<div id="compareControls" class="compareControls hidden"><select id="compareStyleLeft"><option value="pixel">像素</option><option value="realistic">写实</option><option value="illustrated">手绘</option></select><select id="compareStyleRight"><option value="pixel">像素</option><option value="realistic">写实</option><option value="illustrated">手绘</option></select></div>
-<div id="splitLine" class="compareHandle hidden" aria-hidden="true"></div>
-<div id="compareLeft" class="comp-label left hidden"></div><div id="compareRight" class="comp-label right hidden"></div>
+<aside id="pixelReview" class="pixelReview" aria-label="像素地形原型" hidden>
+  <div class="pixelReviewTitle"><svg viewBox="0 0 24 20" aria-hidden="true"><path d="m2 16 7-11 4 6 3-4 6 9M6 9l3 1 2-2"/></svg>像素地形</div>
+  <div class="pixelReviewButtons" role="group" aria-label="地形渲染对比">
+    <button type="button" data-pixel-view="classic" aria-pressed="false">原效果</button>
+    <button type="button" data-pixel-view="relief" aria-pressed="true">地形增强</button>
+    <button type="button" data-pixel-view="split" aria-pressed="false">左右对照</button>
+  </div>
+</aside>
+<div id="pixelDivider" class="pixelDivider" hidden>
+  <span class="pixelSide left" aria-hidden="true">原效果</span>
+  <span class="pixelSide right" aria-hidden="true">地形增强</span>
+  <span id="pixelSeam" class="pixelSeam" aria-hidden="true"></span>
+  <input id="pixelWipe" type="range" min="0" max="1000" value="500" aria-label="移动地形对照分隔线">
+</div>
 <div class="map-center" id="centerBtn" title="回到玩家位置"><svg><use href="#s-target"/></svg></div>
 <div id="panel" class="overlayWindow hidden"></div>
 <div id="gameAdjust" class="gameAdjust hidden">
@@ -162,7 +186,12 @@ const $=s=>document.querySelector(s),all=s=>Array.from(document.querySelectorAll
 const map=$('#map'),ctx=map.getContext('2d',{alpha:false}),area=$('#mapArea');
 const W=1280,H=960,GRID=2,GW=W/GRID,GH=H/GRID;
 const elevation=new Float32Array(GW*GH),moisture=new Float32Array(GW*GH),land=new Uint8Array(GW*GH),biome=new Uint8Array(GW*GH);
-let mode='illustrated',split=.50,compareLeft='pixel',compareRight='realistic',scale=1,cx=710,cy=470,w=innerWidth,h=innerHeight,dpr=Math.min(devicePixelRatio||1,2),drag=null,splitDrag=false,panel='',modal='',layers={roads:true,rail:true,structures:true,waypoints:true,contours:true,regions:true,regionBoundaries:false},waypoints=[],toastTimer,renderQueued=false;
+const terrainPreview=new URLSearchParams(location.search).get('terrain')==='1';
+const pixelReview=$('#pixelReview'),pixelDivider=$('#pixelDivider'),pixelWipe=$('#pixelWipe');
+const mapStyles=['pixel','realistic','illustrated'];
+const textureStyles=[...mapStyles,'pixelClassic'];
+const isPixelTexture=style=>style==='pixel'||style==='pixelClassic';
+let pixelView='relief',mode='pixel',scale=1,cx=710,cy=470,w=innerWidth,h=innerHeight,dpr=Math.min(devicePixelRatio||1,2),drag=null,panel='',modal='',layers={roads:true,rail:true,structures:true,waypoints:true,contours:true,regions:true,regionBoundaries:false},waypoints=[],toastTimer,renderQueued=false;
 const icons={home:'⌂',port:'⚓',mine:'◆',tower:'♜',star:'✦',camp:'⚑',farm:'❀',warehouse:'▣',bridge:'≋',rail:'▤',tree:'♠',cave:'⛰',flag:'⚐',danger:'⚠',bed:'☾',village:'▥'};
 const structures=[{x:780,y:420,name:'白河镇',type:'home'},{x:365,y:642,name:'北湾港',type:'port'},{x:1020,y:286,name:'高岭矿区',type:'mine'},{x:890,y:685,name:'古堡遗址',type:'tower'},{x:603,y:253,name:'湖畔村',type:'home'}];
 waypoints=[{x:655,y:497,name:'我的营地',type:'camp',color:'#c58c4a'},{x:1001,y:490,name:'山口驿站',type:'star',color:'#ad6a67'}];
@@ -179,21 +208,72 @@ function fbm(x,y,seed=0){let s=0,w=.56;for(let i=0;i<4;i++){s+=(noise(x,y,seed+i
 function clamp(x,a,b){return Math.max(a,Math.min(b,x))}
 function gaussian(x,y,cx,cy,sx,sy){let dx=(x-cx)/sx,dy=(y-cy)/sy;return Math.exp(-.5*(dx*dx+dy*dy))}
 function coast(y){return 238+36*Math.sin(y/105)+25*Math.sin(y/52)-80*Math.exp(-(((y-290)/100)**2))+60*Math.exp(-(((y-670)/130)**2))}
-function sample(x,y){let rough=fbm(x/125,y/125,3),detail=fbm(x/33,y/33,15);let ridgeX=1025-(y-270)*.39;let ridges=Math.exp(-(((x-ridgeX)/225)**2))*(.42+.14*Math.sin(y/90))+Math.exp(-(((x-1070)/140)**2)-(((y-180)/245)**2))*.24;let hills=gaussian(x,y,675,730,185,138)*.13+gaussian(x,y,565,205,220,135)*.14;let shore=Math.tanh((x-coast(y))/170);let lake=gaussian(x,y,621,258,81,47)*.64;let h0=shore*.24+rough*.46+detail*.052+ridges+hills-lake-.032;let forest=fbm(x/150+13,y/150+31,21)+gaussian(x,y,920,716,320,210)*.48+gaussian(x,y,460,370,160,140)*.28;let wet=fbm(x/230,y/230,47)+gaussian(x,y,641,254,185,120)*.4;let bi= h0<0?0:h0>.62?5: h0>.42?4:forest>.135?2:wet>.17?3:1;return [h0,wet,forest,bi];}
-function collectGeometry(){for(let y=0;y<GH;y++){for(let x=0;x<GW;x++){let [v,wet,forest,b]=sample(x*GRID,y*GRID),i=y*GW+x;elevation[i]=v;moisture[i]=wet;land[i]=v>0?1:0;biome[i]=b;}}}
+function sample(x,y){let rough=fbm(x/125,y/125,3),detail=fbm(x/33,y/33,15);let ridgeX=1025-(y-270)*.39;let ridges=Math.exp(-(((x-ridgeX)/225)**2))*(.42+.14*Math.sin(y/90))+Math.exp(-(((x-1070)/140)**2)-(((y-180)/245)**2))*.24;let hills=gaussian(x,y,675,730,185,138)*.13+gaussian(x,y,565,205,220,135)*.14;let shore=Math.tanh((x-coast(y))/170);let lake=gaussian(x,y,621,258,81,47)*.64;let h0=shore*.24+rough*.46+detail*.052+ridges+hills-lake-.032;let forest=fbm(x/150+13,y/150+31,21)+gaussian(x,y,920,716,320,210)*.48+gaussian(x,y,460,370,160,140)*.28;let wet=fbm(x/230,y/230,47)+gaussian(x,y,641,254,185,120)*.4;return [h0,wet,forest];}
+// In the synthetic scene, the existing river centerlines cut through the
+// shared DEM. The live renderer simply consumes measured terrain heights.
+function makeDemoValleys(){
+ return [[riverA,70,.19],[riverB,49,.12],[riverC,53,.13]].map(([points,radius,depth])=>{
+  const segments=points.slice(1).map(([bx,by],i)=>{
+   const [ax,ay]=points[i],dx=bx-ax,dy=by-ay;
+   return {ax,ay,dx,dy,inverseLength:1/(dx*dx+dy*dy)};
+  });
+  return {segments,radius,depth};
+ });
+}
+function demoValleyDepth(x,y,valleys){
+ let cut=0;
+ for(const {segments,radius,depth} of valleys){
+  let closest=radius*radius;
+  for(const {ax,ay,dx,dy,inverseLength} of segments){
+   const px=x-ax,py=y-ay;
+   const t=clamp((px*dx+py*dy)*inverseLength,0,1);
+   const sx=px-dx*t,sy=py-dy*t;
+   closest=Math.min(closest,sx*sx+sy*sy);
+  }
+  cut=Math.max(cut,depth*smooth(1-Math.sqrt(closest)/radius));
+ }
+ return cut;
+}
+function collectGeometry(){
+ const valleys=makeDemoValleys();
+ for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
+  const wx=x*GRID,wz=y*GRID;
+  const [base,wet,woods]=sample(wx,wz),i=y*GW+x;
+  const h=base>.055?Math.max(.055,base-demoValleyDepth(wx,wz,valleys)):base;
+  elevation[i]=h;moisture[i]=wet;land[i]=h>0?1:0;
+  biome[i]=h<0?0:h>.62?5:h>.42?4:woods>.135?2:wet>.17?3:1;
+ }
+}
 function getElev(x,y){return elevation[clamp(Math.floor(y/GRID),0,GH-1)*GW+clamp(Math.floor(x/GRID),0,GW-1)]}
 function getBiome(x,y){return biome[clamp(Math.floor(y/GRID),0,GH-1)*GW+clamp(Math.floor(x/GRID),0,GW-1)]}
 function col(r,g,b){return [clamp(Math.round(r),0,255),clamp(Math.round(g),0,255),clamp(Math.round(b),0,255)]}
 function blend(a,b,t){return col(a[0]*(1-t)+b[0]*t,a[1]*(1-t)+b[1]*t,a[2]*(1-t)+b[2]*t)}
 const realPal={water:[81,137,155],beach:[207,201,164],plains:[191,193,146],forest:[96,143,108],wet:[127,165,139],hill:[174,180,136],mountain:[175,169,143],snow:[231,231,220]};
 const inkPal={water:[167,195,185],beach:[230,206,163],plains:[229,212,171],forest:[205,190,148],wet:[217,201,163],hill:[219,199,157],mountain:[215,191,147],snow:[233,219,186]};
-let realBase,inkBase,pixelBase;
+let realBase,inkBase,pixelBase,pixelClassicBase;
 const pixelPal={water:[48,119,199],beach:[226,218,158],plains:[104,169,74],forest:[48,115,68],wet:[65,134,105],hill:[133,163,92],mountain:[133,140,131],snow:[241,244,241]};
 // Pixel style must portray Minecraft's actual SURFACE blocks, not just apply
 // a low-resolution filter to the modern/antique map. This deterministic demo
 // uses the same elevation + biome fields as the other styles; the real mod
 // will instead consume validated FULL-chunk top-block/height/biome snapshots.
-function makePixelRaster(){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),image=c.createImageData(GW,GH),data=image.data;
+// Hillshade over the shared height field. The larger footprint keeps the
+// direction of a slope visible in overview; the smaller one preserves ridges.
+// The raster stays at one pixel per sample and the palette still comes from the surface.
+function terrainShade(x,y,height){
+ const near=10,far=34,heightScale=560;
+ const nearWeight=heightScale*.54/(2*near);
+ const farWeight=heightScale*.46/(2*far);
+ const west=getElev(x-far,y),east=getElev(x+far,y);
+ const north=getElev(x,y-far),south=getElev(x,y+far);
+ const dx=(getElev(x+near,y)-getElev(x-near,y))*nearWeight+(east-west)*farWeight;
+ const dz=(getElev(x,y+near)-getElev(x,y-near))*nearWeight+(south-north)*farWeight;
+ const light=(.62+.57*dx+.54*dz)/Math.hypot(1,dx,dz);
+ const shoulder=clamp((height-(west+east+north+south)/4)*180,-10,10);
+ const relief=clamp((light-.62)*124+shoulder,-64,38);
+ const terrainContrast=.35+.65*smooth(clamp((height-.07)/.38,0,1));
+ return Math.round(relief*terrainContrast/6)*6;
+}
+function makePixelRaster(enhanced){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),image=c.createImageData(GW,GH),data=image.data;
  const heights=new Int16Array(GW*GH);
  for(let i=0;i<heights.length;i++)heights[i]=Math.round(70+155*elevation[i]);
  for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
@@ -226,11 +306,21 @@ function makePixelRaster(){const out=document.createElement('canvas');out.width=
   const stepEdge=water?0:(center>north?7:center<north?-10:0)
                       +(center>west?7:center<west?-10:0);
   const dropShadow=water?0:clamp((center-east)*2+(center-south)*2,-14,14);
-  const shade=variation*.6+heightBand+stepEdge+dropShadow;
-  let k=i*4;data[k]=clamp(base[0]+shade,0,255);data[k+1]=clamp(base[1]+shade,0,255);data[k+2]=clamp(base[2]+shade,0,255);data[k+3]=255;
+  const originalShade=variation*.6+heightBand+stepEdge+dropShadow;
+  const relief=enhanced&&!water?terrainShade(wx,wz,h):0;
+  const shade=enhanced&&!water?relief+variation*.35+stepEdge*.27:originalShade;
+  const shadow=enhanced?Math.max(0,-relief):0;
+  const k=i*4;
+  data[k]=clamp(base[0]+shade,0,255);
+  data[k+1]=clamp(base[1]+shade,0,255);
+  data[k+2]=clamp(base[2]+shade+shadow*.25,0,255);
+  data[k+3]=255;
  }c.putImageData(image,0,0);return out;}
-function pixelPath(c,pts,outer,inner,width){c.save();c.scale(.5,.5);c.lineCap='square';c.lineJoin='miter';drawStroke(c,pts,outer,width+4);drawStroke(c,pts,inner,width);c.restore()}
-function makePixelLayer(){const c=document.createElement('canvas');c.width=GW;c.height=GH;const g=c.getContext('2d',{alpha:false});g.imageSmoothingEnabled=false;g.drawImage(pixelBase,0,0);
+function makePixelLayer(base){
+  const c=document.createElement('canvas');c.width=GW;c.height=GH;
+  const g=c.getContext('2d',{alpha:false});
+  g.imageSmoothingEnabled=false;
+  g.drawImage(base,0,0);
   // Low-resolution overlay drawn on the SAME source coordinate system.
   // Path thickness and corners preserve the block-like top-down feel.
   g.save();g.scale(.5,.5);g.lineJoin='bevel';g.lineCap='square';
@@ -265,7 +355,7 @@ function mountainInk(c){c.save();for(let y=45;y<H-40;y+=54){for(let x=420;x<W-25
 function seaHatch(c){c.save();c.strokeStyle='#638a8199';c.lineWidth=1;for(let y=30;y<H;y+=27){for(let x=25;x<250;x+=43){let px=x+(hash(x,y,2)-.5)*12,py=y+(hash(x,y,4)-.5)*9;if(getElev(px,py)>-.02||hash(x,y,5)<.22)continue;c.beginPath();c.moveTo(px-7,py);c.quadraticCurveTo(px-2,py-3,px+4,py);c.quadraticCurveTo(px+7,py+2,px+10,py);c.stroke();if(hash(x,y,8)>.65){c.beginPath();c.moveTo(px-2,py+5);c.lineTo(px+6,py+5);c.stroke()}}}c.restore()}
 function paperGrain(c){c.save();for(let i=0;i<12500;i++){let x=hash(i,77)*W,y=hash(i,19)*H;c.fillStyle=i%3?'#5a402006':'#fff2b515';c.fillRect(x,y,1.5,1.5)}c.restore()}
 function addLabels(c,style){c.save();const old=style==='illustrated';const labels=[{s:'北镜海',x:75,y:395,z:29,rotation:-.07,color:old?'#5f806d':'#e0f6ef'},{s:'苍岚山脉',x:990,y:163,z:21,rotation:-.25,color:old?'#66503b':'#eaf0e5'},{s:'白 河 谷 地',x:573,y:634,z:19,rotation:-.16,color:old?'#80684c':'#eef3d3'},{s:'雾松林',x:924,y:750,z:20,rotation:.10,color:old?'#5d6441':'#e6efdd'}];for(let t of labels){c.save();c.translate(t.x,t.y);c.rotate(t.rotation);c.textAlign='center';c.font=(old?'bold ':'600 ')+t.z+'px '+(old?'Georgia,"SimSun",serif':'"Microsoft YaHei",sans-serif');c.fillStyle=t.color;c.globalAlpha=old?.76:.69;if(!old){c.shadowColor='#3045339a';c.shadowBlur=9;c.shadowOffsetY=1}c.fillText(t.s,0,0);c.restore()}c.restore()}
-function makeLayer(style){if(style==='pixel')return makePixelLayer();const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d',{alpha:false});g.imageSmoothingEnabled=true;g.drawImage(style==='realistic'?realBase:inkBase,0,0,W,H);if(style==='illustrated')paperGrain(g);if(layers.contours)textureContours(g,style);coastline(g,style);drawLakes(g,style);rivers(g,style);forest(g,style);if(style==='illustrated'){mountainInk(g);seaHatch(g)}drawRoads(g,style);if(style==='illustrated'){g.strokeStyle='#b08e5b67';g.lineWidth=6;g.strokeRect(14,14,W-28,H-28);g.strokeStyle='#795b3f48';g.lineWidth=1;g.strokeRect(22,22,W-44,H-44)}return c}
+function makeLayer(style){if(isPixelTexture(style))return makePixelLayer(style==='pixel'?pixelBase:pixelClassicBase);const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d',{alpha:false});g.imageSmoothingEnabled=true;g.drawImage(style==='realistic'?realBase:inkBase,0,0,W,H);if(style==='illustrated')paperGrain(g);if(layers.contours)textureContours(g,style);coastline(g,style);drawLakes(g,style);rivers(g,style);forest(g,style);if(style==='illustrated'){mountainInk(g);seaHatch(g)}drawRoads(g,style);if(style==='illustrated'){g.strokeStyle='#b08e5b67';g.lineWidth=6;g.strokeRect(14,14,W-28,H-28);g.strokeStyle='#795b3f48';g.lineWidth=1;g.strokeRect(22,22,W-44,H-44)}return c}
 /* The world is generated once. Two separate 16×16-world-block masks control
  * visibility and color; neither reloads/recalculates terrain or style art.
  * A map pixel is 3 world blocks in this preview. One mask pixel = one chunk.
@@ -386,9 +476,10 @@ function blankAndColorMasks(){
 function updateMaskedTextures(){
  if(!textures.pixel)return;
  const masks=blankAndColorMasks();
- for(const style of ['pixel','realistic','illustrated']){
+ for(const style of textureStyles){
   const colored=document.createElement('canvas');colored.width=W;colored.height=H;
   const cg=colored.getContext('2d');
+  cg.imageSmoothingEnabled=!isPixelTexture(style);
   cg.drawImage(textures[style],0,0,W,H);
   cg.globalCompositeOperation='destination-in';
   cg.imageSmoothingEnabled=false;
@@ -405,10 +496,11 @@ function updateMaskedTextures(){
  maskUpdates++;
 }
 function rebuild(){
- for(const style of ['pixel','realistic','illustrated']){
+ for(const style of textureStyles){
   textures[style]=makeLayer(style);
   const gray=document.createElement('canvas');gray.width=W;gray.height=H;
   const g=gray.getContext('2d',{alpha:false});
+  g.imageSmoothingEnabled=!isPixelTexture(style);
   g.filter='grayscale(1)';
   g.drawImage(textures[style],0,0,W,H);g.filter='none';
   graySources[style]=gray;
@@ -420,12 +512,45 @@ function syncSize(){w=innerWidth;h=innerHeight;dpr=Math.min(devicePixelRatio||1,
 function view(){return {left:w/2-cx*scale,top:h/2-cy*scale,ww:W*scale,hh:H*scale}}
 function screenPos(x,y){const v=view();return [v.left+x*scale,v.top+y*scale]}
 function worldPos(x,y){const v=view();return [(x-v.left)/scale,(y-v.top)/scale]}
-function paint(g){g.save();g.setTransform(dpr,0,0,dpr,0,0);g.fillStyle='#d4d6be';g.fillRect(0,0,w,h);const v=view();function draw(which){g.imageSmoothingEnabled=which==='pixel'?false:scale<1.25;g.drawImage(coveredTextures[which],v.left,v.top,v.ww,v.hh)}if(mode==='compare'){g.save();g.beginPath();g.rect(0,0,w*split,h);g.clip();draw(compareLeft);g.restore();g.save();g.beginPath();g.rect(w*split,0,w*(1-split),h);g.clip();draw(compareRight);g.restore()}else draw(mode);g.restore();drawRegions(g);}
+function paint(g){
+ g.save();
+ g.setTransform(dpr,0,0,dpr,0,0);
+ g.fillStyle='#d4d6be';g.fillRect(0,0,w,h);
+ const v=view();
+ function draw(style){
+  g.imageSmoothingEnabled=!isPixelTexture(style)&&scale<1.25;
+  g.drawImage(coveredTextures[style],v.left,v.top,v.ww,v.hh);
+ }
+ if(mode==='pixel'&&pixelView==='split'){
+  const handleWidth=38;
+  const splitX=handleWidth/2+(w-handleWidth)*Number(pixelWipe.value)/1000;
+  $('#pixelSeam').style.left=splitX+'px';
+  draw('pixel');
+  g.save();g.beginPath();g.rect(0,0,splitX,h);g.clip();draw('pixelClassic');g.restore();
+ }else draw(mode==='pixel'&&pixelView==='classic'?'pixelClassic':mode);
+ g.restore();
+ drawRegions(g);
+}
 function requestRender(){if(renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;paint(ctx);drawMarkers();updateSelection();updateStatus()})}
 function scheduleDraw(){requestRender()}
-function drawMarkers(){const holder=$('#markerLayer');holder.innerHTML='';const points=[...(layers.structures?structures.map(p=>({...p,structure:true})):[]),...(layers.waypoints?waypoints:[])];for(const p of points){if(!isSurveyedAt(p.x,p.y))continue;const [x,y]=screenPos(p.x,p.y);if(x< -110||x>w+110||y< -50||y>h+60)continue;const atStyle=mode==='compare'?(x>w*split?compareRight:compareLeft):mode;const ancient=atStyle==='illustrated';const box=document.createElement('div');box.dataset.markerIndex=String(waypoints.indexOf(p));box.dataset.structureIndex=String(p.structure?structures.findIndex(q=>q.x===p.x&&q.y===p.y):-1);box.className='marker'+(ancient?' ancient':atStyle==='pixel'?' pixel':'');box.style.left=x+'px';box.style.top=y+'px';const icon=document.createElement('span');icon.className='markIcon';icon.textContent=icons[p.type]||'✦';if(p.color)icon.style.borderColor=p.color;const label=document.createElement('span');label.className='markLabel';label.textContent=p.name;box.append(icon,label);holder.appendChild(box)}}
-const styleNames={pixel:'像素 · MC 方块地表',realistic:'写实 · 自然地形',illustrated:'手绘 · 古式地图'};function syncCompare(){const is=mode==='compare';$('#splitLine').classList.toggle('hidden',!is);$('#compareLeft').classList.toggle('hidden',!is);$('#compareRight').classList.toggle('hidden',!is);$('#compareControls').classList.toggle('hidden',!is);$('#compareLeft').textContent=styleNames[compareLeft];$('#compareRight').textContent=styleNames[compareRight];$('#compareStyleLeft').value=compareLeft;$('#compareStyleRight').value=compareRight;$('#splitLine').style.left=(split*100)+'%';$('#splitLine').setAttribute('aria-valuenow',Math.round(split*100));}
-function setMode(v,quiet=false){if(!['pixel','realistic','illustrated','compare'].includes(v))return;mode=v;try{if(v!=='compare')localStorage.setItem('cartograph-final-map-style-v3',v)}catch(_){}all('[data-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.mode===v));scheduleDraw();if(!quiet)toast(v==='pixel'?'已切换至像素':v==='realistic'?'已切换至写实':v==='illustrated'?'已切换至手绘':'已开启地图对照');}
+function drawMarkers(){const holder=$('#markerLayer');holder.innerHTML='';const points=[...(layers.structures?structures.map(p=>({...p,structure:true})):[]),...(layers.waypoints?waypoints:[])];for(const p of points){if(!isSurveyedAt(p.x,p.y))continue;const [x,y]=screenPos(p.x,p.y);if(x< -110||x>w+110||y< -50||y>h+60)continue;const ancient=mode==='illustrated';const box=document.createElement('div');box.dataset.markerIndex=String(waypoints.indexOf(p));box.dataset.structureIndex=String(p.structure?structures.findIndex(q=>q.x===p.x&&q.y===p.y):-1);box.className='marker'+(ancient?' ancient':mode==='pixel'?' pixel':'');box.style.left=x+'px';box.style.top=y+'px';const icon=document.createElement('span');icon.className='markIcon';icon.textContent=icons[p.type]||'✦';if(p.color)icon.style.borderColor=p.color;const label=document.createElement('span');label.className='markLabel';label.textContent=p.name;box.append(icon,label);holder.appendChild(box)}}
+const styleNames={pixel:'像素 · MC 方块地表',realistic:'写实 · 自然地形',illustrated:'手绘 · 古式地图'};
+function syncPixelReview(){
+ pixelReview.hidden=mode!=='pixel';
+ pixelDivider.hidden=mode!=='pixel'||pixelView!=='split';
+ for(const button of all('[data-pixel-view]')){
+  button.setAttribute('aria-pressed',String(button.dataset.pixelView===pixelView));
+ }
+}
+function setMode(style,quiet=false){
+ if(!mapStyles.includes(style))return;
+ mode=style;
+ if(!terrainPreview||!quiet){
+  try{localStorage.setItem('cartograph-final-map-style-v3',style)}catch(_){}
+ }
+ syncPixelReview();scheduleDraw();
+ if(!quiet)toast('已切换至'+styleNames[style].split(' · ')[0]);
+}
 function toast(message){const el=$('#toast');el.textContent=message;el.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),2500)}
  function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
  const panelEl=$('#panel'),backdrop=$('#modalBackdrop'),modalEl=$('#modal');
@@ -451,7 +576,7 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  function mini(which){return `<div class="miniPreview"><canvas id="mini-${which}"></canvas><span class="chip">${which==='pixel'?'MC 方块':which==='realistic'?'自然地貌':'古式地图'}</span></div>`}
  function paintMiniThumbs(){for(let m of ['pixel','realistic','illustrated']){const el=$('#mini-'+m);if(!el)continue;el.width=360;el.height=180;const g=el.getContext('2d');g.imageSmoothingEnabled=m!=='pixel';g.drawImage(textures[m],m==='pixel'?180:360,m==='pixel'?100:200,m==='pixel'?270:540,m==='pixel'?135:270,0,0,360,180)}}
  function settingsOpen(tab='map'){detailClose();panelClose();settingTab=tab;modal='settings';const header=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / SETTINGS</div><h2>地图设置</h2><p>配置地图画面和小地图</p></div><button data-act="modal-close">×</button></div><div class="configRow" style="margin-top:14px"><button class="btn ${tab==='map'?'active':''}" data-settings-tab="map">大地图 / 风格</button><button class="btn ${tab==='mini'?'active':''}" data-settings-tab="mini">小地图设置</button><button class="btn ${tab==='cost'?'active':''}" data-settings-tab="cost">耗材与倍率</button></div>`;
- if(tab==='map')modalEl.innerHTML=header+`<div class="settingCaption">地图风格</div><div class="styleCards">${[['pixel','像素 · Minecraft','方块高度明暗、阶梯边缘与坡面阴影'],['realistic','写实 · 现代地形图','自然地貌、坡面阴影、森林与水系'],['illustrated','手绘 · 古式地图','羊皮纸、墨线、山脉与树林符号']].map(([key,t,desc])=>`<button class="styleCard ${mode===key?'chosen':''}" data-style="${key}">${mini(key)}<strong>${t}</strong><small>${desc}</small></button>`).join('')}</div><div class="settingCaption">显示选项</div><label class="settingsToggle"><b>显示区域名称</b><input type="checkbox" data-layer="regions" ${layers.regions?'checked':''}></label><label class="settingsToggle"><b>显示区域边界</b><input type="checkbox" data-layer="regionBoundaries" ${layers.regionBoundaries?'checked':''}></label><label class="settingsToggle" ${mode==='pixel'?'style="opacity:.55"':''}><b>${mode==='pixel'?'方块高差阴影（自动启用）':'显示等高线'}</b><input type="checkbox" data-layer="contours" ${mode==='pixel'?'checked disabled':layers.contours?'checked':''}></label><div class="modalFooter"><small></small><button class="btn primary" data-act="modal-close">完成</button></div>`;
+ if(tab==='map')modalEl.innerHTML=header+`<div class="settingCaption">地图风格</div><div class="styleCards">${[['pixel','像素 · Minecraft','方块色与多尺度坡面阴影，读出山脊和谷地'],['realistic','写实 · 现代地形图','自然地貌、坡面阴影、森林与水系'],['illustrated','手绘 · 古式地图','羊皮纸、墨线、山脉与树林符号']].map(([key,t,desc])=>`<button class="styleCard ${mode===key?'chosen':''}" data-style="${key}">${mini(key)}<strong>${t}</strong><small>${desc}</small></button>`).join('')}</div><div class="settingCaption">显示选项</div><label class="settingsToggle"><b>显示区域名称</b><input type="checkbox" data-layer="regions" ${layers.regions?'checked':''}></label><label class="settingsToggle"><b>显示区域边界</b><input type="checkbox" data-layer="regionBoundaries" ${layers.regionBoundaries?'checked':''}></label><label class="settingsToggle" ${mode==='pixel'?'style="opacity:.55"':''}><b>${mode==='pixel'?'方块高差阴影（自动启用）':'显示等高线'}</b><input type="checkbox" data-layer="contours" ${mode==='pixel'?'checked disabled':layers.contours?'checked':''}></label><div class="modalFooter"><small></small><button class="btn primary" data-act="modal-close">完成</button></div>`;
  else if(tab==='cost')modalEl.innerHTML=header+
  `<div class="costGroup"><h3>测绘墨水</h3><p>每单位 16 × 16 方块。投入墨水逐格揭开空白；底层地形无需重绘。</p>
  ${costRow('inkInput','投入倍率')}${costRow('inkCost','消耗倍率')}
@@ -473,7 +598,7 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
    modalClose();panelClose();detailClose();
    $('#gameAdjust').classList.remove('hidden');
    const frame=$('#gameFrame');
-   const send=()=>frame.contentWindow?.postMessage({type:'cartograph:edit-start',config:miniCfg,style:mode==='compare'?'illustrated':mode},'*');
+   const send=()=>frame.contentWindow?.postMessage({type:'cartograph:edit-start',config:miniCfg,style:mode},'*');
    frame.addEventListener('load',send,{once:true});
    if(frame.contentDocument?.readyState==='complete')send();
  }
@@ -600,6 +725,13 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  else if(act==='delete'){if(kind==='marker')removeWaypoint(waypoints.findIndex(p=>p.id===record.id));else if(kind==='region' && confirm('删除区域「'+record.name+'」？')){regions=regions.filter(r=>r.id!==record.id);saveRegions();detailClose();requestRender();toast('区域已删除')}}
  else if(act==='redraw'&&kind==='region')startRegionDrawing(record.id)}
  function initEvents(){
+ pixelReview.addEventListener('click',event=>{
+   const button=event.target.closest('[data-pixel-view]');
+   if(!button)return;
+   pixelView=button.dataset.pixelView;
+   syncPixelReview();requestRender();
+ });
+ pixelWipe.addEventListener('input',requestRender);
  document.addEventListener('click',e=>{
    const b=e.target.closest('[data-act]');if(b){const a=b.dataset.act;if(a==='settings')settingsOpen();else if(a==='panel-close')panelClose();else if(a==='modal-close')modalClose();else if(a==='materials')materialsOpen();else if(a==='mini-position')openGameAdjust();else if(a==='create-marker')waypointModal(...(selectedPoint||[cx,cy]));else if(a==='save-marker')saveWaypoint();else if(a==='mini-reset'){miniCfg={enabled:true,shape:'round',northUp:true,cardinals:true,showCoords:true,showRegions:true,showIcons:true,zoom:1.5,size:184,x:.96,y:.06};saveMini();settingsOpen('mini')}else if(a==='center'){cx=630;cy=465;scale=Math.max(w/W,h/H)*1.08;requestRender();toast('已返回玩家位置')}else if(a==='exit')toast('已关闭地图');else if(['atlas','markers','regions','layers','info'].includes(a))panelOpen(a)}
    const sub=e.target.closest('[data-settings-tab]');if(sub)settingsOpen(sub.dataset.settingsTab);
@@ -684,7 +816,7 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  area.addEventListener('pointermove',e=>{if(drag){let dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.hypot(dx,dy)>5)drag.moved=true;if(drag.moved){cx=drag.cx-dx/scale;cy=drag.cy-dy/scale;requestRender()}}if(!drag) {let [x,y]=worldPos(e.clientX,e.clientY);$('#coords').textContent=`X ${Math.round(x*3)} · Z ${Math.round(y*3)}`}});
  area.addEventListener('pointerup',e=>{if(drag&&!drag.moved&&!regionDrawing&&e.button===0&&!mapDismissThisPointer){const [x,y]=worldPos(e.clientX,e.clientY),r=regionAt(x,y);showSelected([x,y],r,{kind:r?'region':'position'})}drag=null;mapDismissThisPointer=false;area.classList.remove('dragging')});
  area.addEventListener('pointercancel',()=>{drag=null;mapDismissThisPointer=false;area.classList.remove('dragging')});
- area.addEventListener('wheel',e=>{e.preventDefault();detailClose();$('#contextMenu').classList.add('hidden');let [ax,ay]=worldPos(e.clientX,e.clientY);scale=clamp(scale*Math.exp(-e.deltaY*.0012),.40,4.3);cx=ax-(e.clientX-w/2)/scale;cy=ay-(e.clientY-h/2)/scale;requestRender()},{passive:false});
+ area.addEventListener('wheel',e=>{e.preventDefault();detailClose();$('#contextMenu').classList.add('hidden');let [ax,ay]=worldPos(e.clientX,e.clientY);scale=clamp(scale*Math.exp(-e.deltaY*.0012),Math.min(.40,Math.min(w/W,h/H)*.92),4.3);cx=ax-(e.clientX-w/2)/scale;cy=ay-(e.clientY-h/2)/scale;requestRender()},{passive:false});
  window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if(e.key==='Escape'){detailClose();modalClose();panelClose();$('#contextMenu').classList.add('hidden')}});
  window.addEventListener('resize',syncSize);
  }
@@ -711,7 +843,6 @@ function pointInPoly(p,pts){let inside=false;for(let i=0,j=pts.length-1;i<pts.le
 // True area-weighted centroid; concave shapes fall back to a known inside point.
 function regionCenter(r){if(r.label&&pointInPoly(r.label,r.points))return r.label;const pts=r.points,twice=polygonArea(pts)*6;if(Math.abs(twice)>1e-6){let cx=0,cy=0;for(let i=0;i<pts.length;i++){const a=pts[i],b=pts[(i+1)%pts.length],cross=a[0]*b[1]-b[0]*a[1];cx+=(a[0]+b[0])*cross;cy+=(a[1]+b[1])*cross}const c=[cx/twice,cy/twice];if(pointInPoly(c,pts))return c}return pts[Math.floor(pts.length/2)]}
 function regionAt(x,y){for(let i=regions.length-1;i>=0;i--)if(pointInPoly([x,y],regions[i].points))return regions[i];return null}
-function regionStyleAt(screenX){return mode==='compare'?(screenX<w*split?compareLeft:compareRight):mode}
 function regionStroke(g,r,points,selected){const type=regionTypes[r.type]||regionTypes.other;g.beginPath();points.forEach((p,i)=>i?g.lineTo(...p):g.moveTo(...p));g.closePath();g.fillStyle=selected?`${r.color}2e`:`${type.color}06`;g.fill();if(selected||layers.regionBoundaries){g.strokeStyle=selected?'#ffe5a6':`${type.color}91`;g.lineWidth=selected?2.1:1.2;g.setLineDash(selected?[8,5]:[6,7]);g.stroke();g.setLineDash([])}}
 function drawRegions(g){
  g.save();g.setTransform(dpr,0,0,dpr,0,0);g.textAlign='center';g.textBaseline='middle';
@@ -720,7 +851,7 @@ function drawRegions(g){
    if(!isSurveyedAt(...regionCenter(r)))continue;
    regionStroke(g,r,scr,selected);
    if(xc< -100||xc>w+100||yc< -70||yc>h+70)continue;
-   const at=regionStyleAt(xc),ancient=at==='illustrated',pixel=at==='pixel';
+   const ancient=mode==='illustrated',pixel=mode==='pixel';
    const type=regionTypes[r.type],zoom=Math.min(1.13,Math.max(.78,Math.sqrt(scale/1.3))),size=Math.round((r.type==='sea'||r.type==='mountain'?25:21)*zoom);
    g.save();g.translate(xc,yc);if(ancient)g.rotate(r.type==='mountain'?-.14:r.type==='sea'?-.04:0);
    g.font=(pixel?'800 ':'650 ')+size+'px '+(ancient?'"KaiTi","STKaiti","Songti SC",serif':pixel?'"Microsoft YaHei",monospace':'"Microsoft YaHei",sans-serif');
@@ -905,7 +1036,27 @@ function initRegionEvents(){
  },true);
 }
 
-function start(){initRegionEvents();collectGeometry();initMasks();realBase=makeRaster('realistic');inkBase=makeRaster('illustrated');pixelBase=makePixelRaster();scale=Math.max(innerWidth/W,innerHeight/H)*1.08;cx=630;cy=465;rebuild();initEvents();syncSize();let preferred='illustrated';try{let saved=localStorage.getItem('cartograph-final-map-style-v3');if(['pixel','realistic','illustrated'].includes(saved))preferred=saved}catch(_){}setMode(preferred,true);updateStatus();}
+function start(){
+ initRegionEvents();
+ collectGeometry();initMasks();
+ realBase=makeRaster('realistic');inkBase=makeRaster('illustrated');
+ pixelBase=makePixelRaster(true);pixelClassicBase=makePixelRaster(false);
+ let preferred='pixel';
+ if(!terrainPreview){
+  try{
+   const saved=localStorage.getItem('cartograph-final-map-style-v3');
+   if(mapStyles.includes(saved))preferred=saved;
+  }catch(_){}
+ }
+ if(preferred==='pixel'){
+  scale=Math.min(innerWidth/W,innerHeight/H)*.92;
+  cx=W/2;cy=H/2;
+ }else{
+  scale=Math.max(innerWidth/W,innerHeight/H)*1.08;
+  [cx,cy]=PLAYER_MAP;
+ }
+ rebuild();initEvents();syncSize();setMode(preferred,true);updateStatus();
+}
 start();
 Object.defineProperty(window,'__cartographPreviewState',{
  get:()=>({geometryBuilds,maskUpdates,surveyed:surveyCount,colorized:colorCount,
