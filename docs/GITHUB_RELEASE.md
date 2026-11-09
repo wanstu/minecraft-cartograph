@@ -1,25 +1,25 @@
 # Cartograph GitHub & CI 交付说明
 
-## 当前结论
+## 当前结论（2026-11-09）
 
-- dadm 工程：`/home/wanstu/projects/minecraft-cartograph`。
-- 当前 Git `main` 已存在（本地提交后未自动同步 GitHub）。
-- **目标 GitHub 仓库**：`wanstu/minecraft-cartograph`，但在 2026-11-09 检查时 GitHub 当前授权未能找到它，远端未配置。
-- dadm 目前没有 `gh` CLI、GitHub Token 或 Git 凭据。ChatGPT 的 GitHub 连接器有读写已存在仓库功能，但没有提供“创建仓库”能力。
-- 当前代码是开发测试版，可由 GitHub Actions 产出测试 JAR；**尚未完成客户端实机验收，正式 GitHub Release 保护标志维持 false**。
+- dadm 开发工程：`/home/wanstu/projects/minecraft-cartograph`。
+- **GitHub 公共仓库已创建并成功推送**：[wanstu/minecraft-cartograph](https://github.com/wanstu/minecraft-cartograph)。
+- 由 **eadm** 上已经认证的 GitHub CLI 创建远端；由 **dadm** 使用已经验证的 SSH 密钥推送：`git@github.com:wanstu/minecraft-cartograph.git`。后续代码只需在 dadm `git push origin main`，不用再创建仓库或人工提供 Token。
+- **第一轮 GitHub Actions 真实构建成功**：[构建 42571229244](https://github.com/wanstu/minecraft-cartograph/actions/runs/42571229244)，包含 common-tests、版本矩阵和 1.21.1 NeoForge JAR 校验。
+- 新增 `development-preview` CI job：每次 `main` 自动构建成功后，将已验证的 JAR 和 SHA256SUMS 更新到 [Development 预发布版](https://github.com/wanstu/minecraft-cartograph/releases/tag/development)。这是 **Prerelease 测试版**，与正式版不同。
+- **客户端实机验收尚未完成**，正式 `v0.1.0` Release 的 `release_ready=false` 安全保护继续生效，不可为了发布而提前开启。
 
-## 首次建立远端（仅需一次）
+## 下载与推送
 
-1. 使用当前 GitHub 账号（`wanstu`）在 [GitHub 新建仓库](https://github.com/new) 建立**空的** `minecraft-cartograph`，**不要预生成 README/.gitignore/LICENSE**，避免与本地 Git 产生不同历史。
-2. 在 dadm 上配置当前账户的 GitHub HTTPS 或 SSH 推送身份（不要把 Token 写入 README、仓库或日志；也不要将凭据发给 agent）。
-3. 在 dadm 工程目录中执行：
+直接打开 [Development 下载页](https://github.com/wanstu/minecraft-cartograph/releases/tag/development)，下载与 Minecraft 版本和 Loader 匹配的 `Cartograph-*-mc1.21.1-neoforge.jar`，将其放到游戏的 `mods/`；客户端和服务器均需要安装。开发版本请先备份世界。
+
+若开发预发布尚未生成，则从 [Actions 构建列表](https://github.com/wanstu/minecraft-cartograph/actions/workflows/release.yml) 打开最新成功的 `main` 构建，在 Artifacts 下载 `cartograph-mc1.21.1-neoforge` ZIP 并解压 JAR。
 
 ```bash
-git remote add origin https://github.com/wanstu/minecraft-cartograph.git
-git push -u origin main
+cd /home/wanstu/projects/minecraft-cartograph
+git status --short
+git push origin main
 ```
-
-建议默认分支 `main`。完成后可在 GitHub 的 **Actions → Cartograph build matrix → 最新主分支运行记录 → Artifacts** 下载 `cartograph-mc1.21.1-neoforge` 产物。
 
 ## 自动构建流程
 

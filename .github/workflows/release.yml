@@ -131,3 +131,43 @@ jobs:
           files: |
             dist/*.jar
             dist/SHA256SUMS.txt
+
+  development-preview:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [discover, common-tests, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cartograph-*
+          merge-multiple: true
+          path: dist
+      - name: Verify all development JARs before publishing
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          actual="$(find dist -maxdepth 1 -type f -name '*.jar' | wc -l)"
+          test "$actual" -gt 0
+          test "$actual" -eq "$EXPECTED"
+          (cd dist && sha256sum *.jar > SHA256SUMS.txt)
+      - name: Publish rolling development prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title='Cartograph 开发预览版（未完成验收）'
+          notes="自动构建测试包；不代表正式版本。Commit: ${GITHUB_SHA}；构建：https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}；支持版本以附件 JAR 名称为准。"
+          if gh release view development >/dev/null 2>&1; then
+            gh release edit development --title "$title" --notes "$notes" --prerelease
+          else
+            gh release create development --target "$GITHUB_SHA" \
+              --title "$title" --notes "$notes" --prerelease
+          fi
+          gh release upload development dist/*.jar dist/SHA256SUMS.txt --clobber

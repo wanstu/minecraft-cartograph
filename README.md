@@ -52,11 +52,14 @@ cd java/adapters/1.21.1-neoforge
 
 ## 多版本 CI / 发布
 
+**下载开发测试版**：[GitHub Releases · development](https://github.com/wanstu/minecraft-cartograph/releases/tag/development)。
+每次 `main` 推送通过 CI 后，自动更新这个明确标记为 **Prerelease（开发预览）** 的附件 JAR 和 `SHA256SUMS.txt`。请在正式使用前备份世界。也可以从 [GitHub Actions](https://github.com/wanstu/minecraft-cartograph/actions/workflows/release.yml) 下载构建产物。
+
 - `java/common`（Java 17）保存地图坐标/实际 MCA 数据读取/免费刷新账本等公共逻辑。
 - `java/adapters/<minecraft>-<loader>` 每个版本独立编译为对应单 JAR，避免虚假的跨版本兼容。
 - `config/targets.json` 的 `status=implemented` 才加入 GitHub Actions 构建矩阵。目前唯一已实现目标是 **1.21.1 NeoForge**；其余八个是 `planned`。
 - `.github/workflows/release.yml`：main 推送及 PR 自动进行公共测试、构建、JAR 结构校验并上传 Action artifact；tag `v<version>` 可在正式放行后形成 Release JAR 和 SHA256SUMS。
-- **`release_ready=false`**：在客户端验收、存档复测完成前，GitHub Release 故意不创建；仅提供 CI 开发版 artifacts，避免误当稳定版。
+- **`release_ready=false`**：在客户端验收、存档复测完成前，禁止创建 **正式稳定版**；开发预览版 `development` 独立标记为 Prerelease，仍可供测试下载。
 
 详细说明：[真实测绘验收与限制](docs/SURVEY_PIPELINE.md) · [正式机制契约](docs/MECHANICS_V1.md) · [多版本设计](docs/MULTI_VERSION.md) · [发布与 CI 操作](docs/GITHUB_RELEASE.md)。
 
