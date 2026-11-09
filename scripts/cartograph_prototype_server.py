@@ -28,7 +28,7 @@ class PreviewHandler(SimpleHTTPRequestHandler):
 
     def _health(self):
         body = json.dumps({"ok": True, "service": "cartograph-prototypes",
-                           "version": "v4", "readonly": True}).encode("utf-8")
+                           "version": "v5", "readonly": True}).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

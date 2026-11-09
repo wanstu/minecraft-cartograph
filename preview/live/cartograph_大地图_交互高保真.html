@@ -104,6 +104,14 @@
 .costToggle input{width:19px;height:19px;accent-color:#e5c98c}
 .costImpact{border-left:3px solid #dac58d;background:#132b20cc;padding:12px 15px;border-radius:9px;font-size:13px;color:#f1e8d3;white-space:pre-line;line-height:1.85;margin-top:16px}
 .itemSlot:disabled{opacity:.54;cursor:not-allowed}
+
+.maskStats{display:grid;gap:12px;padding:14px;border-radius:12px;background:linear-gradient(135deg,#264235bb,#162a21d9);border:1px solid #d8c49330;margin:12px 0 15px}
+.maskStatHead{display:flex;align-items:baseline;justify-content:space-between;color:#f2e9d7;font-size:13px;font-weight:750}
+.maskStatHead b{color:#f0d6a2;font-size:16px;font-variant-numeric:tabular-nums}
+.maskStat small{display:block;color:#b8c9b9;font-size:11px;margin-top:6px}
+.maskMeter{height:9px;border-radius:99px;background:#10271e;border:1px solid #ffffff10;overflow:hidden;margin-top:6px}
+.maskMeter i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#89b798,#d3d6a7);transition:width .45s ease}
+.maskMeter.color i{background:linear-gradient(90deg,#84bad0 0%,#8ec19c 35%,#e8c777 74%,#df9d85 100%)}
 </style>
 </head>
 <body>
@@ -258,15 +266,164 @@ function seaHatch(c){c.save();c.strokeStyle='#638a8199';c.lineWidth=1;for(let y=
 function paperGrain(c){c.save();for(let i=0;i<12500;i++){let x=hash(i,77)*W,y=hash(i,19)*H;c.fillStyle=i%3?'#5a402006':'#fff2b515';c.fillRect(x,y,1.5,1.5)}c.restore()}
 function addLabels(c,style){c.save();const old=style==='illustrated';const labels=[{s:'北镜海',x:75,y:395,z:29,rotation:-.07,color:old?'#5f806d':'#e0f6ef'},{s:'苍岚山脉',x:990,y:163,z:21,rotation:-.25,color:old?'#66503b':'#eaf0e5'},{s:'白 河 谷 地',x:573,y:634,z:19,rotation:-.16,color:old?'#80684c':'#eef3d3'},{s:'雾松林',x:924,y:750,z:20,rotation:.10,color:old?'#5d6441':'#e6efdd'}];for(let t of labels){c.save();c.translate(t.x,t.y);c.rotate(t.rotation);c.textAlign='center';c.font=(old?'bold ':'600 ')+t.z+'px '+(old?'Georgia,"SimSun",serif':'"Microsoft YaHei",sans-serif');c.fillStyle=t.color;c.globalAlpha=old?.76:.69;if(!old){c.shadowColor='#3045339a';c.shadowBlur=9;c.shadowOffsetY=1}c.fillText(t.s,0,0);c.restore()}c.restore()}
 function makeLayer(style){if(style==='pixel')return makePixelLayer();const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d',{alpha:false});g.imageSmoothingEnabled=true;g.drawImage(style==='realistic'?realBase:inkBase,0,0,W,H);if(style==='illustrated')paperGrain(g);if(layers.contours)textureContours(g,style);coastline(g,style);drawLakes(g,style);rivers(g,style);forest(g,style);if(style==='illustrated'){mountainInk(g);seaHatch(g)}drawRoads(g,style);if(style==='illustrated'){g.strokeStyle='#b08e5b67';g.lineWidth=6;g.strokeRect(14,14,W-28,H-28);g.strokeStyle='#795b3f48';g.lineWidth=1;g.strokeRect(22,22,W-44,H-44)}return c}
-const textures={};function rebuild(){textures.pixel=makeLayer('pixel');textures.realistic=makeLayer('realistic');textures.illustrated=makeLayer('illustrated');scheduleDraw()}
+/* The world is generated once. Two separate 16×16-world-block masks control
+ * visibility and color; neither reloads/recalculates terrain or style art.
+ * A map pixel is 3 world blocks in this preview. One mask pixel = one chunk.
+ */
+const MASK_BLOCKS=16, MAP_BLOCKS_PER_PIXEL=3, MASK_NX=Math.ceil(W*MAP_BLOCKS_PER_PIXEL/MASK_BLOCKS),
+      MASK_NY=Math.ceil(H*MAP_BLOCKS_PER_PIXEL/MASK_BLOCKS), MASK_COUNT=MASK_NX*MASK_NY;
+const MASK_STORAGE='cartograph-reveal-v5';
+const visibilityMask=new Uint8Array(MASK_COUNT),colorMask=new Uint8Array(MASK_COUNT);
+const maskOrder=Array.from({length:MASK_COUNT},(_,i)=>i);
+let surveyCount=0,colorCount=0,geometryBuilds=0,maskUpdates=0;
+const textures={},graySources={},coveredTextures={};
+function isSurveyedAt(x,y){
+ const xx=Math.floor(x*MAP_BLOCKS_PER_PIXEL/MASK_BLOCKS),
+       yy=Math.floor(y*MAP_BLOCKS_PER_PIXEL/MASK_BLOCKS);
+ return xx>=0&&xx<MASK_NX&&yy>=0&&yy<MASK_NY&&visibilityMask[yy*MASK_NX+xx]===1;
+}
+function isColorizedAt(x,y){
+ const xx=Math.floor(x*MAP_BLOCKS_PER_PIXEL/MASK_BLOCKS),
+       yy=Math.floor(y*MAP_BLOCKS_PER_PIXEL/MASK_BLOCKS);
+ return xx>=0&&xx<MASK_NX&&yy>=0&&yy<MASK_NY&&colorMask[yy*MASK_NX+xx]===1;
+}
+const encodeMask=values=>{
+ const bytes=new Uint8Array(Math.ceil(values.length/8));
+ for(let i=0;i<values.length;i++)if(values[i])bytes[i>>3]|=1<<(i&7);
+ let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);
+ return btoa(binary);
+};
+const decodeMask=(raw,target)=>{
+ const binary=atob(raw);
+ if(binary.length!==Math.ceil(target.length/8))return false;
+ for(let i=0;i<target.length;i++)target[i]=(binary.charCodeAt(i>>3)>>(i&7))&1;
+ return true;
+};
+function saveMasks(){
+ try{
+  localStorage.setItem(MASK_STORAGE,JSON.stringify({
+   v:1,width:MASK_NX,height:MASK_NY,survey:encodeMask(visibilityMask),color:encodeMask(colorMask)
+  }));
+ }catch(_){}
+}
+function initMasks(){
+ // Natural-looking mapped boundary follows a spatially stable survey ordering,
+ // while the cell coverage and color flags are independently persisted.
+ const weights=new Float32Array(MASK_COUNT);
+ for(let i=0;i<MASK_COUNT;i++){
+  const x=i%MASK_NX,y=Math.floor(i/MASK_NX);
+  const xx=(x-MASK_NX*.49)/(MASK_NX*.58),yy=(y-MASK_NY*.48)/(MASK_NY*.62);
+  weights[i]=Math.hypot(xx,yy)+(hash(x,y,951)-.5)*.026+
+            (noise(x/13,y/13,74)-.5)*.09;
+ }
+ maskOrder.sort((a,b)=>weights[a]-weights[b]);
+ let restored=false;
+ try{
+  const saved=JSON.parse(localStorage.getItem(MASK_STORAGE));
+  if(saved?.v===1&&saved.width===MASK_NX&&saved.height===MASK_NY){
+   const va=new Uint8Array(MASK_COUNT),co=new Uint8Array(MASK_COUNT);
+   if(decodeMask(saved.survey,va)&&decodeMask(saved.color,co)){
+    visibilityMask.set(va);colorMask.set(co);restored=true;
+   }
+  }
+ }catch(_){}
+ if(!restored){
+  // A partially surveyed, partially colored atlas is a real save-state:
+  // existing reveal flags were earned in previous visits; current inventory
+  // is separate. Never derive reveal flags from current balance on load.
+  for(let i=0;i<Math.floor(MASK_COUNT*.67);i++)visibilityMask[maskOrder[i]]=1;
+  for(let i=0;i<Math.floor(MASK_COUNT*.48);i++)colorMask[maskOrder[i]]=1;
+  saveMasks();
+ }
+ surveyCount=visibilityMask.reduce((n,v)=>n+v,0);
+ colorCount=colorMask.reduce((n,v)=>n+v,0);
+}
+function revealNewCells(kind){
+ const data=kind==='survey'?visibilityMask:colorMask;
+ const count=kind==='survey'?surveyCount:colorCount;
+ const permanentActive=kind==='survey'?
+       costSettings.permanentInk&&resources.inkEnabled:
+       costSettings.permanentColor&&resources.colorEnabled;
+ const balance=kind==='survey'?'ink':'pigment';
+ if(!permanentActive&&!resources[kind==='survey'?'inkEnabled':'colorEnabled'])return 0;
+ if(count>=MASK_COUNT)return 0;
+ let budget=permanentActive?MASK_COUNT-count:
+   Math.floor((resources[balance]+.000001)/debit(balance));
+ if(budget<=0)return 0;
+ let changed=0;
+ for(const i of maskOrder){
+  if(budget===0)break;
+  if(data[i])continue;
+  data[i]=1;budget--;changed++;
+ }
+ if(!changed)return 0;
+ if(kind==='survey')surveyCount+=changed;else colorCount+=changed;
+ if(!permanentActive)resources[balance]=Math.max(0,
+   Math.round((resources[balance]-changed*debit(balance))*10)/10);
+ saveMasks();saveMaterials();updateMaskedTextures();requestRender();
+ return changed;
+}
+function blankAndColorMasks(){
+ // Two physically separate low-resolution 1-pixel-per-chunk mask textures.
+ // The full terrain stays in the original textures, unchanged by material.
+ const blank=document.createElement('canvas'),color=document.createElement('canvas');
+ blank.width=color.width=MASK_NX;blank.height=color.height=MASK_NY;
+ const a=blank.getContext('2d').createImageData(MASK_NX,MASK_NY);
+ const b=color.getContext('2d').createImageData(MASK_NX,MASK_NY);
+ for(let i=0;i<MASK_COUNT;i++){
+  const k=i*4;
+  if(!visibilityMask[i]){
+    a.data[k]=222;a.data[k+1]=217;a.data[k+2]=195;a.data[k+3]=255;
+  }
+  if(colorMask[i]){
+    b.data[k]=255;b.data[k+1]=255;b.data[k+2]=255;b.data[k+3]=255;
+  }
+ }
+ blank.getContext('2d').putImageData(a,0,0);
+ color.getContext('2d').putImageData(b,0,0);
+ return {blank,color};
+}
+function updateMaskedTextures(){
+ if(!textures.pixel)return;
+ const masks=blankAndColorMasks();
+ for(const style of ['pixel','realistic','illustrated']){
+  const colored=document.createElement('canvas');colored.width=W;colored.height=H;
+  const cg=colored.getContext('2d');
+  cg.drawImage(textures[style],0,0,W,H);
+  cg.globalCompositeOperation='destination-in';
+  cg.imageSmoothingEnabled=false;
+  cg.drawImage(masks.color,0,0,W,H);
+  cg.globalCompositeOperation='source-over';
+  const output=document.createElement('canvas');output.width=W;output.height=H;
+  const g=output.getContext('2d',{alpha:false});
+  g.drawImage(graySources[style],0,0);
+  g.drawImage(colored,0,0);
+  g.imageSmoothingEnabled=false;
+  g.drawImage(masks.blank,0,0,W,H);
+  coveredTextures[style]=output;
+ }
+ maskUpdates++;
+}
+function rebuild(){
+ for(const style of ['pixel','realistic','illustrated']){
+  textures[style]=makeLayer(style);
+  const gray=document.createElement('canvas');gray.width=W;gray.height=H;
+  const g=gray.getContext('2d',{alpha:false});
+  g.filter='grayscale(1)';
+  g.drawImage(textures[style],0,0,W,H);g.filter='none';
+  graySources[style]=gray;
+ }
+ geometryBuilds++;
+ updateMaskedTextures();scheduleDraw();
+}
 function syncSize(){w=innerWidth;h=innerHeight;dpr=Math.min(devicePixelRatio||1,2);map.width=Math.round(w*dpr);map.height=Math.round(h*dpr);map.style.width=w+'px';map.style.height=h+'px';ctx.setTransform(dpr,0,0,dpr,0,0);scheduleDraw()}
 function view(){return {left:w/2-cx*scale,top:h/2-cy*scale,ww:W*scale,hh:H*scale}}
 function screenPos(x,y){const v=view();return [v.left+x*scale,v.top+y*scale]}
 function worldPos(x,y){const v=view();return [(x-v.left)/scale,(y-v.top)/scale]}
-function paint(g){g.save();g.setTransform(dpr,0,0,dpr,0,0);g.fillStyle='#d4d6be';g.fillRect(0,0,w,h);const v=view();function draw(which){g.imageSmoothingEnabled=which==='pixel'?false:scale<1.25;g.drawImage(textures[which],v.left,v.top,v.ww,v.hh)}if(mode==='compare'){g.save();g.beginPath();g.rect(0,0,w*split,h);g.clip();draw(compareLeft);g.restore();g.save();g.beginPath();g.rect(w*split,0,w*(1-split),h);g.clip();draw(compareRight);g.restore()}else draw(mode);g.restore();drawRegions(g);}
+function paint(g){g.save();g.setTransform(dpr,0,0,dpr,0,0);g.fillStyle='#d4d6be';g.fillRect(0,0,w,h);const v=view();function draw(which){g.imageSmoothingEnabled=which==='pixel'?false:scale<1.25;g.drawImage(coveredTextures[which],v.left,v.top,v.ww,v.hh)}if(mode==='compare'){g.save();g.beginPath();g.rect(0,0,w*split,h);g.clip();draw(compareLeft);g.restore();g.save();g.beginPath();g.rect(w*split,0,w*(1-split),h);g.clip();draw(compareRight);g.restore()}else draw(mode);g.restore();drawRegions(g);}
 function requestRender(){if(renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;paint(ctx);drawMarkers();updateSelection();updateStatus()})}
 function scheduleDraw(){requestRender()}
-function drawMarkers(){const holder=$('#markerLayer');holder.innerHTML='';const points=[...(layers.structures?structures.map(p=>({...p,structure:true})):[]),...(layers.waypoints?waypoints:[])];for(const p of points){const [x,y]=screenPos(p.x,p.y);if(x< -110||x>w+110||y< -50||y>h+60)continue;const atStyle=mode==='compare'?(x>w*split?compareRight:compareLeft):mode;const ancient=atStyle==='illustrated';const box=document.createElement('div');box.dataset.markerIndex=String(waypoints.indexOf(p));box.dataset.structureIndex=String(p.structure?structures.findIndex(q=>q.x===p.x&&q.y===p.y):-1);box.className='marker'+(ancient?' ancient':atStyle==='pixel'?' pixel':'');box.style.left=x+'px';box.style.top=y+'px';const icon=document.createElement('span');icon.className='markIcon';icon.textContent=icons[p.type]||'✦';if(p.color)icon.style.borderColor=p.color;const label=document.createElement('span');label.className='markLabel';label.textContent=p.name;box.append(icon,label);holder.appendChild(box)}}
+function drawMarkers(){const holder=$('#markerLayer');holder.innerHTML='';const points=[...(layers.structures?structures.map(p=>({...p,structure:true})):[]),...(layers.waypoints?waypoints:[])];for(const p of points){if(!isSurveyedAt(p.x,p.y))continue;const [x,y]=screenPos(p.x,p.y);if(x< -110||x>w+110||y< -50||y>h+60)continue;const atStyle=mode==='compare'?(x>w*split?compareRight:compareLeft):mode;const ancient=atStyle==='illustrated';const box=document.createElement('div');box.dataset.markerIndex=String(waypoints.indexOf(p));box.dataset.structureIndex=String(p.structure?structures.findIndex(q=>q.x===p.x&&q.y===p.y):-1);box.className='marker'+(ancient?' ancient':atStyle==='pixel'?' pixel':'');box.style.left=x+'px';box.style.top=y+'px';const icon=document.createElement('span');icon.className='markIcon';icon.textContent=icons[p.type]||'✦';if(p.color)icon.style.borderColor=p.color;const label=document.createElement('span');label.className='markLabel';label.textContent=p.name;box.append(icon,label);holder.appendChild(box)}}
 const styleNames={pixel:'像素 · MC 方块地表',realistic:'写实 · 自然地形',illustrated:'手绘 · 古式地图'};function syncCompare(){const is=mode==='compare';$('#splitLine').classList.toggle('hidden',!is);$('#compareLeft').classList.toggle('hidden',!is);$('#compareRight').classList.toggle('hidden',!is);$('#compareControls').classList.toggle('hidden',!is);$('#compareLeft').textContent=styleNames[compareLeft];$('#compareRight').textContent=styleNames[compareRight];$('#compareStyleLeft').value=compareLeft;$('#compareStyleRight').value=compareRight;$('#splitLine').style.left=(split*100)+'%';$('#splitLine').setAttribute('aria-valuenow',Math.round(split*100));}
 function setMode(v,quiet=false){if(!['pixel','realistic','illustrated','compare'].includes(v))return;mode=v;try{if(v!=='compare')localStorage.setItem('cartograph-final-map-style-v3',v)}catch(_){}all('[data-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.mode===v));scheduleDraw();if(!quiet)toast(v==='pixel'?'已切换至像素':v==='realistic'?'已切换至写实':v==='illustrated'?'已切换至手绘':'已开启地图对照');}
 function toast(message){const el=$('#toast');el.textContent=message;el.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),2500)}
@@ -289,17 +446,17 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
    else if(p==='regions'){html=regionPanelHtml()}
    else if(p==='markers'){html=title('我的标点','WAYPOINTS','查看和编辑已经记录的地点')+`<button class="btn primary" style="width:100%" data-act="create-marker">＋ 新增标点</button><div class="markList" style="margin-top:14px">${waypoints.map((m,i)=>`<button data-open-marker="${i}"><span style="font-size:22px">${escapeHtml(icons[m.type]||'✦')}</span><div><b>${escapeHtml(m.name)}</b><small>X ${Math.round(m.x*3)} · Z ${Math.round(m.y*3)} · 点击查看详情</small></div></button>`).join('')}</div>`}
    else if(p==='info'){html=title('地图信息','CARTOGRAPH / MAP','地图与当前世界信息')+`<div class="resource"><small>维度</small><strong>主世界</strong></div><div class="resource"><small>地图样式</small><strong>${styleNames[mode]||'手绘'}</strong></div><div class="resource"><small>区域名称</small><strong>${regions.length} 个</strong></div><div class="resource"><small>自定义标点</small><strong>${waypoints.length} 个</strong></div><p class="panelSubtitle" style="margin-top:14px"></p>`}
-   panelEl.innerHTML=html;panelEl.classList.remove('hidden');}
+   if(p==='atlas')html+=maskProgress();panelEl.innerHTML=html;panelEl.classList.remove('hidden');}
  function modalClose(){modal='';backdrop.classList.add('hidden');modalEl.innerHTML=''}
  function mini(which){return `<div class="miniPreview"><canvas id="mini-${which}"></canvas><span class="chip">${which==='pixel'?'MC 方块':which==='realistic'?'自然地貌':'古式地图'}</span></div>`}
  function paintMiniThumbs(){for(let m of ['pixel','realistic','illustrated']){const el=$('#mini-'+m);if(!el)continue;el.width=360;el.height=180;const g=el.getContext('2d');g.imageSmoothingEnabled=m!=='pixel';g.drawImage(textures[m],m==='pixel'?180:360,m==='pixel'?100:200,m==='pixel'?270:540,m==='pixel'?135:270,0,0,360,180)}}
  function settingsOpen(tab='map'){detailClose();panelClose();settingTab=tab;modal='settings';const header=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / SETTINGS</div><h2>地图设置</h2><p>配置地图画面和小地图</p></div><button data-act="modal-close">×</button></div><div class="configRow" style="margin-top:14px"><button class="btn ${tab==='map'?'active':''}" data-settings-tab="map">大地图 / 风格</button><button class="btn ${tab==='mini'?'active':''}" data-settings-tab="mini">小地图设置</button><button class="btn ${tab==='cost'?'active':''}" data-settings-tab="cost">耗材与倍率</button></div>`;
  if(tab==='map')modalEl.innerHTML=header+`<div class="settingCaption">地图风格</div><div class="styleCards">${[['pixel','像素 · Minecraft','方块高度明暗、阶梯边缘与坡面阴影'],['realistic','写实 · 现代地形图','自然地貌、坡面阴影、森林与水系'],['illustrated','手绘 · 古式地图','羊皮纸、墨线、山脉与树林符号']].map(([key,t,desc])=>`<button class="styleCard ${mode===key?'chosen':''}" data-style="${key}">${mini(key)}<strong>${t}</strong><small>${desc}</small></button>`).join('')}</div><div class="settingCaption">显示选项</div><label class="settingsToggle"><b>显示区域名称</b><input type="checkbox" data-layer="regions" ${layers.regions?'checked':''}></label><label class="settingsToggle"><b>显示区域边界</b><input type="checkbox" data-layer="regionBoundaries" ${layers.regionBoundaries?'checked':''}></label><label class="settingsToggle" ${mode==='pixel'?'style="opacity:.55"':''}><b>${mode==='pixel'?'方块高差阴影（自动启用）':'显示等高线'}</b><input type="checkbox" data-layer="contours" ${mode==='pixel'?'checked disabled':layers.contours?'checked':''}></label><div class="modalFooter"><small></small><button class="btn primary" data-act="modal-close">完成</button></div>`;
  else if(tab==='cost')modalEl.innerHTML=header+
- `<div class="costGroup"><h3>测绘墨水</h3><p>完整区块首次测绘扣费；已测绘区域更新免费。</p>
+ `<div class="costGroup"><h3>测绘墨水</h3><p>每单位 16 × 16 方块。投入墨水逐格揭开空白；底层地形无需重绘。</p>
  ${costRow('inkInput','投入倍率')}${costRow('inkCost','消耗倍率')}
  ${costToggle('permanentInk','永久测绘墨水（首次投入墨囊后生效）')}</div>
- <div class="costGroup"><h3>彩色颜料</h3><p>红黄蓝各投入一份开启彩色；非永久模式可重复用三色补充颜料。</p>
+ <div class="costGroup"><h3>彩色颜料</h3><p>每单位 16 × 16 方块。投入颜料逐格恢复颜色，未揭开的地形始终空白。</p>
  ${costRow('pigmentInput','投入倍率')}${costRow('pigmentCost','消耗倍率')}
  ${costToggle('permanentColor','永久彩色（首次三色齐全后生效）')}</div>
  <div class="costGroup"><h3>发光墨水</h3><p>新建发光标点或首次启用标点发光时扣费。</p>
@@ -336,9 +493,9 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  });
 
  const MAX_INK=1_000_000_000,MAX_GLOW_INK=1_000_000_000;
-  let resources={ink:84,glow:17,pigment:512,inkEnabled:true,glowEnabled:true,colorEnabled:true,compass:true,dyes:{red:true,yellow:true,blue:true}};
+  let resources={ink:84,glow:17,pigment:512,inkEnabled:true,glowEnabled:true,colorEnabled:true,compass:true,dyes:{red:false,yellow:false,blue:false}};
   const formatAmount=n=>Number(n).toLocaleString('zh-CN',{maximumFractionDigits:1});
-  const MATERIAL_STORE_KEY='cartograph-hifi-materials-v4';
+  const MATERIAL_STORE_KEY='cartograph-hifi-materials-v5';
   try{
     const saved=JSON.parse(localStorage.getItem(MATERIAL_STORE_KEY));
     if(saved&&typeof saved==='object'){
@@ -354,9 +511,9 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
     }
   }catch(_){}
   const saveMaterials=()=>{try{localStorage.setItem(MATERIAL_STORE_KEY,JSON.stringify(resources))}catch(_){}};
- const BASE_REFILL={ink:128,pigment:128,glow:32},COST_KEY='cartograph-costs-v4';
+ const BASE_REFILL={ink:128,pigment:128,glow:32},COST_KEY='cartograph-costs-v5';
  const costSettings={inkInput:4,inkCost:.1,pigmentInput:4,pigmentCost:.1,glowInput:4,glowCost:.1,
-   permanentColor:true,permanentInk:false,permanentGlow:false};
+   permanentColor:false,permanentInk:false,permanentGlow:false};
  const rate=v=>Number.isFinite(+v)?Math.max(.1,Math.min(10,Math.round(+v*10)/10)):.1;
  try{const prev=JSON.parse(localStorage.getItem(COST_KEY));if(prev&&typeof prev==='object'){
    for(const k of ['inkInput','inkCost','pigmentInput','pigmentCost','glowInput','glowCost'])
@@ -377,13 +534,22 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  }
  const dyeNames={red:'红色染料',yellow:'黄色染料',blue:'蓝色染料'};
  function dyeReady(){return Object.values(resources.dyes).every(Boolean)}
+ const maskPercent=n=>(100*n/MASK_COUNT).toFixed(1)+'%';
+ const maskProgress=()=>`<div class="maskStats">
+    <div class="maskStat"><div class="maskStatHead"><span>已显示地形</span><b>${maskPercent(surveyCount)}</b></div>
+      <div class="maskMeter"><i style="width:${surveyCount/MASK_COUNT*100}%"></i></div>
+      <small>测绘墨水 · 16 × 16 方块 / 单元</small></div>
+    <div class="maskStat"><div class="maskStatHead"><span>已恢复彩色</span><b>${maskPercent(colorCount)}</b></div>
+      <div class="maskMeter color"><i style="width:${colorCount/MASK_COUNT*100}%"></i></div>
+      <small>彩色颜料 · 独立覆盖范围</small></div>
+  </div>`;
  function colorStatus(){
    return !resources.colorEnabled?'待投入三原色':costSettings.permanentColor?'永久彩色':formatAmount(resources.pigment)+' 颜料';
  }
  function materialsOpen(){
   detailClose();panelClose();modal='materials';
   modalEl.innerHTML=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / INVENTORY</div><h2>地图册 · 材料槽</h2></div><button data-act="modal-close">×</button></div>
-   <div class="settingCaption">地图册</div>
+   <div class="settingCaption">地图册 · 覆盖范围</div>${maskProgress()}
    <div class="resource"><small>测绘墨水</small><strong>${resources.inkEnabled&&costSettings.permanentInk?'永久':formatAmount(resources.ink)}</strong></div>
    <div class="resource"><small>发光墨水</small><strong>${resources.glowEnabled&&costSettings.permanentGlow?'永久':formatAmount(resources.glow)}</strong></div>
    <div class="resource"><small>彩色颜料</small><strong>${colorStatus()}</strong></div>
@@ -408,16 +574,20 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  function removeWaypoint(index){const p=waypoints[index];if(!p||!confirm('删除标点「'+p.name+'」？'))return;waypoints.splice(index,1);savePins();detailClose();requestRender();toast('标点已删除')}
  function detailClose(){detailEl.classList.add('hidden');selectedHit=null}
  function pointOnMap(x,y){selectedPoint=[x,y];requestRender()}
- function showSelected(point,record=null,opts={}){detailClose();$('#contextMenu').classList.add('hidden');pointOnMap(...point);lastClick=point;const foundRegion=record&&opts.kind==='region'?record:regionAt(...point),meta=(record&&opts.kind==='marker')?'玩家标点':(record&&opts.kind==='structure')?'已生成地表结构':foundRegion?regionTypes[foundRegion.type].name:'地图位置';selectedHit={point,record,kind:opts.kind||'position'};
- let name=record?.name||(foundRegion?'区域内位置':'地图位置');
+ function showSelected(point,record=null,opts={}){detailClose();$('#contextMenu').classList.add('hidden');pointOnMap(...point);lastClick=point;
+ const concealed=!isSurveyedAt(...point);
+ const foundRegion=concealed?null:record&&opts.kind==='region'?record:regionAt(...point),meta=(record&&opts.kind==='marker')?'玩家标点':(record&&opts.kind==='structure')?'已生成地表结构':foundRegion?regionTypes[foundRegion.type].name:'地图位置';selectedHit={point,record,kind:opts.kind||'position'};
+ let name=concealed?'尚未测绘':record?.name||(foundRegion?'区域内位置':'地图位置');
  const biomeText={0:'水域',1:'平原',2:'森林',3:'湿地',4:'丘陵',5:'山地'}[getBiome(...point)]||'未知';
  const height=Math.round(80+getElev(...point)*110);
  let description=record?.note||'';
  if(opts.kind==='region'&&record){const square=Math.round(Math.abs(polygonArea(record.points))*9);description=[description,`类型：${regionTypes[record.type].name}`,`面积：约 ${square.toLocaleString()} 平方方块`,`边界：${record.points.length} 个顶点`].filter(Boolean).join(' · ')}
  else if(opts.kind==='position'||!record){description=[`地表：${biomeText}`,`高度：约 Y ${height}`,foundRegion?`所属区域：${foundRegion.name}`:'未命名区域'].join(' · ')}
  else if(!description)description=`地表：${biomeText} · 高度：约 Y ${height}`;
+ if(concealed)description='地图册尚未揭开这个位置的测绘蒙层。';
+ else if(!isColorizedAt(...point))description+=' · 当前为无色地图';
  const [px,py]=screenPos(...point);detailEl.style.left=clamp(px+17,12,w-332)+'px';detailEl.style.top=clamp(py+16,85,h-235)+'px';$('#detailType').textContent=meta.toUpperCase();$('#detailName').textContent=name;$('#detailDescription').textContent=description;$('#detailMeta').textContent=`主世界 · X ${Math.round(point[0]*3)} · Z ${Math.round(point[1]*3)}${foundRegion?' · '+foundRegion.name:''}`;
- const actions=$('#detailActions');actions.innerHTML='<button data-detail="center">定位这里</button>'+(opts.kind==='marker'?'<button data-detail="edit">编辑标点</button><button class="delete" data-detail="delete">删除</button>':opts.kind==='region'?'<button data-detail="edit">编辑区域</button><button data-detail="redraw">重圈边界</button><button class="delete" data-detail="delete">删除</button>':'');detailEl.classList.remove('hidden');updateStatus('已选中 '+name)}
+ const actions=$('#detailActions');actions.innerHTML='<button data-detail="center">定位这里</button>'+(!concealed?(opts.kind==='marker'?'<button data-detail="edit">编辑标点</button><button class="delete" data-detail="delete">删除</button>':opts.kind==='region'?'<button data-detail="edit">编辑区域</button><button data-detail="redraw">重圈边界</button><button class="delete" data-detail="delete">删除</button>':''):'');detailEl.classList.remove('hidden');updateStatus('已选中 '+name)}
  function updateStatus(action){if(action)lastAction=action;$('#coords').textContent=selectedPoint?`X ${Math.round(selectedPoint[0]*3)} · Z ${Math.round(selectedPoint[1]*3)}`:`X ${Math.round(cx*3)} · Z ${Math.round(cy*3)}`;$('#zoomValue').textContent=scale.toFixed(2)+'×';$('#statusName').textContent=lastAction||'点击地图查看位置';}
  function updateSelection(){
   const [px,py]=screenPos(...PLAYER_MAP);
@@ -444,6 +614,8 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
       if(resources.inkEnabled&&costSettings.permanentInk){toast('永久测绘墨水已启用');return}
       const amount=refill('ink');if(resources.ink>MAX_INK-amount){toast('测绘墨水已达到上限');return}
       resources.ink=Math.round((resources.ink+amount)*10)/10;resources.inkEnabled=true;
+      const opened=revealNewCells('survey');
+      toast('已揭开 '+formatAmount(opened)+' 个测绘单元');
     }else if(kind==='glow'){
       if(resources.glowEnabled&&costSettings.permanentGlow){toast('永久发光墨水已启用');return}
       const amount=refill('glow');if(resources.glow>MAX_GLOW_INK-amount){toast('发光墨水已达到上限');return}
@@ -459,8 +631,9 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
         if(resources.pigment>MAX_INK-amount){resources.dyes[dye]=false;toast('颜料已达到上限');return}
         resources.pigment=Math.round((resources.pigment+amount)*10)/10;
         resources.colorEnabled=true;
+        const colored=revealNewCells('color');
         if(!costSettings.permanentColor)resources.dyes={red:false,yellow:false,blue:false};
-        toast(costSettings.permanentColor?'已永久解锁彩色':'三色已投入，颜料 +'+formatAmount(amount));
+        toast(costSettings.permanentColor?'已永久解锁彩色':'已为 '+formatAmount(colored)+' 个单元恢复彩色');
       }
     }else if(kind==='compass')resources.compass=!resources.compass;
     saveMaterials();requestRender();materialsOpen();
@@ -473,6 +646,8 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
      const key=permanentSwitch.dataset.permanent;
      if(!['permanentColor','permanentInk','permanentGlow'].includes(key))return;
      costSettings[key]=permanentSwitch.checked;
+     if(key==='permanentInk'&&permanentSwitch.checked)revealNewCells('survey');
+     if(key==='permanentColor'&&permanentSwitch.checked)revealNewCells('color');
      if(key==='permanentColor'&&!costSettings.permanentColor&&resources.colorEnabled)
        resources.dyes={red:false,yellow:false,blue:false};
      saveCosts();saveMaterials();
@@ -542,6 +717,7 @@ function drawRegions(g){
  g.save();g.setTransform(dpr,0,0,dpr,0,0);g.textAlign='center';g.textBaseline='middle';
  if(layers.regions){for(const r of regions){const scr=r.points.map(p=>screenPos(...p)),[xc,yc]=screenPos(...regionCenter(r)),selected=r.id===selectedRegionId;
    if(scr.every(p=>p[0]<-60||p[0]>w+60||p[1]<-60||p[1]>h+60))continue;
+   if(!isSurveyedAt(...regionCenter(r)))continue;
    regionStroke(g,r,scr,selected);
    if(xc< -100||xc>w+100||yc< -70||yc>h+70)continue;
    const at=regionStyleAt(xc),ancient=at==='illustrated',pixel=at==='pixel';
@@ -729,8 +905,14 @@ function initRegionEvents(){
  },true);
 }
 
-function start(){initRegionEvents();collectGeometry();realBase=makeRaster('realistic');inkBase=makeRaster('illustrated');pixelBase=makePixelRaster();scale=Math.max(innerWidth/W,innerHeight/H)*1.08;cx=630;cy=465;rebuild();initEvents();syncSize();let preferred='illustrated';try{let saved=localStorage.getItem('cartograph-final-map-style-v3');if(['pixel','realistic','illustrated'].includes(saved))preferred=saved}catch(_){}setMode(preferred,true);updateStatus();}
+function start(){initRegionEvents();collectGeometry();initMasks();realBase=makeRaster('realistic');inkBase=makeRaster('illustrated');pixelBase=makePixelRaster();scale=Math.max(innerWidth/W,innerHeight/H)*1.08;cx=630;cy=465;rebuild();initEvents();syncSize();let preferred='illustrated';try{let saved=localStorage.getItem('cartograph-final-map-style-v3');if(['pixel','realistic','illustrated'].includes(saved))preferred=saved}catch(_){}setMode(preferred,true);updateStatus();}
 start();
+Object.defineProperty(window,'__cartographPreviewState',{
+ get:()=>({geometryBuilds,maskUpdates,surveyed:surveyCount,colorized:colorCount,
+   total:MASK_COUNT,ink:resources.ink,pigment:resources.pigment,
+   permanentInk:costSettings.permanentInk,permanentColor:costSettings.permanentColor,
+   masks:{survey:new Uint8Array(visibilityMask),color:new Uint8Array(colorMask)}})
+});
 })();
 </script>
 </body>

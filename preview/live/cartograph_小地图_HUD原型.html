@@ -48,6 +48,59 @@
  const defaultConfig={enabled:true,shape:'round',northUp:true,cardinals:true,showCoords:true,showRegions:true,showIcons:true,zoom:1.5,size:184,x:.96,y:.06};
  let cfg={...defaultConfig},style='illustrated';
  const editMode=new URLSearchParams(location.search).get('edit')==='1';
+  // The minimap uses the same persistent per-chunk visibility / color state
+  // as the full map. Existing HUD image styles remain immutable source art.
+  const MASK_STORAGE='cartograph-reveal-v5',WORLD_SCALE=3,UNIT=16,MAP_ORIGIN=[630,465];
+  const maskedMiniTextures={};let miniRevision=0;
+  function readMasks(){
+    try{
+      const raw=JSON.parse(localStorage.getItem(MASK_STORAGE));
+      if(!raw||raw.v!==1||raw.width!==240||raw.height!==180)return null;
+      const survey=atob(raw.survey),color=atob(raw.color);
+      const expected=Math.ceil(raw.width*raw.height/8);
+      if(survey.length!==expected||color.length!==expected)return null;
+      return {survey,color,nx:raw.width,ny:raw.height};
+    }catch(_){return null}
+  }
+  function maskedAt(bytes,idx){return (bytes.charCodeAt(idx>>3)>>(idx&7))&1}
+  function updateMiniMaskTextures(){
+    const mask=readMasks();
+    miniRevision++;
+    const version=miniRevision;
+    if(!mask){for(const k of Object.keys(maskedMiniTextures))delete maskedMiniTextures[k];apply();return}
+    for(const [kind,source] of Object.entries(textures)){
+      const img=new Image();
+      img.onload=()=>{
+        if(version!==miniRevision)return;
+        const cv=document.createElement('canvas');
+        cv.width=img.naturalWidth;cv.height=img.naturalHeight;
+        const g=cv.getContext('2d',{willReadFrequently:true});
+        g.drawImage(img,0,0);
+        const frame=g.getImageData(0,0,cv.width,cv.height),pixels=frame.data;
+        const sx=240/cv.width,sy=240/cv.height;
+        for(let y=0;y<cv.height;y++){
+          const worldY=MAP_ORIGIN[1]+(y-cv.height/2)*sy;
+          const my=Math.floor(worldY*WORLD_SCALE/UNIT);
+          for(let x=0;x<cv.width;x++){
+            const worldX=MAP_ORIGIN[0]+(x-cv.width/2)*sx;
+            const mx=Math.floor(worldX*WORLD_SCALE/UNIT);
+            const at=mx>=0&&my>=0&&mx<mask.nx&&my<mask.ny?my*mask.nx+mx:-1;
+            const k=(y*cv.width+x)*4;
+            if(at<0||!maskedAt(mask.survey,at)){
+              pixels[k]=224;pixels[k+1]=217;pixels[k+2]=195;pixels[k+3]=255;
+            }else if(!maskedAt(mask.color,at)){
+              const v=Math.round(pixels[k]*.30+pixels[k+1]*.58+pixels[k+2]*.12);
+              pixels[k]=v;pixels[k+1]=v;pixels[k+2]=v;
+            }
+          }
+        }
+        g.putImageData(frame,0,0);
+        maskedMiniTextures[kind]=cv.toDataURL('image/png');
+        if(style===kind)apply();
+      };
+      img.src=source;
+    }
+  }
  try{const saved=JSON.parse(localStorage.getItem('cartograph-final-minimap-v3'));if(saved&&typeof saved==='object')cfg={...cfg,...saved};const x=localStorage.getItem('cartograph-final-map-style-v3');if(textures[x])style=x}catch(_){ }
  function saveCfg(){try{localStorage.setItem('cartograph-final-minimap-v3',JSON.stringify(cfg))}catch(_){}}
  function notifyParent(){if(editMode&&window.parent!==window)window.parent.postMessage({type:'cartograph:edit-change',config:cfg},'*')}
@@ -63,7 +116,7 @@
    root.classList.toggle('rotated',!cfg.northUp);
    root.classList.toggle('pixel',style==='pixel');
    root.classList.toggle('editing',editMode);
-   map.src=textures[style]||textures.illustrated;
+   const picture=maskedMiniTextures[style]||textures[style]||textures.illustrated;if(map.src!==picture)map.src=picture;
    const zoom=Math.max(.5,Math.min(4,Number(cfg.zoom)||1.5));
    map.style.transform=`rotate(${cfg.northUp?0:26}deg) scale(${zoom})`;
    document.querySelectorAll('.cardinal').forEach(el=>el.style.display=cfg.cardinals?'':'none');
@@ -115,6 +168,6 @@
  // bright square clouds
  c.fillStyle='#e6f1ed';for(let i=0;i<5;i++){let x=rnd()*cw,y=15+rnd()*50;c.fillRect(x,y,26,5);c.fillRect(x+11,y-5,29,6);c.fillRect(x+33,y+3,12,4)}
  }
- gameWorld();apply();window.addEventListener('resize',apply);
+ gameWorld();apply();updateMiniMaskTextures();window.addEventListener('storage',e=>{if(e.key===MASK_STORAGE)updateMiniMaskTextures()});window.addEventListener('resize',apply);
 })();
 </script></body></html>
