@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Cartograph · 世界地图</title>
+<title>Cartograph · 世界地图 V4</title>
 <style>
 :root{color-scheme:dark;--ink:#18241f;--glass:#20332be8;--text:#f5eee0;--muted:#c5d0bf;--gold:#e5c89b;--line:#d9e6cd28;--shadow:0 14px 45px #0b1716a6;font-family:Inter,"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif}
 *{box-sizing:border-box}html,body{height:100%;margin:0;overflow:hidden;background:#cfceb9;color:var(--text)}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible{outline:2px solid #f4cf8c;outline-offset:2px}button:disabled{opacity:.45;cursor:not-allowed}
@@ -22,6 +22,12 @@
 @media(max-width:640px){.styleCards{grid-template-columns:1fr}.styleCard{display:grid;grid-template-columns:105px 1fr;grid-template-rows:auto auto;align-items:center}.miniPreview{grid-row:1/3;height:91px}.styleCard strong{margin:8px 10px 0;font-size:15px}.styleCard small{margin:2px 10px 8px;min-height:unset}.compareControls{left:8px;top:113px;gap:5px;padding:5px}.compareControls .tip{display:none}.compareControls label{font-size:10px}.compareControls select{font-size:11px;padding:5px}}
 @media(max-width:520px){.tool{width:36px}.tool span{font-size:9px}.switcher{top:59px}.switcher button{padding:8px 8px}.styleCards{gap:7px}.styleCard small{font-size:10px}.styleCard strong{font-size:13px}.modalHeading h2{font-size:20px}.overlayWindow{top:111px}.comp-label.right{right:9px;top:110px}.comp-label.left{top:110px}}
 
+/* Compass player arrow follows world coordinates, independent of selection. */
+.playerArrow{position:fixed;z-index:4;pointer-events:none;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);filter:drop-shadow(0 2px 3px #061b13df)}
+.playerArrowTri{width:30px;height:36px;background:#fff8e4;clip-path:polygon(50% 0,95% 100%,50% 74%,5% 100%);transform:rotate(35deg);border:2px solid #213c30}
+.playerArrow small{background:#223c2fe8;border:1px solid #d2c39788;color:#fdf3dd;border-radius:5px;font-size:11px;padding:1px 6px;font-weight:800;white-space:nowrap}
+.playerArrow.hidden{display:none}
+.layerRow:has(input[disabled]){opacity:.58;cursor:default}
 /* Distinct cartographic place names, not point-waypoints */
 #mapArea.regionDrawing{cursor:crosshair!important}
 #mapArea.regionDrawing.dragging{cursor:crosshair!important}
@@ -87,6 +93,17 @@
 .dyeStatus{padding:10px 13px;background:#244333;border-radius:8px;border-left:3px solid #e6ce90;color:#efe0bb;font-size:13px}
 .compassSlot{max-width:340px;margin-top:12px}
 @media(max-width:580px){.materialSlots.triple{grid-template-columns:1fr}.materialSlots{grid-template-columns:1fr}}
+
+.costGroup{padding:15px 17px;margin-top:14px;background:#ffffff08;border:1px solid #dfcda838;border-radius:12px}
+.costGroup h3{font-size:16px;color:#f4dfac;margin:0 0 8px}
+.costGroup p{font-size:12px;color:#c5d0c2;line-height:1.7}
+.costRow{margin:11px 0 14px}.costRow label{display:flex;justify-content:space-between;color:#f6edda;font-size:13px;font-weight:700}
+.costRow output{color:#ebcb8f;font-variant-numeric:tabular-nums;font-size:14px}
+.costRow input{width:100%;accent-color:#e9c886;display:block;margin:12px 0 4px}
+.costToggle{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#253f31b5;margin:8px 0 0;padding:11px 12px;border-radius:8px;font-size:13px;font-weight:700}
+.costToggle input{width:19px;height:19px;accent-color:#e5c98c}
+.costImpact{border-left:3px solid #dac58d;background:#132b20cc;padding:12px 15px;border-radius:9px;font-size:13px;color:#f1e8d3;white-space:pre-line;line-height:1.85;margin-top:16px}
+.itemSlot:disabled{opacity:.54;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -100,7 +117,7 @@
 <symbol id="s-region" viewBox="0 0 24 24"><path d="M3 5 11 2 21 7 18 20 8 22 2 14z"/><circle cx="3" cy="5" r="2"/><circle cx="11" cy="2" r="2"/><circle cx="21" cy="7" r="2"/><circle cx="18" cy="20" r="2"/><circle cx="8" cy="22" r="2"/></symbol>
 <symbol id="s-close" viewBox="0 0 24 24"><path d="M5 5 19 19M19 5 5 19"/></symbol>
 </defs></svg>
-<div id="mapArea" tabindex="0"><canvas id="map"></canvas><div id="markerLayer"></div></div>
+<div id="mapArea" tabindex="0"><canvas id="map"></canvas><div id="markerLayer"></div><div id="playerArrow" class="playerArrow" title="玩家位置" aria-hidden="true"><span class="playerArrowTri"></span><small>玩家</small></div></div>
 <div class="appbar" role="toolbar" aria-label="地图工具">
  <button class="tool" data-act="layers" title="地图图层"><svg><use href="#s-layers"/></svg><span>图层</span></button>
  <button class="tool" data-act="markers" title="管理标点"><svg><use href="#s-pin"/></svg><span>标点</span></button>
@@ -168,10 +185,17 @@ const pixelPal={water:[48,119,199],beach:[226,218,158],plains:[104,169,74],fores
 // a low-resolution filter to the modern/antique map. This deterministic demo
 // uses the same elevation + biome fields as the other styles; the real mod
 // will instead consume validated FULL-chunk top-block/height/biome snapshots.
-function makePixelRaster(){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),image=c.createImageData(GW,GH),data=image.data;for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
+function makePixelRaster(){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),image=c.createImageData(GW,GH),data=image.data;
+ const heights=new Int16Array(GW*GH);
+ for(let i=0;i<heights.length;i++)heights[i]=Math.round(70+155*elevation[i]);
+ for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
   const i=y*GW+x,h=elevation[i],b=biome[i],wx=x*GRID,wz=y*GRID;
+  const center=heights[i],west=heights[y*GW+Math.max(0,x-1)],
+        east=heights[y*GW+Math.min(GW-1,x+1)],
+        north=heights[Math.max(0,y-1)*GW+x],
+        south=heights[Math.min(GH-1,y+1)*GW+x];
   const shore=h<.038,water=h<=0,beach=shore&&!water;
-  const slope=(getElev(wx-4,wz-4)-getElev(wx+4,wz+4));
+
   const patch=hash(Math.floor(x/4),Math.floor(y/4),32);
   let base;
   if(water){base=h<-.18?[39,99,172]:h<-.075?[43,120,194]:[60,151,217]}
@@ -189,8 +213,12 @@ function makePixelRaster(){const out=document.createElement('canvas');out.width=
   if(!water&&!beach&&h>.53&&h<.75&&n>.88)base=[170,175,166];
   if(beach&&patch>.72)base=[232,224,175];
   if(!water&&h<.4&&b===1&&n>.96)base=[159,176,85];
-  let heightBand=water?0:Math.round(clamp(slope*20,-14,14)/4)*4;
-  const shade=variation+heightBand;
+  // Top-down block-relief: per-block elevation determines directional brightness.
+  let heightBand=water?0:clamp((west-east)*7+(north-south)*5,-50,45);
+  const stepEdge=water?0:(center>north?7:center<north?-10:0)
+                      +(center>west?7:center<west?-10:0);
+  const dropShadow=water?0:clamp((center-east)*2+(center-south)*2,-14,14);
+  const shade=variation*.6+heightBand+stepEdge+dropShadow;
   let k=i*4;data[k]=clamp(base[0]+shade,0,255);data[k+1]=clamp(base[1]+shade,0,255);data[k+2]=clamp(base[2]+shade,0,255);data[k+3]=255;
  }c.putImageData(image,0,0);return out;}
 function pixelPath(c,pts,outer,inner,width){c.save();c.scale(.5,.5);c.lineCap='square';c.lineJoin='miter';drawStroke(c,pts,outer,width+4);drawStroke(c,pts,inner,width);c.restore()}
@@ -244,6 +272,7 @@ function setMode(v,quiet=false){if(!['pixel','realistic','illustrated','compare'
 function toast(message){const el=$('#toast');el.textContent=message;el.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),2500)}
  function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
  const panelEl=$('#panel'),backdrop=$('#modalBackdrop'),modalEl=$('#modal');
+ const playerEl=$('#playerArrow'),PLAYER_MAP=[630,465];
  const detailEl=$('#detailFloat'),pinEl=$('#selectedPoint'),minimapStorageKey='cartograph-final-minimap-v3',waypointStorageKey='cartograph-final-waypoints-v3';
  let mapDismissThisPointer=false,markerDismissClick=false;let selectedPoint=null,selectedHit=null,selectedIcon='star',settingTab='map',lastClick=[630,465],lastAction='';
  let miniCfg={enabled:true,shape:'round',northUp:true,cardinals:true,showCoords:true,showRegions:true,showIcons:true,zoom:1.5,size:184,x:.96,y:.06};
@@ -255,8 +284,8 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  function panelClose(){panel='';panelEl.classList.add('hidden');all('.tool').forEach(b=>b.classList.remove('active'))}
  function panelOpen(p){detailClose();$('#contextMenu').classList.add('hidden');if(panel===p){panelClose();return}panel=p;backdrop.classList.add('hidden');all('.tool').forEach(b=>b.classList.toggle('active',b.dataset.act===p));let html='';
    if(p==='atlas'){html=title('地图册 · 资源','ATLAS / RESOURCES','地图页与测绘范围')+
-      `<div class="resource"><small>地图页</small><strong>24 页</strong></div><div class="resource"><small>测绘覆盖</small><strong>已扩展 24 页</strong></div><div class="resource"><small>墨水 · 首次测绘消耗</small><strong id="resInk">84 / 100</strong></div><div class="resource"><small>染料 · 红 / 黄 / 蓝</small><strong id="resDye">${dyeReady()?'已装齐':'未装齐'}</strong></div><div class="resource"><small>发光墨水 · 发光标点</small><strong id="resGlow">17 / 40</strong></div><div class="resource"><small>指南针 · 显示玩家位置</small><strong id="resCompass">已装入</strong></div><div class="panelGroup"><button class="btn primary" data-act="materials">添加材料 / 管理指南针</button></div><p class="panelSubtitle" style="margin-top:13px"></p>`}
-   else if(p==='layers'){html=title('地图图层','MAP LAYERS','图层只决定显示内容。关闭或开启不重新读取世界。')+Object.entries({roads:['地表道路','原版真实已生成地面路径'],rail:['铁路','原版及兼容模组的真实铁轨'],structures:['地表结构','村庄 / 已发现的地表结构'],waypoints:['玩家标点','独立标记层'],regions:['区域名称','海域 / 山脉 / 森林 / 河谷'],regionBoundaries:['区域边界','默认隐藏轮廓线'],contours:['等高线','跟随真实地表高度']}).map(([k,[name,desc]])=>`<label class="layerRow"><div><span>${name}</span><small>${desc}</small></div><input data-layer="${k}" type="checkbox" ${layers[k]?'checked':''}/></label>`).join('')}
+      `<div class="resource"><small>地图页</small><strong>24 页</strong></div><div class="resource"><small>测绘覆盖</small><strong>已扩展 24 页</strong></div><div class="resource"><small>墨水 · 首次测绘消耗</small><strong id="resInk">${resources.inkEnabled&&costSettings.permanentInk?'永久':formatAmount(resources.ink)}</strong></div><div class="resource"><small>红黄蓝染料 · 彩色绘制</small><strong id="resDye">${colorStatus()}</strong></div><div class="resource"><small>发光墨水 · 发光标点</small><strong id="resGlow">${resources.glowEnabled&&costSettings.permanentGlow?'永久':formatAmount(resources.glow)}</strong></div><div class="resource"><small>指南针 · 玩家位置箭头</small><strong id="resCompass">${resources.compass?'已装入':'未装入'}</strong></div><div class="panelGroup"><button class="btn primary" data-act="materials">添加材料 / 管理指南针</button></div><p class="panelSubtitle" style="margin-top:13px"></p>`}
+   else if(p==='layers'){html=title('地图图层','MAP LAYERS','图层只决定显示内容。关闭或开启不重新读取世界。')+Object.entries({roads:['地表道路','原版真实已生成地面路径'],rail:['铁路','原版及兼容模组的真实铁轨'],structures:['地表结构','村庄 / 已发现的地表结构'],waypoints:['玩家标点','独立标记层'],regions:['区域名称','海域 / 山脉 / 森林 / 河谷'],regionBoundaries:['区域边界','默认隐藏轮廓线'],contours:['等高线',mode==='pixel'?'像素模式使用方块高度明暗，无需等高线':'显示地形等高线']}).map(([k,[name,desc]])=>`<label class="layerRow"><div><span>${name}</span><small>${desc}</small></div><input data-layer="${k}" type="checkbox" ${layers[k]?'checked':''} ${mode==='pixel'&&k==='contours'?'disabled':''}/></label>`).join('')}
    else if(p==='regions'){html=regionPanelHtml()}
    else if(p==='markers'){html=title('我的标点','WAYPOINTS','查看和编辑已经记录的地点')+`<button class="btn primary" style="width:100%" data-act="create-marker">＋ 新增标点</button><div class="markList" style="margin-top:14px">${waypoints.map((m,i)=>`<button data-open-marker="${i}"><span style="font-size:22px">${escapeHtml(icons[m.type]||'✦')}</span><div><b>${escapeHtml(m.name)}</b><small>X ${Math.round(m.x*3)} · Z ${Math.round(m.y*3)} · 点击查看详情</small></div></button>`).join('')}</div>`}
    else if(p==='info'){html=title('地图信息','CARTOGRAPH / MAP','地图与当前世界信息')+`<div class="resource"><small>维度</small><strong>主世界</strong></div><div class="resource"><small>地图样式</small><strong>${styleNames[mode]||'手绘'}</strong></div><div class="resource"><small>区域名称</small><strong>${regions.length} 个</strong></div><div class="resource"><small>自定义标点</small><strong>${waypoints.length} 个</strong></div><p class="panelSubtitle" style="margin-top:14px"></p>`}
@@ -264,8 +293,20 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  function modalClose(){modal='';backdrop.classList.add('hidden');modalEl.innerHTML=''}
  function mini(which){return `<div class="miniPreview"><canvas id="mini-${which}"></canvas><span class="chip">${which==='pixel'?'MC 方块':which==='realistic'?'自然地貌':'古式地图'}</span></div>`}
  function paintMiniThumbs(){for(let m of ['pixel','realistic','illustrated']){const el=$('#mini-'+m);if(!el)continue;el.width=360;el.height=180;const g=el.getContext('2d');g.imageSmoothingEnabled=m!=='pixel';g.drawImage(textures[m],m==='pixel'?180:360,m==='pixel'?100:200,m==='pixel'?270:540,m==='pixel'?135:270,0,0,360,180)}}
- function settingsOpen(tab='map'){detailClose();panelClose();settingTab=tab;modal='settings';const header=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / SETTINGS</div><h2>地图设置</h2><p>配置地图画面和小地图</p></div><button data-act="modal-close">×</button></div><div class="configRow" style="margin-top:14px"><button class="btn ${tab==='map'?'active':''}" data-settings-tab="map">大地图 / 风格</button><button class="btn ${tab==='mini'?'active':''}" data-settings-tab="mini">小地图设置</button></div>`;
- if(tab==='map')modalEl.innerHTML=header+`<div class="settingCaption">地图风格</div><div class="styleCards">${[['pixel','像素 · Minecraft','方块地表，清晰辨认建筑与道路'],['realistic','写实 · 现代地形图','自然地貌、坡面阴影、森林与水系'],['illustrated','手绘 · 古式地图','羊皮纸、墨线、山脉与树林符号']].map(([key,t,desc])=>`<button class="styleCard ${mode===key?'chosen':''}" data-style="${key}">${mini(key)}<strong>${t}</strong><small>${desc}</small></button>`).join('')}</div><div class="settingCaption">显示选项</div><label class="settingsToggle"><b>显示区域名称</b><input type="checkbox" data-layer="regions" ${layers.regions?'checked':''}></label><label class="settingsToggle"><b>显示区域边界</b><input type="checkbox" data-layer="regionBoundaries" ${layers.regionBoundaries?'checked':''}></label><label class="settingsToggle"><b>显示等高线</b><input type="checkbox" data-layer="contours" ${layers.contours?'checked':''}></label><div class="modalFooter"><small></small><button class="btn primary" data-act="modal-close">完成</button></div>`;
+ function settingsOpen(tab='map'){detailClose();panelClose();settingTab=tab;modal='settings';const header=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / SETTINGS</div><h2>地图设置</h2><p>配置地图画面和小地图</p></div><button data-act="modal-close">×</button></div><div class="configRow" style="margin-top:14px"><button class="btn ${tab==='map'?'active':''}" data-settings-tab="map">大地图 / 风格</button><button class="btn ${tab==='mini'?'active':''}" data-settings-tab="mini">小地图设置</button><button class="btn ${tab==='cost'?'active':''}" data-settings-tab="cost">耗材与倍率</button></div>`;
+ if(tab==='map')modalEl.innerHTML=header+`<div class="settingCaption">地图风格</div><div class="styleCards">${[['pixel','像素 · Minecraft','方块高度明暗、阶梯边缘与坡面阴影'],['realistic','写实 · 现代地形图','自然地貌、坡面阴影、森林与水系'],['illustrated','手绘 · 古式地图','羊皮纸、墨线、山脉与树林符号']].map(([key,t,desc])=>`<button class="styleCard ${mode===key?'chosen':''}" data-style="${key}">${mini(key)}<strong>${t}</strong><small>${desc}</small></button>`).join('')}</div><div class="settingCaption">显示选项</div><label class="settingsToggle"><b>显示区域名称</b><input type="checkbox" data-layer="regions" ${layers.regions?'checked':''}></label><label class="settingsToggle"><b>显示区域边界</b><input type="checkbox" data-layer="regionBoundaries" ${layers.regionBoundaries?'checked':''}></label><label class="settingsToggle" ${mode==='pixel'?'style="opacity:.55"':''}><b>${mode==='pixel'?'方块高差阴影（自动启用）':'显示等高线'}</b><input type="checkbox" data-layer="contours" ${mode==='pixel'?'checked disabled':layers.contours?'checked':''}></label><div class="modalFooter"><small></small><button class="btn primary" data-act="modal-close">完成</button></div>`;
+ else if(tab==='cost')modalEl.innerHTML=header+
+ `<div class="costGroup"><h3>测绘墨水</h3><p>完整区块首次测绘扣费；已测绘区域更新免费。</p>
+ ${costRow('inkInput','投入倍率')}${costRow('inkCost','消耗倍率')}
+ ${costToggle('permanentInk','永久测绘墨水（首次投入墨囊后生效）')}</div>
+ <div class="costGroup"><h3>彩色颜料</h3><p>红黄蓝各投入一份开启彩色；非永久模式可重复用三色补充颜料。</p>
+ ${costRow('pigmentInput','投入倍率')}${costRow('pigmentCost','消耗倍率')}
+ ${costToggle('permanentColor','永久彩色（首次三色齐全后生效）')}</div>
+ <div class="costGroup"><h3>发光墨水</h3><p>新建发光标点或首次启用标点发光时扣费。</p>
+ ${costRow('glowInput','投入倍率')}${costRow('glowCost','消耗倍率')}
+ ${costToggle('permanentGlow','永久发光墨水（首次投入后生效）')}</div>
+ <div class="costImpact" id="costImpact">${costSummary()}</div>
+ <div class="modalFooter"><button class="btn primary" data-act="modal-close">完成</button></div>`;
  else modalEl.innerHTML=header+`<div class="settingCaption">显示</div><div class="miniOptions"><label><input type="checkbox" data-mini-check="enabled" ${miniCfg.enabled?'checked':''}> 启用小地图</label><label><input type="checkbox" data-mini-check="cardinals" ${miniCfg.cardinals?'checked':''}> 显示东南西北</label><label><input type="checkbox" data-mini-check="northUp" ${miniCfg.northUp?'checked':''}> 锁定北方</label><label><input type="checkbox" data-mini-check="showCoords" ${miniCfg.showCoords?'checked':''}> 显示坐标</label><label><input type="checkbox" data-mini-check="showRegions" ${miniCfg.showRegions?'checked':''}> 显示区域名称</label><label><input type="checkbox" data-mini-check="showIcons" ${miniCfg.showIcons?'checked':''}> 显示地图图标</label></div><div class="settingCaption">形状</div><div class="configRow"><button class="btn ${miniCfg.shape==='square'?'active':''}" data-mini-shape="square">▢ 方形</button><button class="btn ${miniCfg.shape==='round'?'active':''}" data-mini-shape="round">◯ 圆形</button></div><div class="settingCaption">缩放等级 · <span id="miniZoomText">${Number(miniCfg.zoom||1.5).toFixed(1)}×</span></div><input id="miniZoomRange" type="range" min="0.5" max="4" step="0.1" value="${miniCfg.zoom||1.5}" style="width:100%;accent-color:#dec58b"><div class="settingCaption">位置与大小</div><button class="btn primary" data-act="mini-position" style="width:100%;padding:14px">进入游戏画面调整位置与大小</button><div class="modalFooter"><button class="btn" data-act="mini-reset">恢复默认设置</button><button class="btn primary" data-act="modal-close">完成</button></div>`;
  backdrop.classList.remove('hidden');if(tab==='map')paintMiniThumbs()}
 
@@ -294,27 +335,70 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
    miniCfg={...miniCfg,size:clamp(Number(n.size)||184,100,360),x:clamp(Number(n.x)||0,0,1),y:clamp(Number(n.y)||0,0,1)};
  });
 
- let resources={ink:84,glow:17,compass:true,dyes:{red:true,yellow:true,blue:true}};
+ const MAX_INK=1_000_000_000,MAX_GLOW_INK=1_000_000_000;
+  let resources={ink:84,glow:17,pigment:512,inkEnabled:true,glowEnabled:true,colorEnabled:true,compass:true,dyes:{red:true,yellow:true,blue:true}};
+  const formatAmount=n=>Number(n).toLocaleString('zh-CN',{maximumFractionDigits:1});
+  const MATERIAL_STORE_KEY='cartograph-hifi-materials-v4';
+  try{
+    const saved=JSON.parse(localStorage.getItem(MATERIAL_STORE_KEY));
+    if(saved&&typeof saved==='object'){
+      resources.ink=Number.isSafeInteger(saved.ink)?clamp(saved.ink,0,MAX_INK):resources.ink;
+      resources.glow=Number.isSafeInteger(saved.glow)?clamp(saved.glow,0,MAX_GLOW_INK):resources.glow;
+      resources.pigment=Number.isFinite(saved.pigment)?clamp(saved.pigment,0,MAX_INK):resources.pigment;
+       resources.inkEnabled=typeof saved.inkEnabled==='boolean'?saved.inkEnabled:resources.inkEnabled;
+       resources.glowEnabled=typeof saved.glowEnabled==='boolean'?saved.glowEnabled:resources.glowEnabled;
+       resources.colorEnabled=typeof saved.colorEnabled==='boolean'?saved.colorEnabled:resources.colorEnabled;
+       resources.compass=typeof saved.compass==='boolean'?saved.compass:resources.compass;
+      for(const dye of ['red','yellow','blue'])
+        if(saved.dyes&&typeof saved.dyes[dye]==='boolean')resources.dyes[dye]=saved.dyes[dye];
+    }
+  }catch(_){}
+  const saveMaterials=()=>{try{localStorage.setItem(MATERIAL_STORE_KEY,JSON.stringify(resources))}catch(_){}};
+ const BASE_REFILL={ink:128,pigment:128,glow:32},COST_KEY='cartograph-costs-v4';
+ const costSettings={inkInput:4,inkCost:.1,pigmentInput:4,pigmentCost:.1,glowInput:4,glowCost:.1,
+   permanentColor:true,permanentInk:false,permanentGlow:false};
+ const rate=v=>Number.isFinite(+v)?Math.max(.1,Math.min(10,Math.round(+v*10)/10)):.1;
+ try{const prev=JSON.parse(localStorage.getItem(COST_KEY));if(prev&&typeof prev==='object'){
+   for(const k of ['inkInput','inkCost','pigmentInput','pigmentCost','glowInput','glowCost'])
+     if(Object.prototype.hasOwnProperty.call(prev,k))costSettings[k]=rate(prev[k]);
+   for(const k of ['permanentColor','permanentInk','permanentGlow'])
+     if(typeof prev[k]==='boolean')costSettings[k]=prev[k];
+ }}catch(_){}
+ const saveCosts=()=>{try{localStorage.setItem(COST_KEY,JSON.stringify(costSettings))}catch(_){}};
+ const refill=t=>Math.round(BASE_REFILL[t]*rate(costSettings[t+'Input'])*10)/10;
+ const debit=t=>rate(costSettings[t+'Cost']);
+ const costRow=(key,title)=>`<div class="costRow"><label for="rate-${key}">${title}<output data-rate-out="${key}">${rate(costSettings[key]).toFixed(1)}×</output></label><input id="rate-${key}" data-rate="${key}" type="range" min="0.1" max="10" step="0.1" value="${costSettings[key]}"></div>`;
+ const costToggle=(key,title)=>`<label class="costToggle"><span>${title}</span><input type="checkbox" data-permanent="${key}" ${costSettings[key]?'checked':''}></label>`;
+ function costSummary(){
+  return `墨囊 +${formatAmount(refill('ink'))}；首次测绘 ${debit('ink').toFixed(1)} / 区块；${costSettings.permanentInk?'首次投入后永久使用':'每份约 '+formatAmount(Math.floor(refill('ink')/debit('ink')))+' 区块'}
+三色染料 +${formatAmount(refill('pigment'))}；首次上色 ${debit('pigment').toFixed(1)} / 区块；${costSettings.permanentColor?'三色齐全后永久彩色':'每组约 '+formatAmount(Math.floor(refill('pigment')/debit('pigment')))+' 区块'}
+发光墨囊 +${formatAmount(refill('glow'))}；首次发光 ${debit('glow').toFixed(1)} / 标点；${costSettings.permanentGlow?'首次投入后永久使用':'每份约 '+formatAmount(Math.floor(refill('glow')/debit('glow')))+' 标点'}
+全部倍率最低 0.1，不能为 0；永久开关不取消首次材料投入。`;
+ }
  const dyeNames={red:'红色染料',yellow:'黄色染料',blue:'蓝色染料'};
  function dyeReady(){return Object.values(resources.dyes).every(Boolean)}
+ function colorStatus(){
+   return !resources.colorEnabled?'待投入三原色':costSettings.permanentColor?'永久彩色':formatAmount(resources.pigment)+' 颜料';
+ }
  function materialsOpen(){
-   detailClose();panelClose();modal='materials';
-   const slot=(name,amount,desc)=>`<div class="itemSlot"><span class="itemSlotIcon">${name}</span><div><strong>${amount}</strong><small>${desc}</small></div></div>`;
-   modalEl.innerHTML=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / INVENTORY</div><h2>地图册 · 材料槽</h2></div><button data-act="modal-close">×</button></div>
-     <div class="settingCaption">地图册</div>
-     <div class="resource"><small>测绘墨水</small><strong>${resources.ink} / 100</strong></div><div class="resource"><small>发光墨水</small><strong>${resources.glow} / 40</strong></div>
-     <div class="settingCaption">消耗品</div>
-     <div class="materialSlots">
-       <button class="itemSlot" data-material="ink"><span class="itemSlotIcon">✒</span><div><strong>墨囊</strong><small>投入 · +8 墨水</small></div></button>
-       <button class="itemSlot" data-material="glow"><span class="itemSlotIcon">✧</span><div><strong>发光墨囊</strong><small>投入 · +5 发光墨水</small></div></button>
-     </div>
-     <div class="settingCaption">彩色绘制 · 三个独立的染料槽</div>
-     <div class="materialSlots triple">${Object.entries(dyeNames).map(([key,label])=>`<button class="itemSlot ${resources.dyes[key]?'installed':''}" data-material="dye-${key}"><span class="itemSlotIcon dye-${key}">⬟</span><div><strong>${label}</strong><small>${resources.dyes[key]?'已装入 · 点击取出':'未装入 · 点击装入'}</small></div></button>`).join('')}</div>
-     <div class="dyeStatus">${dyeReady()?'彩色绘制已启用':'尚缺 '+Object.entries(dyeNames).filter(([key])=>!resources.dyes[key]).map(([,name])=>name).join('、')}</div>
-     <div class="settingCaption">非消耗品</div>
-     <button class="itemSlot compassSlot" data-material="compass"><span class="itemSlotIcon">⌖</span><div><strong>指南针</strong><small>${resources.compass?'已装入 · 点击取出':'未装入 · 点击装入'}</small></div></button>
-     <div class="modalFooter"><button class="btn primary" data-act="modal-close">完成</button></div>`;
-   backdrop.classList.remove('hidden');
+  detailClose();panelClose();modal='materials';
+  modalEl.innerHTML=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / INVENTORY</div><h2>地图册 · 材料槽</h2></div><button data-act="modal-close">×</button></div>
+   <div class="settingCaption">地图册</div>
+   <div class="resource"><small>测绘墨水</small><strong>${resources.inkEnabled&&costSettings.permanentInk?'永久':formatAmount(resources.ink)}</strong></div>
+   <div class="resource"><small>发光墨水</small><strong>${resources.glowEnabled&&costSettings.permanentGlow?'永久':formatAmount(resources.glow)}</strong></div>
+   <div class="resource"><small>彩色颜料</small><strong>${colorStatus()}</strong></div>
+   <div class="settingCaption">消耗品</div>
+   <div class="materialSlots">
+    <button class="itemSlot" data-material="ink" ${resources.inkEnabled&&costSettings.permanentInk?'disabled':''}><span class="itemSlotIcon">✒</span><div><strong>墨囊</strong><small>${resources.inkEnabled&&costSettings.permanentInk?'已永久启用':'消耗 1 个 · 补充 '+formatAmount(refill('ink'))+' 墨水'}</small></div></button>
+    <button class="itemSlot" data-material="glow" ${resources.glowEnabled&&costSettings.permanentGlow?'disabled':''}><span class="itemSlotIcon">✧</span><div><strong>发光墨囊</strong><small>${resources.glowEnabled&&costSettings.permanentGlow?'已永久启用':'消耗 1 个 · 补充 '+formatAmount(refill('glow'))+' 发光墨水'}</small></div></button>
+   </div>
+   <div class="settingCaption">彩色染料 · 红黄蓝各需一份</div>
+   <div class="materialSlots triple">${Object.entries(dyeNames).map(([key,label])=>`<button class="itemSlot ${resources.dyes[key]?'installed':''}" data-material="dye-${key}" ${resources.colorEnabled&&costSettings.permanentColor||resources.dyes[key]?'disabled':''}><span class="itemSlotIcon dye-${key}">⬟</span><div><strong>${label}</strong><small>${resources.colorEnabled&&costSettings.permanentColor?'永久彩色已解锁':resources.dyes[key]?'本组已投入':'投入 1 份'}</small></div></button>`).join('')}</div>
+   <div class="dyeStatus">${resources.colorEnabled&&costSettings.permanentColor?'彩色已永久解锁，后续不消耗':resources.colorEnabled?'彩色已启用 · 颜料 '+formatAmount(resources.pigment)+' · 每组三色增加 '+formatAmount(refill('pigment')):'请先投入红、黄、蓝三色'}</div>
+   <div class="settingCaption">非消耗品</div>
+   <button class="itemSlot compassSlot" data-material="compass"><span class="itemSlotIcon">⌖</span><div><strong>指南针</strong><small>${resources.compass?'已装入 · 点击取出':'未装入 · 点击装入'}</small></div></button>
+   <div class="modalFooter"><button class="btn primary" data-act="modal-close">完成</button></div>`;
+  backdrop.classList.remove('hidden');
  }
 
  function waypointModal(x,y,editIndex=null){detailClose();panelClose();selectedIcon=editIndex==null?'star':waypoints[editIndex].type;const edit=editIndex!==null,m=edit?waypoints[editIndex]:null;modal='marker';const startX=Math.round((m?m.x:x)*3),startZ=Math.round((m?m.y:y)*3);
@@ -335,7 +419,11 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  const [px,py]=screenPos(...point);detailEl.style.left=clamp(px+17,12,w-332)+'px';detailEl.style.top=clamp(py+16,85,h-235)+'px';$('#detailType').textContent=meta.toUpperCase();$('#detailName').textContent=name;$('#detailDescription').textContent=description;$('#detailMeta').textContent=`主世界 · X ${Math.round(point[0]*3)} · Z ${Math.round(point[1]*3)}${foundRegion?' · '+foundRegion.name:''}`;
  const actions=$('#detailActions');actions.innerHTML='<button data-detail="center">定位这里</button>'+(opts.kind==='marker'?'<button data-detail="edit">编辑标点</button><button class="delete" data-detail="delete">删除</button>':opts.kind==='region'?'<button data-detail="edit">编辑区域</button><button data-detail="redraw">重圈边界</button><button class="delete" data-detail="delete">删除</button>':'');detailEl.classList.remove('hidden');updateStatus('已选中 '+name)}
  function updateStatus(action){if(action)lastAction=action;$('#coords').textContent=selectedPoint?`X ${Math.round(selectedPoint[0]*3)} · Z ${Math.round(selectedPoint[1]*3)}`:`X ${Math.round(cx*3)} · Z ${Math.round(cy*3)}`;$('#zoomValue').textContent=scale.toFixed(2)+'×';$('#statusName').textContent=lastAction||'点击地图查看位置';}
- function updateSelection(){if(!selectedPoint){pinEl.classList.add('hidden');return}const [x,y]=screenPos(...selectedPoint);pinEl.classList.toggle('hidden',x<0||x>w||y<0||y>h);pinEl.style.left=x+'px';pinEl.style.top=y+'px'}
+ function updateSelection(){
+  const [px,py]=screenPos(...PLAYER_MAP);
+  playerEl.classList.toggle('hidden',!resources.compass||px<0||px>w||py<0||py>h);
+  playerEl.style.left=px+'px';playerEl.style.top=py+'px';
+  if(!selectedPoint){pinEl.classList.add('hidden');return}const [x,y]=screenPos(...selectedPoint);pinEl.classList.toggle('hidden',x<0||x>w||y<0||y>h);pinEl.style.left=x+'px';pinEl.style.top=y+'px'}
  function detailAction(act){if(!selectedHit)return;const {point,record,kind}=selectedHit;
  if(act==='center'){[cx,cy]=point;detailClose();requestRender();toast('已定位到选中位置')}
  else if(act==='edit'){if(kind==='marker'){let i=waypoints.findIndex(p=>p.id===record.id);if(i>=0)waypointModal(record.x,record.y,i)} else if(kind==='region')openRegionEditor(record.id)}
@@ -350,11 +438,64 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
    const marker=e.target.closest('[data-open-marker]');if(marker){const p=waypoints[+marker.dataset.openMarker];if(p){panelClose();showSelected([p.x,p.y],p,{kind:'marker'})}}
    const act=e.target.closest('[data-detail]');if(act)detailAction(act.dataset.detail);
    const shape=e.target.closest('[data-mini-shape]');if(shape){miniCfg.shape=shape.dataset.miniShape;saveMini();settingsOpen('mini')}
-   const mat=e.target.closest('[data-material]');if(mat){const kind=mat.dataset.material;if(kind==='ink')resources.ink=Math.min(100,resources.ink+8);if(kind==='glow')resources.glow=Math.min(40,resources.glow+5);if(kind.startsWith('dye-')){const dye=kind.slice(4);if(dye in resources.dyes)resources.dyes[dye]=!resources.dyes[dye]}if(kind==='compass')resources.compass=!resources.compass;materialsOpen()}
+   const mat=e.target.closest('[data-material]');if(mat){
+    const kind=mat.dataset.material;
+    if(kind==='ink'){
+      if(resources.inkEnabled&&costSettings.permanentInk){toast('永久测绘墨水已启用');return}
+      const amount=refill('ink');if(resources.ink>MAX_INK-amount){toast('测绘墨水已达到上限');return}
+      resources.ink=Math.round((resources.ink+amount)*10)/10;resources.inkEnabled=true;
+    }else if(kind==='glow'){
+      if(resources.glowEnabled&&costSettings.permanentGlow){toast('永久发光墨水已启用');return}
+      const amount=refill('glow');if(resources.glow>MAX_GLOW_INK-amount){toast('发光墨水已达到上限');return}
+      resources.glow=Math.round((resources.glow+amount)*10)/10;resources.glowEnabled=true;
+    }else if(kind.startsWith('dye-')){
+      const dye=kind.slice(4);
+      if(!(dye in resources.dyes))return;
+      if(resources.colorEnabled&&costSettings.permanentColor){toast('彩色已经永久解锁');return}
+      if(resources.dyes[dye]){toast('本组三色已投入该颜色');return}
+      resources.dyes[dye]=true;
+      if(dyeReady()){
+        const amount=refill('pigment');
+        if(resources.pigment>MAX_INK-amount){resources.dyes[dye]=false;toast('颜料已达到上限');return}
+        resources.pigment=Math.round((resources.pigment+amount)*10)/10;
+        resources.colorEnabled=true;
+        if(!costSettings.permanentColor)resources.dyes={red:false,yellow:false,blue:false};
+        toast(costSettings.permanentColor?'已永久解锁彩色':'三色已投入，颜料 +'+formatAmount(amount));
+      }
+    }else if(kind==='compass')resources.compass=!resources.compass;
+    saveMaterials();requestRender();materialsOpen();
+   }
  });
  document.addEventListener('click',e=>{const b=e.target.closest('[data-mini-adjust]');if(b)stopGameAdjust(b.dataset.miniAdjust==='save')});
- document.addEventListener('change',e=>{let cb=e.target.closest('[data-layer]');if(cb){layers[cb.dataset.layer]=cb.checked;if(['regions','regionBoundaries','waypoints','structures'].includes(cb.dataset.layer))requestRender();else rebuild();toast('图层已更新')}let mc=e.target.closest('[data-mini-check]');if(mc){miniCfg[mc.dataset.miniCheck]=mc.checked;saveMini()}});
- document.addEventListener('input',e=>{if(e.target.id==='miniZoomRange'){miniCfg.zoom=+e.target.value;$('#miniZoomText').textContent=miniCfg.zoom.toFixed(1)+'×';saveMini()}});
+ document.addEventListener('change',e=>{
+   const permanentSwitch=e.target.closest('[data-permanent]');
+   if(permanentSwitch){
+     const key=permanentSwitch.dataset.permanent;
+     if(!['permanentColor','permanentInk','permanentGlow'].includes(key))return;
+     costSettings[key]=permanentSwitch.checked;
+     if(key==='permanentColor'&&!costSettings.permanentColor&&resources.colorEnabled)
+       resources.dyes={red:false,yellow:false,blue:false};
+     saveCosts();saveMaterials();
+     const impact=document.getElementById('costImpact');
+     if(impact)impact.textContent=costSummary();
+     toast(permanentSwitch.checked?'永久设置已启用':'永久设置已关闭');
+     return;
+   }
+   let cb=e.target.closest('[data-layer]');if(cb){layers[cb.dataset.layer]=cb.checked;if(['regions','regionBoundaries','waypoints','structures'].includes(cb.dataset.layer))requestRender();else rebuild();toast('图层已更新')}let mc=e.target.closest('[data-mini-check]');if(mc){miniCfg[mc.dataset.miniCheck]=mc.checked;saveMini()}});
+ document.addEventListener('input',e=>{
+   const rateInput=e.target.closest('[data-rate]');
+   if(rateInput){
+     const key=rateInput.dataset.rate;
+     if(!['inkInput','inkCost','pigmentInput','pigmentCost','glowInput','glowCost'].includes(key))return;
+     costSettings[key]=rate(rateInput.value);
+     rateInput.value=costSettings[key];
+     const output=modalEl.querySelector('[data-rate-out="'+key+'"]');
+     if(output)output.textContent=costSettings[key].toFixed(1)+'×';
+     const impact=document.getElementById('costImpact');
+     if(impact)impact.textContent=costSummary();
+     saveCosts();return;
+   }
+   if(e.target.id==='miniZoomRange'){miniCfg.zoom=+e.target.value;$('#miniZoomText').textContent=miniCfg.zoom.toFixed(1)+'×';saveMini()}});
  $('#centerBtn').addEventListener('click',()=>{detailClose();$('#contextMenu').classList.add('hidden');cx=630;cy=465;scale=Math.max(w/W,h/H)*1.08;requestRender();toast('已回到玩家位置')});
  $('#detailClose').addEventListener('click',detailClose);
  backdrop.addEventListener('click',e=>{if(e.target===backdrop)modalClose()});
