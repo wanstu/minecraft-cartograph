@@ -40,6 +40,8 @@ jobs:
         run: bash scripts/verify-common.sh
       - name: Verify full-screen UI layout regression guards
         run: python3 scripts/verify-ui-layout.py
+      - name: Verify asynchronous world surface boundaries
+        run: python3 scripts/verify-world-index.py
 
   build:
     needs: [discover, common-tests]

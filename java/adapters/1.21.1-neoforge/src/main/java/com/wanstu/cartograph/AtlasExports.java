@@ -104,14 +104,21 @@ public final class AtlasExports {
                 AtlasActions.reply(player, false, "拓印取消：该地图页已失效");
                 continue;
             }
-            int index = job.next++;
+            int index = job.next;
             int chunkX = job.pageX * 8 + index % 8;
             int chunkZ = job.pageZ * 8 + index / 8;
             SurveyLedger.ChunkKey key = new SurveyLedger.ChunkKey(job.dimension, chunkX, chunkZ);
-            if (entry.paid(key)) {
-                var sample = SurfaceSampler.surface(level, chunkX, chunkZ);
-                if (sample.isPresent()) {
-                    SurfaceSampler.SurfaceTile tile = sample.get();
+            boolean previouslySurveyed = entry.paid(key);
+            WorldSurfaceIndex.Lookup lookup = previouslySurveyed
+                    ? WorldSurfaceIndex.of(level).inspect(level, chunkX, chunkZ)
+                    : WorldSurfaceIndex.Lookup.missing();
+            if (lookup.state() == WorldSurfaceIndex.State.PENDING) {
+                ORDER.addLast(uuid);
+                continue;
+            }
+            job.next++;
+            if (previouslySurveyed && lookup.state() == WorldSurfaceIndex.State.READY) {
+                    SurfaceSampler.SurfaceTile tile = lookup.snapshot().tile();
                     data.sample(entry, key, tile.colors(), tile.features(), atlas); // existing paid -> free
                     boolean colorized = entry.isColored(key);
                     for (int z = 0; z < 16; z++) {
@@ -132,7 +139,6 @@ public final class AtlasExports {
                             job.painted++;
                         }
                     }
-                }
             }
             if (job.next >= 64) {
                 PENDING.remove(uuid);

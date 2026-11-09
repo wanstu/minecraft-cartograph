@@ -143,14 +143,31 @@ public final class AtlasMapServer {
                 continue;
             }
 
-            int index = task.next++;
+            int index = task.next;
             int chunkX = task.pageX * AtlasPage.CHUNKS_PER_SIDE + index % 8;
             int chunkZ = task.pageZ * AtlasPage.CHUNKS_PER_SIDE + index / 8;
+            WorldSurfaceIndex indexer = WorldSurfaceIndex.of(player.serverLevel());
+            WorldSurfaceIndex.Lookup lookup =
+                    indexer.inspect(player.serverLevel(), chunkX, chunkZ);
+            if (lookup.state() == WorldSurfaceIndex.State.PENDING) {
+                // Never count or debit a chunk before the background disk
+                // scan completes. Polling here is constant-time, no NBT I/O.
+                ORDER.addLast(viewer);
+                continue;
+            }
+            // Early prefetch avoids a disk-read stall for each sequential
+            // chunk, while at most one extra loaded snapshot is sampled.
+            if (index + 1 < 64) {
+                int ahead = index + 1;
+                indexer.inspect(player.serverLevel(),
+                        task.pageX * AtlasPage.CHUNKS_PER_SIDE + ahead % 8,
+                        task.pageZ * AtlasPage.CHUNKS_PER_SIDE + ahead / 8);
+            }
+            task.next++;
             var key = new SurveyLedger.ChunkKey(task.dimension, chunkX, chunkZ);
-            var sampled = SurfaceSampler.surface(player.serverLevel(), chunkX, chunkZ);
-            if (sampled.isPresent()) {
+            if (lookup.state() == WorldSurfaceIndex.State.READY) {
                 task.generated++;
-                SurfaceSampler.SurfaceTile tile = sampled.get();
+                SurfaceSampler.SurfaceTile tile = lookup.snapshot().tile();
                 data.sample(entry, key, tile.colors(), tile.features(), atlas);
                 byte[] savedColors = entry.getPixels(key);
                 if (savedColors != null && entry.paid(key)) {

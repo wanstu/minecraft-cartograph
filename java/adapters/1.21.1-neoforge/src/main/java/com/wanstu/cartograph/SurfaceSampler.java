@@ -15,7 +15,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.SimpleBitStorage;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -24,11 +23,8 @@ import net.minecraft.world.level.storage.LevelResource;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.nio.file.Path;
-import java.nio.file.Files;
-import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -40,19 +36,15 @@ import java.util.Optional;
  */
 public final class SurfaceSampler {
     private SurfaceSampler() {}
-    // Saved regions are immutable between writes. Cache only FULL saved samples
-    // and invalidate on region mtime/size changes. Live loaded chunks bypass
-    // this cache to ensure every changed block can refresh without charging.
-    private static final int MAX_SAVED_CACHE = 2048;
-    private record CacheKey(Path region, int x, int z) {}
-    private record CacheValue(FileTime stamp, long size, SurfaceTile tile) {}
-    private static final LinkedHashMap<CacheKey, CacheValue> SAVED =
-            new LinkedHashMap<>(512, .75f, true);
-
-    private static void remember(CacheKey key, FileTime stamp, long size, SurfaceTile tile) {
-        SAVED.put(key, new CacheValue(stamp, size, tile));
-        while (SAVED.size() > MAX_SAVED_CACHE) {
-            SAVED.remove(SAVED.keySet().iterator().next());
+    /**
+     * Snapshot of saved-read parameters captured on the server thread.
+     * Disk workers must not access a live ServerLevel/LevelChunk.
+     */
+    public record SavedRequest(Path regionDir, int chunkX, int chunkZ,
+                               int minBuildHeight, int worldHeight) {
+        public SavedRequest {
+            if (regionDir == null || worldHeight < 16 || worldHeight > 4096)
+                throw new IllegalArgumentException("Invalid saved chunk request");
         }
     }
 
@@ -65,7 +57,7 @@ public final class SurfaceSampler {
         }
     }
 
-    private static Path regionDir(ServerLevel level) {
+    static Path regionDir(ServerLevel level) {
         Path world = level.getServer().getWorldPath(LevelResource.ROOT);
         ResourceLocation id = level.dimension().location();
         if (level.dimension() == net.minecraft.world.level.Level.OVERWORLD) return world.resolve("region");
@@ -74,41 +66,42 @@ public final class SurfaceSampler {
         return world.resolve("dimensions").resolve(id.getNamespace()).resolve(id.getPath()).resolve("region");
     }
 
-    public static Optional<SurfaceTile> surface(ServerLevel level, int chunkX, int chunkZ) {
+    public static SavedRequest request(ServerLevel level, int chunkX, int chunkZ) {
+        return new SavedRequest(regionDir(level), chunkX, chunkZ,
+                level.getMinBuildHeight(), level.getHeight());
+    }
+
+    /**
+     * Main server thread ONLY. Querying getChunkNow does not load/generate
+     * chunks; both the chunk and its world-backed map color are sampled here.
+     */
+    public static Optional<SurfaceTile> loaded(ServerLevel level, int chunkX, int chunkZ) {
+        LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+        return chunk == null ? Optional.empty() :
+                Optional.of(sampleLoaded(level, chunk, chunkX, chunkZ));
+    }
+
+    /**
+     * Disk worker ONLY: region I/O, NBT parse, block palettes and pixel
+     * conversion use captured immutable parameters; never touch ServerLevel.
+     */
+    public static Optional<SurfaceTile> saved(SavedRequest request) {
         try {
-            LevelChunk loaded = level.getChunkSource().getChunkNow(chunkX, chunkZ);
-            // getChunkNow returns LevelChunk (fully realized), never protochunk;
-            // checking persistedStatus incorrectly rejects newly generated
-            // FULL chunks before their first disk save.
-            if (loaded != null) {
-                return Optional.of(sampleLoaded(level, loaded, chunkX, chunkZ));
-            }
-            Path regions = regionDir(level);
-            Path region = regions.resolve("r." + Math.floorDiv(chunkX, 32) +
-                    "." + Math.floorDiv(chunkZ, 32) + ".mca");
-            if (!Files.isRegularFile(region)) return Optional.empty();
-            FileTime stamp = Files.getLastModifiedTime(region);
-            long size = Files.size(region);
-            CacheKey cacheKey = new CacheKey(region, chunkX, chunkZ);
-            CacheValue cached = SAVED.get(cacheKey);
-            if (cached != null && cached.size() == size && cached.stamp().equals(stamp))
-                return Optional.of(cached.tile());
-            Optional<byte[]> raw = McaChunkReader.readNbt(regions, chunkX, chunkZ);
+            Optional<byte[]> raw = McaChunkReader.readNbt(
+                    request.regionDir(), request.chunkX(), request.chunkZ());
             if (raw.isEmpty()) return Optional.empty();
             try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(raw.get()))) {
                 CompoundTag nbt = NbtIo.read(in, NbtAccounter.create(8 * 1024 * 1024));
-                if (!nbt.getString("Status").equals("minecraft:full")
-                        && !nbt.getString("Status").equals("full")) return Optional.empty();
-                if (nbt.getInt("xPos") != chunkX || nbt.getInt("zPos") != chunkZ) return Optional.empty();
-                SurfaceTile tile = sampleSaved(level, nbt);
-                if (tile != null) {
-                    remember(cacheKey, stamp, size, tile);
-                    return Optional.of(tile);
-                }
-                return Optional.empty();
+                String status = nbt.getString("Status");
+                if (!status.equals("minecraft:full") && !status.equals("full"))
+                    return Optional.empty();
+                if (nbt.getInt("xPos") != request.chunkX()
+                        || nbt.getInt("zPos") != request.chunkZ()) return Optional.empty();
+                return Optional.ofNullable(sampleSaved(
+                        request.minBuildHeight(), request.worldHeight(), nbt));
             }
-        } catch (Exception badOrUnsupportedSave) {
-            // Unsupported compression/chunk data remains blank, never predicted.
+        } catch (Exception malformedOrUnsupportedChunk) {
+            // Unsupported/partial save is NOT generated terrain; never predict.
             return Optional.empty();
         }
     }
@@ -196,10 +189,10 @@ public final class SurfaceSampler {
     }
 
     /** Decode 1.21.1 saved FULL chunk NBT without loading it into Minecraft. */
-    private static SurfaceTile sampleSaved(ServerLevel level, CompoundTag nbt) {
+    private static SurfaceTile sampleSaved(int minBuildHeight, int worldHeight, CompoundTag nbt) {
         CompoundTag maps = nbt.getCompound("Heightmaps");
         long[] height = maps.getLongArray("WORLD_SURFACE");
-        int bits = 32 - Integer.numberOfLeadingZeros(level.getHeight());
+        int bits = 32 - Integer.numberOfLeadingZeros(worldHeight);
         int expectedLongs = (256 + (64 / bits) - 1) / (64 / bits);
         if (height.length != expectedLongs) return null;
         SimpleBitStorage surface = new SimpleBitStorage(bits, 256, height);
@@ -237,7 +230,7 @@ public final class SurfaceSampler {
 
         byte[] result = new byte[256], features = new byte[256];
         String[] topNames = new String[256];
-        int minBuild = level.getMinBuildHeight();
+        int minBuild = minBuildHeight;
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         int cx = nbt.getInt("xPos"), cz = nbt.getInt("zPos");
         for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
