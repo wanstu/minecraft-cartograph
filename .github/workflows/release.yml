@@ -1,0 +1,133 @@
+name: Cartograph build matrix
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+      count: ${{ steps.targets.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load implemented targets only
+        id: targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(python3 scripts/release-matrix.py --json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$(python3 -c 'import json,sys;print(len(json.loads(sys.argv[1])["include"]))' "$matrix")" >> "$GITHUB_OUTPUT"
+          python3 scripts/release-matrix.py --all
+
+  common-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify shared rules on Java 17
+        run: bash scripts/verify-common.sh
+
+  build:
+    needs: [discover, common-tests]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    name: Build mc${{ matrix.minecraft }} ${{ matrix.loader }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Validate target metadata and tagged release version
+        shell: bash
+        env:
+          TARGET_DIR: ${{ matrix.adapter }}
+          TARGET_MC: ${{ matrix.minecraft }}
+          TARGET_LOADER: ${{ matrix.loader }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          test -f "$TARGET_DIR/gradle.properties"
+          grep -Fx "minecraft_version=$TARGET_MC" "$TARGET_DIR/gradle.properties"
+          grep -Fx "mod_id=cartograph" "$TARGET_DIR/gradle.properties"
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            version="$(sed -n 's/^mod_version=//p' "$TARGET_DIR/gradle.properties")"
+            test "$REF_NAME" == "v$version" || { echo "Tag and adapter version mismatch" >&2; exit 1; }
+          fi
+      - name: Build and test adapter
+        shell: bash
+        env:
+          TARGET_DIR: ${{ matrix.adapter }}
+        run: |
+          set -euo pipefail
+          chmod +x "$TARGET_DIR/gradlew"
+          "$TARGET_DIR/gradlew" -p "$TARGET_DIR" --no-daemon --max-workers=2 check build
+      - name: Verify output JAR and package checksum
+        shell: bash
+        env:
+          TARGET_DIR: ${{ matrix.adapter }}
+          TARGET_MC: ${{ matrix.minecraft }}
+          TARGET_LOADER: ${{ matrix.loader }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^mod_version=//p' "$TARGET_DIR/gradle.properties")"
+          jar="$TARGET_DIR/build/libs/Cartograph-${version}-mc${TARGET_MC}-${TARGET_LOADER}.jar"
+          test -f "$jar"
+          python3 scripts/verify-jar.py "$jar" "$TARGET_LOADER" "$version"
+          mkdir -p dist
+          cp "$jar" dist/
+          (cd dist && sha256sum *.jar)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cartograph-mc${{ matrix.minecraft }}-${{ matrix.loader }}
+          path: dist/*.jar
+          if-no-files-found: error
+
+  github-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [discover, common-tests, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require explicit release readiness
+        run: python3 scripts/release-matrix.py --ensure-release-ready
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cartograph-*
+          merge-multiple: true
+          path: dist
+      - name: Check exact number of completed target artifacts
+        shell: bash
+        env:
+          EXPECTED: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          actual="$(find dist -maxdepth 1 -type f -name '*.jar' | wc -l)"
+          test "$actual" -eq "$EXPECTED"
+          test "$actual" -gt 0
+          (cd dist && sha256sum *.jar > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*.jar
+            dist/SHA256SUMS.txt

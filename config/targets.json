@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "release_ready": false,
+  "policy": "Implemented targets enter CI/release automatically; planned targets cannot be published or counted as supported.",
+  "targets": [
+    {
+      "minecraft": "26.3",
+      "loader": "neoforge",
+      "java": "25",
+      "adapter": "java/adapters/26.3-neoforge",
+      "status": "planned"
+    },
+    {
+      "minecraft": "26.3",
+      "loader": "fabric",
+      "java": "25",
+      "adapter": "java/adapters/26.3-fabric",
+      "status": "planned"
+    },
+    {
+      "minecraft": "26.2",
+      "loader": "neoforge",
+      "java": "25",
+      "adapter": "java/adapters/26.2-neoforge",
+      "status": "planned"
+    },
+    {
+      "minecraft": "26.2",
+      "loader": "fabric",
+      "java": "25",
+      "adapter": "java/adapters/26.2-fabric",
+      "status": "planned"
+    },
+    {
+      "minecraft": "26.1.2",
+      "loader": "neoforge",
+      "java": "25",
+      "adapter": "java/adapters/26.1.2-neoforge",
+      "status": "planned"
+    },
+    {
+      "minecraft": "26.1.2",
+      "loader": "fabric",
+      "java": "25",
+      "adapter": "java/adapters/26.1.2-fabric",
+      "status": "planned"
+    },
+    {
+      "minecraft": "1.21.1",
+      "loader": "neoforge",
+      "java": "21",
+      "adapter": "java/adapters/1.21.1-neoforge",
+      "status": "implemented"
+    },
+    {
+      "minecraft": "1.21.1",
+      "loader": "fabric",
+      "java": "21",
+      "adapter": "java/adapters/1.21.1-fabric",
+      "status": "planned"
+    },
+    {
+      "minecraft": "1.20.1",
+      "loader": "fabric",
+      "java": "17",
+      "adapter": "java/adapters/1.20.1-fabric",
+      "status": "planned"
+    }
+  ]
+}

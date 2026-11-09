@@ -1,0 +1,14 @@
+{
+  "item.cartograph.atlas": "绘图师地图册",
+  "cartograph.tooltip.pages": "地图页数：%s",
+  "cartograph.tooltip.resources": "墨水 %s · 颜料 %s · 发光墨水 %s",
+  "cartograph.tooltip.hint": "主手拿地图册，副手拿材料，右键填入；潜行右键取回指南针",
+  "cartograph.message.compass_removed": "取回指南针 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s",
+  "cartograph.message.compass_installed": "指南针已安装 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s",
+  "cartograph.message.compass_present": "指南针已经安装 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s",
+  "cartograph.message.ink_filled": "已添加墨水 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s",
+  "cartograph.message.glow_filled": "已添加发光墨水 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s",
+  "cartograph.message.dye_installed": "三原色颜料已补充 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s",
+  "cartograph.message.dye_waiting": "染料已暂存，需红黄蓝各一份 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s",
+  "cartograph.message.inspect": "地图册状态 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s"
+}

@@ -1,0 +1,79 @@
+package com.wanstu.cartograph;
+
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.level.Level;
+import java.util.List;
+
+/**
+ * First playable interaction: use the atlas in the main hand and put one
+ * refill/compass in the offhand, then right click. Future GUI will use the
+ * same immutable data component and service functions.
+ */
+public final class AtlasItem extends Item {
+    public AtlasItem(Properties properties) { super(properties); }
+
+    @Override
+    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
+        if (hand != InteractionHand.MAIN_HAND) return InteractionResultHolder.pass(player.getItemInHand(hand));
+        ItemStack atlas = player.getItemInHand(hand);
+        if (!level.isClientSide) {
+            AtlasState current = atlas.getOrDefault(CartographMod.ATLAS_STATE.get(), AtlasState.blank()).identified();
+            ItemStack input = player.getOffhandItem();
+            AtlasState next = current;
+            String message;
+            boolean consume = false;
+            if (player.isShiftKeyDown() && current.compassInstalled() && input.isEmpty()) {
+                next = current.withCompass(false);
+                ItemStack returned = new ItemStack(Items.COMPASS);
+                if (!player.getInventory().add(returned)) player.drop(returned, false);
+                message = "cartograph.message.compass_removed";
+            } else if (input.is(Items.COMPASS)) {
+                if (!current.compassInstalled()) {
+                    next = current.withCompass(true);
+                    consume = true;
+                    message = "cartograph.message.compass_installed";
+                } else message = "cartograph.message.compass_present";
+            } else if (input.is(Items.INK_SAC)) {
+                next = current.fillInk(CartographConfig.INK_REFILL.get());
+                consume = true;
+                message = "cartograph.message.ink_filled";
+            } else if (input.is(Items.GLOW_INK_SAC)) {
+                next = current.fillGlow(CartographConfig.GLOW_REFILL.get());
+                consume = true;
+                message = "cartograph.message.glow_filled";
+            } else if (input.is(Items.RED_DYE) || input.is(Items.YELLOW_DYE) || input.is(Items.BLUE_DYE)) {
+                AtlasState.Primary primary = input.is(Items.RED_DYE) ? AtlasState.Primary.RED :
+                        input.is(Items.YELLOW_DYE) ? AtlasState.Primary.YELLOW : AtlasState.Primary.BLUE;
+                next = current.addDye(primary, CartographConfig.PIGMENT_REFILL.get());
+                consume = true;
+                message = next.colorEnabled() ? "cartograph.message.dye_installed" : "cartograph.message.dye_waiting";
+            } else message = "cartograph.message.inspect";
+
+            atlas.set(CartographMod.ATLAS_STATE.get(), next);
+            if (consume && !player.getAbilities().instabuild) input.shrink(1);
+            player.displayClientMessage(Component.translatable(message,
+                    next.pages(), next.inkUnits() / 10.0, next.pigmentUnits() / 10.0,
+                    next.glowUnits() / 10.0).withStyle(ChatFormatting.GOLD), true);
+        }
+        return InteractionResultHolder.sidedSuccess(atlas, level.isClientSide);
+    }
+
+    @Override
+    public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
+        super.appendHoverText(stack, context, tooltip, flag);
+        AtlasState state = stack.getOrDefault(CartographMod.ATLAS_STATE.get(), AtlasState.blank());
+        tooltip.add(Component.translatable("cartograph.tooltip.pages", state.pages()).withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.translatable("cartograph.tooltip.resources",
+                state.inkUnits() / 10.0, state.pigmentUnits() / 10.0,
+                state.glowUnits() / 10.0).withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.translatable("cartograph.tooltip.hint").withStyle(ChatFormatting.DARK_GRAY));
+    }
+}

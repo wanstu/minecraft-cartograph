@@ -1,0 +1,13 @@
+.gradle/
+**/.gradle/
+**/build/
+**/run/
+**/logs/
+**/.idea/
+**/.classpath
+**/.project
+*.log
+*.pid
+*.exit
+.tmp/
+.DS_Store
