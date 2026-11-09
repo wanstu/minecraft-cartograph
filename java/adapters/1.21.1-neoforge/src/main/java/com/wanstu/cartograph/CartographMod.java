@@ -44,6 +44,8 @@ public final class CartographMod {
         modBus.addListener(this::creativeTab);
         modBus.addListener(MapNetwork::register);
         NeoForge.EVENT_BUS.addListener(AtlasMapServer::tick);
+        NeoForge.EVENT_BUS.addListener(AtlasExports::tick);
+
         container.registerConfig(ModConfig.Type.SERVER, CartographConfig.SPEC);
     }
 

@@ -53,7 +53,13 @@ public final class AtlasScreen extends Screen {
     private static boolean drawRails = true;
     private static boolean drawWaypoints = true;
 
-    private double viewX, viewZ, zoom = 2.25;
+    private double viewX, viewZ, zoom, zoomPixels = 2.35;
+    // 1.55 physical pixels per UI unit, matching the original HTML prototype.
+    private float chromeScale = 1.0f;
+    private int vw() { return Math.max(1, (int) Math.ceil(width / chromeScale)); }
+    private int vh() { return Math.max(1, (int) Math.ceil(height / chromeScale)); }
+    private double ux(double x) { return x / chromeScale; }
+    private double uy(double y) { return y / chromeScale; }
     private boolean initialized, draggingMap;
     private int frameTicks, actionRefreshTicks;
     private int hoverX = -1, hoverY = -1;
@@ -71,7 +77,22 @@ public final class AtlasScreen extends Screen {
     private boolean chosenGlow;
     private int[] rates = {10, 10, 10};
     private String notice = "";
+    private boolean noticeError;
     private int noticeUntil;
+
+    /** Called only after the server has actually acknowledged an operation. */
+    public void feedback(boolean ok, String message) {
+        noticeError = !ok;
+        toast((ok ? "✓ " : "！") + message);
+        if (ok) {
+            reloadVisible(false);
+            CartographClient.queue(Math.floorDiv((int) viewX, 128),
+                    Math.floorDiv((int) viewZ, 128), true);
+        }
+    }
+
+    /** First coverage answer gives the UI the purchased page grid. */
+    public void refreshVisible() { reloadVisible(false); }
 
     public AtlasScreen() {
         super(Component.translatable("screen.cartograph.atlas"));
@@ -80,6 +101,9 @@ public final class AtlasScreen extends Screen {
     @Override
     protected void init() {
         super.init();
+        double guiScale = Math.max(1.0, minecraft.getWindow().getGuiScale());
+        chromeScale = (float) (1.55 / guiScale);
+        zoom = zoomPixels / guiScale;
         if (!initialized && minecraft != null && minecraft.player != null) {
             viewX = minecraft.player.getBlockX();
             viewZ = minecraft.player.getBlockZ();
@@ -126,7 +150,12 @@ public final class AtlasScreen extends Screen {
 
     @Override
     public void tick() {
-        if (++frameTicks % 200 == 0) reloadVisible(true);
+        if (++frameTicks % 200 == 0) {
+            // Do not enqueue all visible pages again while an earlier scan
+            // is incomplete. Refresh one centered page at a time.
+            CartographClient.queue(Math.floorDiv((int) Math.floor(viewX), 128),
+                    Math.floorDiv((int) Math.floor(viewZ), 128), true);
+        }
         if (actionRefreshTicks > 0 && --actionRefreshTicks == 0) reloadVisible(true);
     }
 
@@ -135,19 +164,28 @@ public final class AtlasScreen extends Screen {
         hoverX = mx;
         hoverY = my;
         renderTerrain(g);
-        renderToolbar(g, mx, my);
-        if (panel != Panel.NONE && dialog == Dialog.NONE) renderFloatingPanel(g, mx, my);
-        if (context != Context.NONE && dialog == Dialog.NONE) renderContext(g, mx, my);
-        if (dialog != Dialog.NONE) renderDialog(g, mx, my);
-        else renderCursorInfo(g, mx, my);
-        if (!notice.isBlank() && frameTicks <= noticeUntil) {
-            int w = Math.min(width - 20, font.width(notice) + 30);
-            int x = (width - w) / 2;
-            g.fill(x, height - 45, x + w, height - 20, 0xee1b2c23);
-            g.drawCenteredString(font, shortText(notice, w - 12), width / 2, height - 36, GOLD);
+        int sx = (int) ux(mx), sy = (int) uy(my);
+        g.pose().pushPose();
+        g.pose().scale(chromeScale, chromeScale, 1);
+        try {
+            renderToolbar(g, sx, sy);
+            if (panel != Panel.NONE && dialog == Dialog.NONE) renderFloatingPanel(g, sx, sy);
+            if (context != Context.NONE && dialog == Dialog.NONE) renderContext(g, sx, sy);
+            if (dialog != Dialog.NONE) renderDialog(g, sx, sy);
+            else renderSurveyBadge(g, mx, my);
+            // No fixed footer: map coordinates and status belong in optional popovers.
+            if (!notice.isBlank() && frameTicks <= noticeUntil) {
+                int w = Math.min(vw() - 20, font.width(notice) + 30);
+                int x = (vw() - w) / 2;
+                g.fill(x, vh() - 45, x + w, vh() - 20,
+                        noticeError ? 0xee673b31 : 0xee1b2c23);
+                g.drawCenteredString(font, shortText(notice, w - 12),
+                        vw() / 2, vh() - 36, GOLD);
+            }
+            super.render(g, sx, sy, partialTick);
+        } finally {
+            g.pose().popPose();
         }
-        // Handles EditBox and slider draw/input only; never blur this fullscreen map.
-        super.render(g, mx, my, partialTick);
     }
 
     @Override
@@ -180,8 +218,12 @@ public final class AtlasScreen extends Screen {
             MapNetwork.Page playerPage = CartographClient.page(Math.floorDiv(x, 128), Math.floorDiv(z, 128));
             if (playerPage != null && playerPage.inRange() && playerPage.compass()) {
                 int sx = toScreenX(x), sy = toScreenZ(z);
-                g.fill(sx - 4, sy - 4, sx + 5, sy + 5, 0xff8a382c);
-                g.fill(sx - 2, sy - 2, sx + 3, sy + 3, 0xffffe1b6);
+                g.pose().pushPose();
+                g.pose().translate(sx, sy, 0);
+                g.pose().scale(chromeScale, chromeScale, 1);
+                g.fill(-4, -4, 5, 5, 0xff8a382c);
+                g.fill(-2, -2, 3, 3, 0xffffe1b6);
+                g.pose().popPose();
             }
         }
         g.disableScissor();
@@ -192,10 +234,14 @@ public final class AtlasScreen extends Screen {
             for (SurfaceStructure poi : page.structures()) {
                 int x = toScreenX(poi.x()), y = toScreenZ(poi.z());
                 if (x < -60 || x >= width + 60 || y < -30 || y >= height + 30) continue;
-                g.fill(x - 6, y - 6, x + 7, y + 7, 0xff334236);
-                g.fill(x - 4, y - 4, x + 5, y + 5, 0xffd3b879);
-                g.drawString(font, "◆", x - 3, y - 4, 0xff23342c, false);
-                if (zoom >= 2.0) label(g, structureTitle(poi.type()), x + 9, y - 5);
+                g.pose().pushPose();
+                g.pose().translate(x, y, 0);
+                g.pose().scale(chromeScale, chromeScale, 1);
+                g.fill(-6, -6, 7, 7, 0xff334236);
+                g.fill(-4, -4, 5, 5, 0xffd3b879);
+                g.drawString(font, "◆", -3, -4, 0xff23342c, false);
+                if (zoomPixels >= 2.0) label(g, structureTitle(poi.type()), 9, -5);
+                g.pose().popPose();
             }
         }
         if (drawWaypoints) {
@@ -203,12 +249,16 @@ public final class AtlasScreen extends Screen {
                 int x = toScreenX(marker.x()), y = toScreenZ(marker.z());
                 if (x < -60 || x >= width + 60 || y < -30 || y >= height + 30) continue;
                 int color = COLORS[Math.clamp(marker.color(), 0, COLORS.length - 1)];
+                g.pose().pushPose();
+                g.pose().translate(x, y, 0);
+                g.pose().scale(chromeScale, chromeScale, 1);
                 if (marker.glowing()) {
-                    g.fill(x - 8, y - 8, x + 9, y + 9, 0x88ffe3a4);
-                    g.fill(x - 6, y - 6, x + 7, y + 7, 0xffcda968);
+                    g.fill(-8, -8, 9, 9, 0x88ffe3a4);
+                    g.fill(-6, -6, 7, 7, 0xffcda968);
                 }
-                renderIcon(g, x, y, marker.icon(), color);
-                if (zoom >= 2.0) label(g, marker.name(), x + 10, y - 5);
+                renderIcon(g, 0, 0, marker.icon(), color);
+                if (zoomPixels >= 2.0) label(g, marker.name(), 10, -5);
+                g.pose().popPose();
             }
         }
     }
@@ -274,18 +324,18 @@ public final class AtlasScreen extends Screen {
         };
     }
 
-    private int toolW() { return width < 590 ? 35 : 45; }
-    private int toolY() { return 14; }
+    private int toolW() { return vw() < 590 ? 35 : 38; }
+    private int toolY() { return 16; }
     private int toolbarWidth() { return 7 * toolW() + 6 * 4 + 12; }
-    private int toolbarX() { return width - toolbarWidth() - 12; }
+    private int toolbarX() { return vw() - toolbarWidth() - 18; }
 
     private void renderToolbar(GuiGraphics g, int mx, int my) {
         int tw = toolW(), tx = toolbarX(), ty = toolY();
-        if (width >= 520) {
-            g.fill(14, 13, width >= 650 ? 180 : 102, 49, 0xed1b2e25);
+        if (vw() >= 520) {
+            g.fill(14, 13, vw() >= 650 ? 180 : 102, 49, 0xed1b2e25);
             g.fill(18, 18, 43, 43, 0xff405a45);
             g.renderItem(new ItemStack(CartographMod.ATLAS.get()), 22, 22);
-            g.drawString(font, width >= 650 ? "绘图师 · 世界地图" : "绘图师", 50, 28, CREAM);
+            g.drawString(font, vw() >= 650 ? "绘图师 · 世界地图" : "绘图师", 50, 28, CREAM);
         }
         g.fill(tx - 6, ty - 6, tx + toolbarWidth(), ty + 45, 0xeb1b2c23);
         for (int i = 0; i < TOOLS.length; i++) {
@@ -298,46 +348,115 @@ public final class AtlasScreen extends Screen {
             boolean hovered = contains(mx, my, bx, ty, tw, 37);
             g.fill(bx, ty, bx + tw, ty + 37,
                     active ? 0xff627a60 : hovered ? 0xff50664e : 0xff30483b);
-            ItemStack icon = switch (i) {
-                case 0 -> new ItemStack(CartographMod.ATLAS.get());
-                case 1 -> new ItemStack(Items.RED_BANNER);
-                case 2 -> new ItemStack(Items.MAP);
-                case 3 -> new ItemStack(Items.REPEATER);
-                case 4 -> new ItemStack(Items.COMPASS);
-                case 5 -> new ItemStack(Items.WRITABLE_BOOK);
-                default -> new ItemStack(Items.BARRIER);
-            };
-            g.renderItem(icon, bx + (tw - 16) / 2, ty + 2);
+            // Match the high-fidelity HTML SVG toolbar: neutral thin line
+            // icons, not giant vanilla item sprites magnified by GUI scale.
+            renderToolGlyph(g, bx + tw / 2, ty + 11, i,
+                    active ? 0xfff6d9a3 : 0xffd8e1d4);
             g.drawCenteredString(font, TOOLS[i], bx + tw / 2, ty + 23,
                     active ? 0xffffffff : CREAM);
         }
     }
 
-    private int panelW() { return Math.min(274, width - 20); }
-    private int panelX() { return width - panelW() - 12; }
-    private int panelY() { return 59; }
+    private void hLine(GuiGraphics g, int x, int y, int len, int c) {
+        g.fill(x, y, x + len, y + 1, c);
+    }
+    private void vLine(GuiGraphics g, int x, int y, int len, int c) {
+        g.fill(x, y, x + 1, y + len, c);
+    }
+
+    /** At 1.55 real pixels per unit, 14px icons match the HTML's 19px SVGs. */
+    private void renderToolGlyph(GuiGraphics g, int cx, int cy, int kind, int c) {
+        int x = cx - 7, y = cy - 7;
+        switch (kind) {
+            case 0 -> { // atlas / open book
+                vLine(g, x, y + 2, 12, c);
+                vLine(g, x + 13, y + 2, 12, c);
+                vLine(g, x + 6, y + 3, 11, c);
+                hLine(g, x + 1, y + 2, 4, c);
+                hLine(g, x + 8, y + 2, 5, c);
+                hLine(g, x + 1, y + 12, 4, c);
+                hLine(g, x + 8, y + 12, 5, c);
+            }
+            case 1 -> { // map pin with dot
+                hLine(g, x + 4, y, 6, c);
+                hLine(g, x + 2, y + 2, 2, c); hLine(g, x + 10, y + 2, 2, c);
+                vLine(g, x + 1, y + 4, 5, c); vLine(g, x + 12, y + 4, 5, c);
+                hLine(g, x + 3, y + 10, 2, c); hLine(g, x + 9, y + 10, 2, c);
+                g.fill(cx - 1, cy - 3, cx + 2, cy, c);
+                vLine(g, cx, cy + 4, 6, c);
+            }
+            case 2 -> { // layers
+                hLine(g, x + 2, y + 3, 10, c);
+                hLine(g, x, y + 5, 14, c);
+                hLine(g, x + 2, y + 9, 10, c);
+                hLine(g, x, y + 11, 14, c);
+                hLine(g, x + 2, y + 13, 10, c);
+            }
+            case 3 -> { // three adjustment sliders
+                hLine(g, x, y + 3, 14, c);
+                hLine(g, x, y + 7, 14, c);
+                hLine(g, x, y + 11, 14, c);
+                g.fill(x + 3, y + 1, x + 6, y + 6, c);
+                g.fill(x + 9, y + 5, x + 12, y + 10, c);
+                g.fill(x + 5, y + 9, x + 8, y + 14, c);
+            }
+            case 4 -> { // recenter / crosshair
+                vLine(g, cx, y, 14, c); hLine(g, x, cy, 14, c);
+                hLine(g, x + 3, y + 2, 8, c);
+                hLine(g, x + 3, y + 12, 8, c);
+                vLine(g, x + 2, y + 3, 9, c);
+                vLine(g, x + 12, y + 3, 9, c);
+            }
+            case 5 -> { // information
+                hLine(g, x + 4, y, 6, c);
+                hLine(g, x + 4, y + 13, 6, c);
+                vLine(g, x + 1, y + 3, 8, c);
+                vLine(g, x + 12, y + 3, 8, c);
+                g.fill(cx, y + 3, cx + 2, y + 5, c);
+                vLine(g, cx + 1, y + 7, 4, c);
+            }
+            default -> { // dismiss
+                for (int j = 0; j < 12; j++) {
+                    g.fill(x + 1 + j, y + 1 + j, x + 2 + j, y + 2 + j, c);
+                    g.fill(x + 12 - j, y + 1 + j, x + 13 - j, y + 2 + j, c);
+                }
+            }
+        }
+    }
+
+    private int panelW() { return Math.min(218, vw() - 20); }
+    private int panelX() { return vw() - panelW() - 18; }
+    private int panelY() { return 66; }
     private int panelH() {
         return switch (panel) {
-            case ATLAS -> Math.min(height - panelY() - 12,
-                    height < 365 ? 247 : height < 402 ? 274 : 332);
-            case MARKERS -> Math.min(height - panelY() - 12, 352);
-            case LAYERS -> Math.min(height - panelY() - 12, 285);
-            case INFO -> Math.min(height - panelY() - 12, 242);
+            case ATLAS -> Math.min(vh() - panelY() - 12,
+                    vh() < 365 ? 247 : vh() < 402 ? 274 : 332);
+            case MARKERS -> Math.min(vh() - panelY() - 12, 352);
+            case LAYERS -> Math.min(vh() - panelY() - 12, 285);
+            case INFO -> Math.min(vh() - panelY() - 12, 242);
             default -> 0;
         };
     }
-    private boolean compact() { return height < 402; }
-    private boolean tiny() { return height < 365; }
+    private boolean compact() { return vh() < 402; }
+    private boolean tiny() { return vh() < 365; }
     private boolean contains(double mx, double my, int x, int y, int w, int h) {
         return mx >= x && mx < x + w && my >= y && my < y + h;
     }
 
     private void card(GuiGraphics g, int x, int y, int w, int h, String heading, String subtitle) {
         g.fill(x - 4, y + 4, x + w + 4, y + h + 7, 0x7715201b);
+        g.fill(x - 1, y - 1, x + w + 1, y + h + 1, 0xff6c765f);
         g.fill(x, y, x + w, y + h, PANEL_BG);
-        g.fill(x, y, x + w, y + 34, 0xff344b3d);
-        g.fill(x, y + 33, x + w, y + 34, 0xffc4ab79);
-        g.drawString(font, heading, x + 13, y + 13, CREAM);
+        // HTML prototype: subdued eyebrow, title and description, not a
+        // solid 34px-wide permanent green header or gold separator.
+        g.drawString(font, switch (panel) {
+            case ATLAS -> "ATLAS · 01";
+            case MARKERS -> "WAYPOINTS";
+            case LAYERS -> "MAP LAYERS";
+            case INFO -> "INFORMATION";
+            default -> "";
+        }, x + 13, y + 9, MUTED);
+        g.drawString(font, heading, x + 13, y + 23, CREAM);
         g.drawString(font, "×", x + w - 17, y + 13, GOLD);
         if (!subtitle.isBlank()) {
             g.drawString(font, shortText(subtitle, w - 22), x + 12, y + 42, MUTED);
@@ -395,8 +514,8 @@ public final class AtlasScreen extends Screen {
         if (occupied > 0) g.fill(x, y + 14, x + occupied, y + 19, color);
     }
 
-    private int consumableY() { return panelY() + (height < 295 ? 133 : tiny() ? 142 : compact() ? 167 : 198); }
-    private int compassY() { return panelY() + (height < 295 ? 181 : tiny() ? 198 : compact() ? 236 : 283); }
+    private int consumableY() { return panelY() + (vh() < 280 ? 112 : vh() < 295 ? 133 : tiny() ? 142 : compact() ? 167 : 198); }
+    private int compassY() { return panelY() + (vh() < 280 ? 166 : vh() < 295 ? 176 : tiny() ? 198 : compact() ? 236 : 283); }
 
     private void renderAtlasPanel(GuiGraphics g, int x, int y, int w, int h, int mx, int my) {
         card(g, x, y, w, h, "地图册 · 资源", "首次测绘消耗材料，更新免费");
@@ -405,8 +524,8 @@ public final class AtlasScreen extends Screen {
         int ink = page == null ? item.inkUnits() : page.inkUnits();
         int pigment = page == null ? item.pigmentUnits() : page.pigmentUnits();
         int glow = page == null ? item.glowUnits() : page.glowUnits();
-        int step = height < 295 ? 22 : tiny() ? 24 : compact() ? 29 : 36;
-        int firstY = height < 295 ? 50 : tiny() ? 53 : 62;
+        int step = vh() < 280 ? 19 : vh() < 295 ? 22 : tiny() ? 24 : compact() ? 29 : 36;
+        int firstY = vh() < 280 ? 45 : vh() < 295 ? 50 : tiny() ? 53 : 62;
         meter(g, "墨水", 0, ink, x + 13, y + firstY, w - 26);
         meter(g, "颜料", 1, pigment, x + 13, y + firstY + step, w - 26);
         meter(g, "发光墨水", 2, glow, x + 13, y + firstY + 2 * step, w - 26);
@@ -472,9 +591,9 @@ public final class AtlasScreen extends Screen {
         g.drawString(font, "仅显示已读取的页；滚轮查看列表", x + 13, y + h - 22, MUTED);
     }
 
-    private int layerTop() { return height < 295 ? 52 : height < 350 ? 59 : 66; }
-    private int layerStep() { return height < 295 ? 35 : height < 350 ? 39 : 47; }
-    private int layerRowH() { return height < 295 ? 32 : height < 350 ? 35 : 39; }
+    private int layerTop() { return vh() < 295 ? 52 : vh() < 350 ? 59 : 66; }
+    private int layerStep() { return vh() < 295 ? 35 : vh() < 350 ? 39 : 47; }
+    private int layerRowH() { return vh() < 295 ? 32 : vh() < 350 ? 35 : 39; }
 
     private void renderLayersPanel(GuiGraphics g, int x, int y, int w, int h, int mx, int my) {
         card(g, x, y, w, h, "地图图层", "只影响显示，不影响测绘和扣费");
@@ -520,30 +639,58 @@ public final class AtlasScreen extends Screen {
         g.drawString(font, "地图页数   " + state().pages(), x + 13, y + 88, CREAM);
         g.drawString(font, "地图中心   X " + (int) viewX + "  Z " + (int) viewZ,
                 x + 13, y + 108, CREAM);
-        g.drawString(font, "地图缩放   " + (int) (zoom * 100) + "%", x + 13, y + 128, CREAM);
+        g.drawString(font, "地图缩放   " + (int) (zoomPixels * 100) + "%", x + 13, y + 128, CREAM);
         g.drawString(font, "拖动地图：左键拖动", x + 13, y + 157, MUTED);
         g.drawString(font, "放大缩小：滚动滚轮", x + 13, y + 174, MUTED);
         g.drawString(font, "添加/编辑标点：右键地图", x + 13, y + 191, MUTED);
         g.drawString(font, "右键地图亦可拓印原版地图", x + 13, y + 208, MUTED);
     }
 
-    private void renderCursorInfo(GuiGraphics g, int mx, int my) {
-        if (mx < 0 || my < 0 || mx >= width || my >= height) return;
-        if (panel != Panel.NONE && contains(mx, my, panelX(), panelY(), panelW(), panelH())) return;
-        if (contains(mx, my, toolbarX() - 6, toolY() - 6, toolbarWidth() + 6, 51)) return;
-        String str = "X " + toWorldX(mx) + "   Z " + toWorldZ(my)
-                + "    " + String.format(java.util.Locale.ROOT, "%.1f", zoom) + "×";
-        int w = Math.min(width - 20, font.width(str) + 22);
-        g.fill(12, height - 33, 12 + w, height - 12, 0xdf1b2c23);
-        g.drawString(font, shortText(str, w - 14), 20, height - 27, GOLD);
+    /** Compact prototype-style hover badge. No full-width footer/bar. */
+    private void renderSurveyBadge(GuiGraphics g, int originalX, int originalY) {
+        if (vh() < 140 || vw() < 210) return;
+        int viewPageX = Math.floorDiv((int) Math.floor(viewX), 128);
+        int viewPageZ = Math.floorDiv((int) Math.floor(viewZ), 128);
+        MapNetwork.Page page = centerPage();
+        String status;
+        if (!CartographClient.coverageKnown()) {
+            status = "等待服务器确认地图册与已购买页...";
+        } else if (!CartographClient.covered(viewPageX, viewPageZ)
+                || (page != null && !page.inRange())) {
+            status = "此处未扩充地图页 · 工作台用地图册+空地图增加";
+        } else if (page == null) {
+            status = "等待区块测绘 · 已排队 " + CartographClient.pendingPages() + " 页";
+        } else if (!page.complete()) {
+            status = "测绘中 " + page.scanned() + "/64 · 已生成 " +
+                    page.generated() + " · 已绘制 " + page.painted();
+        } else if (page.generated() == 0) {
+            status = "此页尚无可读取的完整生成区块（未生成区域保持空白）";
+        } else if (page.painted() == 0) {
+            status = !state().inkEnabled()
+                    ? "发现 " + page.generated() + " 个已生成区块，请先加入墨囊"
+                    : "发现 " + page.generated() + " 个已生成区块，墨水不足无法绘制";
+        } else {
+            status = "已绘制 " + page.painted() + "/" + page.generated() +
+                    " 个真实区块 · 旧区块更新不重复扣费";
+        }
+
+        int x = 16, y = vh() - 49;
+        int maxWidth = Math.min(300, vw() - 32);
+        g.fill(x, y, x + maxWidth, y + 34, 0xd91c3025);
+        int worldX = toWorldX(originalX);
+        int worldZ = toWorldZ(originalY);
+        g.drawString(font, shortText("X " + worldX + "  Z " + worldZ +
+                "    " + String.format(java.util.Locale.ROOT, "%.2f", zoomPixels) + "×",
+                maxWidth - 18), x + 9, y + 7, GOLD);
+        g.drawString(font, shortText(status, maxWidth - 18), x + 9, y + 20, MUTED);
     }
 
     private void renderContext(GuiGraphics g, int mx, int my) {
         int items = context == Context.MATERIAL ? 5 : 2;
         int w = context == Context.MATERIAL ? 159 : 170;
         int h = items * 27 + 9;
-        int x = Math.clamp(contextX, 4, Math.max(4, width - w - 4));
-        int y = Math.clamp(contextY, 4, Math.max(4, height - h - 4));
+        int x = Math.clamp(contextX, 4, Math.max(4, vw() - w - 4));
+        int y = Math.clamp(contextY, 4, Math.max(4, vh() - h - 4));
         g.fill(x, y, x + w, y + h, 0xf91b3025);
         g.fill(x, y, x + w, y + 1, 0xffceb27f);
         for (int i = 0; i < items; i++) {
@@ -559,19 +706,19 @@ public final class AtlasScreen extends Screen {
         }
     }
 
-    private int modalW() { return Math.min(398, Math.max(210, width - 24)); }
-    private int modalH() { return dialog == Dialog.SETTINGS ? Math.min(309, height - 22) : Math.min(302, height - 22); }
+    private int modalW() { return Math.min(320, Math.max(210, vw() - 24)); }
+    private int modalH() { return dialog == Dialog.SETTINGS ? Math.min(309, vh() - 22) : Math.min(302, vh() - 22); }
     private int markerOffset(int wide, int medium, int tiny) {
         return modalH() < 252 ? tiny : modalH() < 300 ? medium : wide;
     }
     private int settingsOffset(int wide, int medium, int tiny) {
         return modalH() < 238 ? tiny : modalH() < 307 ? medium : wide;
     }
-    private int modalX() { return (width - modalW()) / 2; }
-    private int modalY() { return (height - modalH()) / 2; }
+    private int modalX() { return (vw() - modalW()) / 2; }
+    private int modalY() { return (vh() - modalH()) / 2; }
 
     private void renderDialog(GuiGraphics g, int mx, int my) {
-        g.fill(0, 0, width, height, 0xa80b1711);
+        g.fill(0, 0, vw(), vh(), 0xa80b1711);
         int x = modalX(), y = modalY(), w = modalW(), h = modalH();
         g.fill(x - 4, y + 5, x + w + 4, y + h + 6, 0x98121d16);
         g.fill(x, y, x + w, y + h, PANEL_BG);
@@ -801,17 +948,18 @@ public final class AtlasScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
-        if (dialog != Dialog.NONE) return dialogClicked(mx, my, button);
+        double guiX = ux(mx), guiY = uy(my);
+        if (dialog != Dialog.NONE) return dialogClicked(guiX, guiY, button);
         if (context != Context.NONE) {
-            if (handleContextClick(mx, my, button)) return true;
+            if (handleContextClick(guiX, guiY, button)) return true;
             context = Context.NONE;
         }
-        if (handleToolbarClick(mx, my, button)) return true;
+        if (handleToolbarClick(guiX, guiY, button)) return true;
         if (panel != Panel.NONE) {
             int x = panelX(), y = panelY(), w = panelW(), h = panelH();
-            if (contains(mx, my, x, y, w, h)) {
-                if (panel == Panel.MARKERS && super.mouseClicked(mx, my, button)) return true;
-                return panelClicked(mx, my, button);
+            if (contains(guiX, guiY, x, y, w, h)) {
+                if (panel == Panel.MARKERS && super.mouseClicked(guiX, guiY, button)) return true;
+                return panelClicked(guiX, guiY, button);
             }
             hidePanel();
         }
@@ -824,8 +972,8 @@ public final class AtlasScreen extends Screen {
                 pendingZ = selectedMarker.z();
             }
             context = selectedMarker == null ? Context.MAP : Context.MARKER;
-            contextX = (int) mx;
-            contextY = (int) my;
+            contextX = (int) guiX;
+            contextY = (int) guiY;
             return true;
         }
         if (button == 0) {
@@ -949,8 +1097,8 @@ public final class AtlasScreen extends Screen {
         int items = context == Context.MATERIAL ? 5 : 2;
         int w = context == Context.MATERIAL ? 159 : 170;
         int h = items * 27 + 9;
-        int x = Math.clamp(contextX, 4, Math.max(4, width - w - 4));
-        int y = Math.clamp(contextY, 4, Math.max(4, height - h - 4));
+        int x = Math.clamp(contextX, 4, Math.max(4, vw() - w - 4));
+        int y = Math.clamp(contextY, 4, Math.max(4, vh() - h - 4));
         if (!contains(mx, my, x, y, w, h)) return false;
         if (button == 0) {
             for (int i = 0; i < items; i++) {
@@ -1041,7 +1189,8 @@ public final class AtlasScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        if (dialog != Dialog.NONE) return super.mouseDragged(mx, my, button, dx, dy);
+        if (dialog != Dialog.NONE)
+            return super.mouseDragged(ux(mx), uy(my), button, ux(dx), uy(dy));
         if (button == 0 && draggingMap) {
             viewX = Math.clamp(viewX - dx / zoom, -30_000_000, 30_000_000);
             viewZ = Math.clamp(viewZ - dy / zoom, -30_000_000, 30_000_000);
@@ -1054,23 +1203,26 @@ public final class AtlasScreen extends Screen {
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
         if (button == 0) draggingMap = false;
-        return super.mouseReleased(mx, my, button);
+        return super.mouseReleased(ux(mx), uy(my), button);
     }
 
     @Override
     public boolean mouseScrolled(double mx, double my, double deltaX, double deltaY) {
-        if (dialog != Dialog.NONE) return super.mouseScrolled(mx, my, deltaX, deltaY);
+        double guiX = ux(mx), guiY = uy(my);
+        if (dialog != Dialog.NONE)
+            return super.mouseScrolled(guiX, guiY, deltaX, deltaY);
         if (context != Context.NONE) return true;
-        if (panel == Panel.MARKERS && contains(mx, my, panelX(), panelY(), panelW(), panelH())) {
+        if (panel == Panel.MARKERS && contains(guiX, guiY, panelX(), panelY(), panelW(), panelH())) {
             int max = Math.max(0, availableMarkers().size() - markerRows());
             markerScroll = Math.clamp(markerScroll - (int) Math.signum(deltaY), 0, max);
             return true;
         }
-        if (panel != Panel.NONE && contains(mx, my, panelX(), panelY(), panelW(), panelH())) return true;
-        if (contains(mx, my, toolbarX() - 6, toolY() - 6, toolbarWidth() + 6, 51)) return true;
+        if (panel != Panel.NONE && contains(guiX, guiY, panelX(), panelY(), panelW(), panelH())) return true;
+        if (contains(guiX, guiY, toolbarX() - 6, toolY() - 6, toolbarWidth() + 6, 51)) return true;
         double originalX = viewX + (mx - screenMidX()) / zoom;
         double originalZ = viewZ + (my - screenMidY()) / zoom;
-        zoom = Math.clamp(zoom * (deltaY > 0 ? 1.25 : 0.8), 1.0, 6.0);
+        zoomPixels = Math.clamp(zoomPixels * (deltaY > 0 ? 1.25 : 0.8), .4, 10.0);
+        zoom = zoomPixels / Math.max(1, minecraft.getWindow().getGuiScale());
         viewX = Math.clamp(originalX - (mx - screenMidX()) / zoom, -30_000_000, 30_000_000);
         viewZ = Math.clamp(originalZ - (my - screenMidY()) / zoom, -30_000_000, 30_000_000);
         reloadVisible(false);

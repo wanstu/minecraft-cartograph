@@ -24,8 +24,11 @@ import net.minecraft.world.level.storage.LevelResource;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,6 +40,21 @@ import java.util.Optional;
  */
 public final class SurfaceSampler {
     private SurfaceSampler() {}
+    // Saved regions are immutable between writes. Cache only FULL saved samples
+    // and invalidate on region mtime/size changes. Live loaded chunks bypass
+    // this cache to ensure every changed block can refresh without charging.
+    private static final int MAX_SAVED_CACHE = 2048;
+    private record CacheKey(Path region, int x, int z) {}
+    private record CacheValue(FileTime stamp, long size, SurfaceTile tile) {}
+    private static final LinkedHashMap<CacheKey, CacheValue> SAVED =
+            new LinkedHashMap<>(512, .75f, true);
+
+    private static void remember(CacheKey key, FileTime stamp, long size, SurfaceTile tile) {
+        SAVED.put(key, new CacheValue(stamp, size, tile));
+        while (SAVED.size() > MAX_SAVED_CACHE) {
+            SAVED.remove(SAVED.keySet().iterator().next());
+        }
+    }
 
     /** 0 no feature, 1 natural dirt-path road, 2 vanilla railway, 3 Create railway. */
     public record SurfaceTile(byte[] colors, byte[] features, List<SurfaceStructure> structures) {
@@ -59,17 +77,35 @@ public final class SurfaceSampler {
     public static Optional<SurfaceTile> surface(ServerLevel level, int chunkX, int chunkZ) {
         try {
             LevelChunk loaded = level.getChunkSource().getChunkNow(chunkX, chunkZ);
-            if (loaded != null && loaded.getPersistedStatus().isOrAfter(ChunkStatus.FULL)) {
+            // getChunkNow returns LevelChunk (fully realized), never protochunk;
+            // checking persistedStatus incorrectly rejects newly generated
+            // FULL chunks before their first disk save.
+            if (loaded != null) {
                 return Optional.of(sampleLoaded(level, loaded, chunkX, chunkZ));
             }
-            Optional<byte[]> raw = McaChunkReader.readNbt(regionDir(level), chunkX, chunkZ);
+            Path regions = regionDir(level);
+            Path region = regions.resolve("r." + Math.floorDiv(chunkX, 32) +
+                    "." + Math.floorDiv(chunkZ, 32) + ".mca");
+            if (!Files.isRegularFile(region)) return Optional.empty();
+            FileTime stamp = Files.getLastModifiedTime(region);
+            long size = Files.size(region);
+            CacheKey cacheKey = new CacheKey(region, chunkX, chunkZ);
+            CacheValue cached = SAVED.get(cacheKey);
+            if (cached != null && cached.size() == size && cached.stamp().equals(stamp))
+                return Optional.of(cached.tile());
+            Optional<byte[]> raw = McaChunkReader.readNbt(regions, chunkX, chunkZ);
             if (raw.isEmpty()) return Optional.empty();
             try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(raw.get()))) {
                 CompoundTag nbt = NbtIo.read(in, NbtAccounter.create(8 * 1024 * 1024));
                 if (!nbt.getString("Status").equals("minecraft:full")
                         && !nbt.getString("Status").equals("full")) return Optional.empty();
                 if (nbt.getInt("xPos") != chunkX || nbt.getInt("zPos") != chunkZ) return Optional.empty();
-                return Optional.ofNullable(sampleSaved(level, nbt));
+                SurfaceTile tile = sampleSaved(level, nbt);
+                if (tile != null) {
+                    remember(cacheKey, stamp, size, tile);
+                    return Optional.of(tile);
+                }
+                return Optional.empty();
             }
         } catch (Exception badOrUnsupportedSave) {
             // Unsupported compression/chunk data remains blank, never predicted.

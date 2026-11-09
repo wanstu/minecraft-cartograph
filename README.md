@@ -36,6 +36,10 @@ A survival atlas for Minecraft that maps **only actually generated / saved terra
 
 临时兼容交互：主手地图册 + 副手耗材右键同样能补充；潜行+空副手右键可以取回指南针。图册 UI 为主要入口。
 
+### 最新的实机反馈修复
+
+**大地图界面不一致、卡顿/操作无确认、旧区块/新区块不显示**已进行针对性修复和真实存档读取检查。界面不再被 Minecraft GUI Scale 重复放大；操作有服务端结果提示；测绘支持 8/32/64 区块进度显示、服务端每 tick 两个区块的分批扫描以及已保存 FULL 地表缓存。完整验收详情和明确的地图容量/墨水限制见 [docs/CLIENT_UI_SURVEY_FIX.md](docs/CLIENT_UI_SURVEY_FIX.md)。
+
 ### 大地图界面高保真参考
 
 设计原型：[preview/cartograph-fullscreen-hifi.html](preview/cartograph-fullscreen-hifi.html)，可直接用浏览器打开。Minecraft UI 已按原型重做为地图满屏、顶部 7 个悬浮工具、多个独立浮窗和居中弹窗；Java 原生字体及物品图标会与网页不同，客户端视觉和操作尚需实机验收。

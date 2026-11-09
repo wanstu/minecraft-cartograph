@@ -12,6 +12,9 @@ import java.util.List;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -24,10 +27,11 @@ import java.util.UUID;
  * eligible for a response.
  */
 public final class AtlasMapServer {
+    private static final Logger LOG = LoggerFactory.getLogger("cartograph.survey");
     private static final int MAX_WORK_PER_TICK = 2;
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
-    private static final Map<UUID, Long> LAST_REQUEST = new HashMap<>();
-    private static final Map<UUID, Long> LAST_ACTION = new HashMap<>();
+    private static final ArrayDeque<UUID> ORDER = new ArrayDeque<>();
+    private static final Map<UUID, Long> LAST_DIAGNOSTIC = new HashMap<>();
     private static int ticks;
 
     private AtlasMapServer() {}
@@ -70,19 +74,15 @@ public final class AtlasMapServer {
     }
 
     public static void enqueue(ServerPlayer player, MapNetwork.Request request) {
-        if (Math.abs((long) request.pageX()) > 234375 || Math.abs((long) request.pageZ()) > 234375) return;
+        if (Math.abs((long) request.pageX()) > 234375 ||
+                Math.abs((long) request.pageZ()) > 234375) return;
         ItemStack stack = findAtlas(player, request.atlasId());
         if (stack.isEmpty()) return;
-        long tick = player.serverLevel().getGameTime();
-        Long last = LAST_REQUEST.get(player.getUUID());
-        if (last != null && tick - last < 25 && tick >= last) return;
-        LAST_REQUEST.put(player.getUUID(), tick);
-        var data = AtlasWorldData.get(player.serverLevel());
-        var entry = data.access(stack);
+        AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
+        AtlasWorldData.Entry entry = data.access(stack);
         PacketDistributor.sendToPlayer(player, AtlasActions.settings(player));
         String dim = player.serverLevel().dimension().location().toString();
         if (!entry.anchored()) {
-            // First use anchors the atlas at the player's present map page.
             var origin = AtlasPage.atBlock(dim, player.getBlockX(), player.getBlockZ());
             data.anchor(entry, dim, origin.pageX(), origin.pageZ());
         }
@@ -90,80 +90,124 @@ public final class AtlasMapServer {
             PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
                     entry.state().id(), dim, request.pageX(), request.pageZ(),
                     new byte[128 * 128], new byte[128 * 128], 0L,
-                    entry.state().inkUnits(), entry.state().pigmentUnits(), entry.state().glowUnits(),
-                    entry.state().compassInstalled(), false, List.of(), List.of()));
+                    entry.state().inkUnits(), entry.state().pigmentUnits(),
+                    entry.state().glowUnits(), entry.state().compassInstalled(),
+                    false, true, 0, 0, 0,
+                    entry.anchorX(), entry.anchorZ(), entry.state().pages(),
+                    List.of(), List.of()));
             return;
         }
-        PENDING.put(player.getUUID(), new Pending(entry.state().id(), request.pageX(), request.pageZ(), dim));
+        Pending old = PENDING.get(player.getUUID());
+        if (old != null) {
+            // Never reset an incomplete page when a new request arrives; doing
+            // so can starve scans indefinitely on busy/unresponsive clients.
+            if (!old.dimension.equals(dim) || !old.atlasId.equals(entry.state().id())
+                    || old.pageX != request.pageX() || old.pageZ != request.pageZ()) {
+                player.displayClientMessage(
+                        Component.literal("绘图师：上一页正在测绘，请稍候"), true);
+            }
+            return;
+        }
+        Pending next = new Pending(entry.state().id(),
+                request.pageX(), request.pageZ(), dim);
+        PENDING.put(player.getUUID(), next);
+        ORDER.addLast(player.getUUID());
     }
 
     public static void tick(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
-        // Prevent indefinite per-player rate-limit state on long-running servers.
-        if (++ticks % 600 == 0) {
-            LAST_REQUEST.keySet().removeIf(id -> server.getPlayerList().getPlayer(id) == null);
-            LAST_ACTION.keySet().removeIf(id -> server.getPlayerList().getPlayer(id) == null);
-        }
-        int budget = MAX_WORK_PER_TICK;
-        Iterator<Map.Entry<UUID, Pending>> iterator = PENDING.entrySet().iterator();
-        while (iterator.hasNext() && budget > 0) {
-            Map.Entry<UUID, Pending> task = iterator.next();
-            ServerPlayer player = server.getPlayerList().getPlayer(task.getKey());
-            if (player == null || !player.serverLevel().dimension().location().toString().equals(task.getValue().dimension)) {
-                iterator.remove(); continue;
+        if (++ticks % 600 == 0)
+            LAST_DIAGNOSTIC.keySet().removeIf(id -> server.getPlayerList().getPlayer(id) == null);
+        // One slot per chunk, not one per player. The previous implementation
+        // scanned only ONE chunk per tick for a sole viewer despite budget=2.
+        // Rotate viewers fairly and avoid holding any FileChannel between ticks.
+        for (int step = 0; step < MAX_WORK_PER_TICK && !ORDER.isEmpty(); step++) {
+            UUID viewer = ORDER.removeFirst();
+            Pending task = PENDING.get(viewer);
+            if (task == null) continue;
+            ServerPlayer player = server.getPlayerList().getPlayer(viewer);
+            if (player == null || !player.serverLevel().dimension()
+                    .location().toString().equals(task.dimension)) {
+                PENDING.remove(viewer);
+                continue;
             }
-            ItemStack item = findAtlas(player, task.getValue().atlasId);
-            if (item.isEmpty()) { iterator.remove(); continue; }
-            var data = AtlasWorldData.get(player.serverLevel());
-            var entry = data.access(item);
-            if (!entry.isCovered(task.getValue().dimension, task.getValue().pageX, task.getValue().pageZ)) {
-                iterator.remove(); continue;
+            ItemStack atlas = findAtlas(player, task.atlasId);
+            if (atlas.isEmpty()) {
+                PENDING.remove(viewer);
+                continue;
             }
-            Pending current = task.getValue();
-            int index = current.next++;
-            int cx = current.pageX * AtlasPage.CHUNKS_PER_SIDE + (index % 8);
-            int cz = current.pageZ * AtlasPage.CHUNKS_PER_SIDE + (index / 8);
-            var key = new SurveyLedger.ChunkKey(current.dimension, cx, cz);
-            var sample = SurfaceSampler.surface(player.serverLevel(), cx, cz);
-            sample.ifPresent(tile -> data.sample(entry, key, tile.colors(), tile.features(), item));
-            byte[] savedColors = entry.getPixels(key);
-            // A deleted/unreadable save must display as unknown even if the
-            // atlas paid for and cached that chunk earlier. Its ledger remains
-            // intact so rebuilding the chunk won't charge for a second time.
-            if (sample.isPresent() && savedColors != null && entry.paid(key)) {
-                int x = index % 8, z = index / 8;
-                for (int pz = 0; pz < 16; pz++) {
-                    System.arraycopy(savedColors, pz * 16, current.pixels,
-                            (z * 16 + pz) * 128 + x * 16, 16);
-                }
-                byte[] savedFeatures = entry.getFeatures(key);
-                if (savedFeatures != null && savedFeatures.length == 256) {
-                    for (int pz = 0; pz < 16; pz++) {
-                        System.arraycopy(savedFeatures, pz * 16, current.features,
-                                (z * 16 + pz) * 128 + x * 16, 16);
+            AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
+            AtlasWorldData.Entry entry = data.access(atlas);
+            if (!entry.isCovered(task.dimension, task.pageX, task.pageZ)) {
+                PENDING.remove(viewer);
+                continue;
+            }
+
+            int index = task.next++;
+            int chunkX = task.pageX * AtlasPage.CHUNKS_PER_SIDE + index % 8;
+            int chunkZ = task.pageZ * AtlasPage.CHUNKS_PER_SIDE + index / 8;
+            var key = new SurveyLedger.ChunkKey(task.dimension, chunkX, chunkZ);
+            var sampled = SurfaceSampler.surface(player.serverLevel(), chunkX, chunkZ);
+            if (sampled.isPresent()) {
+                task.generated++;
+                SurfaceSampler.SurfaceTile tile = sampled.get();
+                data.sample(entry, key, tile.colors(), tile.features(), atlas);
+                byte[] savedColors = entry.getPixels(key);
+                if (savedColors != null && entry.paid(key)) {
+                    task.painted++;
+                    int x = index % 8, z = index / 8;
+                    for (int localZ = 0; localZ < 16; localZ++) {
+                        System.arraycopy(savedColors, localZ * 16, task.pixels,
+                                (z * 16 + localZ) * 128 + x * 16, 16);
                     }
-                }
-                // Auto markers are derived from the actually observed FULL
-                // chunk and never saved as user-selected waypoint records.
-                if (sample.isPresent()) {
-                    for (SurfaceStructure marker : sample.get().structures()) {
-                        if (current.structures.size() >= 64) break;
-                        current.structures.add(marker);
+                    byte[] features = entry.getFeatures(key);
+                    if (features != null && features.length == 256) {
+                        for (int localZ = 0; localZ < 16; localZ++) {
+                            System.arraycopy(features, localZ * 16, task.features,
+                                    (z * 16 + localZ) * 128 + x * 16, 16);
+                        }
                     }
+                    for (SurfaceStructure structure : tile.structures()) {
+                        if (task.structures.size() >= 64) break;
+                        task.structures.add(structure);
+                    }
+                    if (entry.isColored(key)) task.coloredChunks |= 1L << index;
                 }
-                if (entry.isColored(key)) current.coloredChunks |= 1L << index;
             }
-            budget--;
-            if (current.next == 64) {
+
+            boolean done = task.next >= 64;
+            if (task.next == 8 || task.next == 32 || done) {
                 PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
-                        current.atlasId, current.dimension, current.pageX, current.pageZ,
-                        current.pixels, current.features, current.coloredChunks,
-                        entry.state().inkUnits(), entry.state().pigmentUnits(), entry.state().glowUnits(),
-                        entry.state().compassInstalled(), true,
-                        entry.markersOnPage(current.dimension, current.pageX, current.pageZ),
-                        java.util.List.copyOf(current.structures)));
-                iterator.remove();
+                        task.atlasId, task.dimension, task.pageX, task.pageZ,
+                        task.pixels.clone(), task.features.clone(), task.coloredChunks,
+                        entry.state().inkUnits(), entry.state().pigmentUnits(),
+                        entry.state().glowUnits(), entry.state().compassInstalled(),
+                        true, done, task.next, task.generated, task.painted,
+                        entry.anchorX(), entry.anchorZ(), entry.state().pages(),
+                        entry.markersOnPage(task.dimension, task.pageX, task.pageZ),
+                        List.copyOf(task.structures)));
             }
+            if (done) {
+                LOG.debug("Cartograph real surface survey completed: dimension={} page=({}, {}) " +
+                                "generated_FULL={}/64 painted={}/64 ink_units={} capacity={}",
+                        task.dimension, task.pageX, task.pageZ,
+                        task.generated, task.painted, entry.state().inkUnits(),
+                        entry.state().pages());
+                if (task.generated > 0 && task.painted == 0) {
+                    long now = player.serverLevel().getGameTime();
+                    Long prior = LAST_DIAGNOSTIC.get(viewer);
+                    if (prior == null || now - prior >= 1200) {
+                        LOG.info("Cartograph did not paint generated blocks: dimension={} " +
+                                        "page=({}, {}) full_chunks={} ink_unlocked={} ink_units={} " +
+                                        "required_per_chunk={} bought_pages={}",
+                                task.dimension, task.pageX, task.pageZ, task.generated,
+                                entry.state().inkEnabled(), entry.state().inkUnits(),
+                                CartographConfig.inkCostUnits(), entry.state().pages());
+                        LAST_DIAGNOSTIC.put(viewer, now);
+                    }
+                }
+                PENDING.remove(viewer);
+            } else ORDER.addLast(viewer);
         }
     }
 
@@ -174,7 +218,7 @@ public final class AtlasMapServer {
         final byte[] pixels = new byte[128 * 128];
         final byte[] features = new byte[128 * 128];
         final java.util.List<SurfaceStructure> structures = new java.util.ArrayList<>();
-        int next;
+        int next, generated, painted;
         long coloredChunks;
         Pending(String atlasId, int pageX, int pageZ, String dimension) {
             this.atlasId = atlasId; this.pageX = pageX; this.pageZ = pageZ; this.dimension = dimension;

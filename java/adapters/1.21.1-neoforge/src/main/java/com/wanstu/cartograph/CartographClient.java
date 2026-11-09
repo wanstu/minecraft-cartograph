@@ -1,6 +1,8 @@
 package com.wanstu.cartograph;
 
 import com.mojang.blaze3d.platform.NativeImage;
+import com.wanstu.cartograph.core.SpiralCoverage;
+import com.wanstu.cartograph.core.AtlasTone;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -33,10 +35,14 @@ public final class CartographClient {
     private static final int CACHE_LIMIT = 64;
     private static final LinkedHashMap<CacheKey, Entry> PAGES = new LinkedHashMap<>(32, 0.75f, true);
     private static final Set<CacheKey> QUEUED = new LinkedHashSet<>();
+    private static final Set<CacheKey> REDRAW = new LinkedHashSet<>();
     private static int ticks;
     private static boolean drawRoads = true;
     private static boolean drawRails = true;
     private static CacheKey inFlight;
+    private static boolean coverageKnown;
+    private static int anchorX, anchorZ, totalPages;
+    private static String coverageAtlas = "";
     private static int sentAt;
     private static String lastDimension = "";
     private static String lastAtlasId = "";
@@ -117,12 +123,25 @@ public final class CartographClient {
                 new MapNetwork.Request(atlasId(), pageX, pageZ));
     }
 
+    public static boolean coverageKnown() {
+        return coverageKnown && coverageAtlas.equals(atlasId());
+    }
+    public static boolean covered(int px, int pz) {
+        return !coverageKnown() || SpiralCoverage.covers(anchorX, anchorZ, px, pz, totalPages);
+    }
+    public static int pageCount() { return coverageKnown() ? totalPages :
+            currentAtlas().getOrDefault(CartographMod.ATLAS_STATE.get(), AtlasState.blank()).pages(); }
+    public static int pendingPages() { return QUEUED.size() + (inFlight != null ? 1 : 0); }
+    public static boolean awaitingPage() { return inFlight != null; }
+
     public static void queue(int px, int pz, boolean force) {
         if (Math.abs((long) px) > 234375 || Math.abs((long) pz) > 234375 || !hasAtlas()) return;
-        CacheKey key = key(px, pz);
-        Entry entry = PAGES.get(key);
+        if (!covered(px, pz)) return;
+        CacheKey cacheKey = key(px, pz);
+        Entry entry = PAGES.get(cacheKey);
         if (!force && entry != null && ticks - entry.updated() < 200) return;
-        QUEUED.add(key);
+        // Don't queue repeated work while a page is actively being scanned.
+        if (!cacheKey.equals(inFlight)) QUEUED.add(cacheKey);
     }
 
     public static MapNetwork.CostSettings settings() { return settings; }
@@ -175,6 +194,21 @@ public final class CartographClient {
         // multi-page book with several online viewers can replace an
         // incomplete 64-chunk request forever on busy servers.
         if (inFlight != null && ticks - sentAt >= 220) inFlight = null;
+        // Re-rendering all 64 cached textures in a click handler froze the
+        // game UI. Redraw at most two per client tick instead.
+        int redrawn = 0;
+        Iterator<CacheKey> redrawing = REDRAW.iterator();
+        while (redrawing.hasNext() && redrawn < 2) {
+            CacheKey key = redrawing.next();
+            redrawing.remove();
+            Entry old = PAGES.get(key);
+            if (old == null) continue;
+            if (old.textureId() != null)
+                mc.getTextureManager().release(old.textureId());
+            PAGES.put(key, createEntry(old.page(), old.updated()));
+            redrawn++;
+        }
+
         if (ticks % 6 == 1 && inFlight == null && !QUEUED.isEmpty()) {
             Iterator<CacheKey> it = QUEUED.iterator();
             CacheKey q = it.next();
@@ -192,12 +226,7 @@ public final class CartographClient {
         if (drawRoads == roads && drawRails == rails) return;
         drawRoads = roads;
         drawRails = rails;
-        Minecraft mc = Minecraft.getInstance();
-        var snapshot = new ArrayList<>(PAGES.entrySet());
-        for (var item : snapshot) {
-            mc.getTextureManager().release(item.getValue().textureId());
-            PAGES.put(item.getKey(), createEntry(item.getValue().page(), item.getValue().updated()));
-        }
+        REDRAW.addAll(PAGES.keySet());
     }
 
     /** Map points panel lists markers only from pages already supplied for this atlas. */
@@ -213,33 +242,66 @@ public final class CartographClient {
     }
 
     private static Entry createEntry(MapNetwork.Page page, int updated) {
+        // Unknown/unpurchased pages are already covered by the paper-colored
+        // Screen background. Do not allocate 128² native pixels and a GPU texture.
+        if (!page.inRange() || page.painted() == 0)
+            return new Entry(page, null, null, updated);
         Minecraft mc = Minecraft.getInstance();
-        NativeImage pixels = new NativeImage(128, 128, false);
-        for (int z = 0; z < 128; z++) for (int x = 0; x < 128; x++) {
-            int packed = Byte.toUnsignedInt(page.pixels()[x + z * 128]);
-            int rgb;
-            if (!page.inRange() || packed == 0 || packed > 64) rgb = 0xe4d5b4;
+        int[] sourceRgb = new int[128 * 128];
+        byte[] categories = new byte[128 * 128];
+        for (int i = 0; i < sourceRgb.length; i++) {
+            int packed = Byte.toUnsignedInt(page.pixels()[i]);
+            if (packed == 0 || packed > 64) continue;
+            int rgb = MapColor.byId(packed - 1).col & 0xffffff;
+            sourceRgb[i] = rgb;
+            int x = i % 128, z = i / 128;
+            int chunk = (z / 16) * 8 + (x / 16);
+            boolean color = (page.coloredChunks() & (1L << chunk)) != 0;
+            if (color) categories[i] = 3;
             else {
-                int mapId = packed - 1;
-                rgb = MapColor.byId(mapId).col & 0xffffff;
-                int chunkX = x / 16, chunkZ = z / 16;
-                boolean colorized = (page.coloredChunks() & (1L << (chunkZ * 8 + chunkX))) != 0;
-                if (!colorized) {
-                    int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
-                    int lightness = (r * 30 + g * 59 + b * 11) / 100;
-                    rgb = lightness >= 132 ? 0xf4efdf : 0x292724;
-                }
-                int feature = Byte.toUnsignedInt(page.features()[x + z * 128]);
-                if (feature == 1 && drawRoads) rgb = colorized ? 0xa58352 : 0x282724;
-                if (feature == 2 && drawRails) rgb = colorized ? 0x353e42 : 0x111b1a;
-                if (feature == 3 && drawRails) rgb = colorized ? 0x5b8790 : 0x111b1a;
+                int r = (rgb >> 16) & 255;
+                int g = (rgb >> 8) & 255;
+                int b = rgb & 255;
+                int lightness = (r * 30 + g * 59 + b * 11) / 100;
+                categories[i] = (byte) (lightness >= 132 ? 1 : 2);
+            }
+        }
+        // 5x5 majority using integral images (linear time). Removes random
+        // grass/leaf/block binary speckle without introducing grayscale or
+        // turning ungenerated cells into imaginary terrain.
+        byte[] filtered = AtlasTone.smooth(categories);
+        NativeImage pixels = new NativeImage(128, 128, false);
+        for (int i = 0; i < filtered.length; i++) {
+            int tone = Byte.toUnsignedInt(filtered[i]);
+            int rgb = switch (tone) {
+                case 1 -> 0xf4efdf;
+                case 2 -> 0x292724;
+                case 3 -> sourceRgb[i];
+                default -> 0xe4d5b4;
+            };
+            if (tone != 0) {
+                int feature = Byte.toUnsignedInt(page.features()[i]);
+                if (feature == 1 && drawRoads) rgb = tone == 3 ? 0xa58352 : 0x282724;
+                if (feature == 2 && drawRails) rgb = tone == 3 ? 0x353e42 : 0x111b1a;
+                if (feature == 3 && drawRails) rgb = tone == 3 ? 0x5b8790 : 0x111b1a;
             }
             int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
-            pixels.setPixelRGBA(x, z, 0xff000000 | (b << 16) | (g << 8) | r);
+            pixels.setPixelRGBA(i % 128, i / 128, 0xff000000 | (b << 16) | (g << 8) | r);
         }
         DynamicTexture texture = new DynamicTexture(pixels);
         ResourceLocation textureId = mc.getTextureManager().register("cartograph/page", texture);
         return new Entry(page, texture, textureId, updated);
+    }
+
+    public static void acceptFeedback(MapNetwork.Feedback result) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof AtlasScreen atlas) {
+            atlas.feedback(result.ok(), result.message());
+        } else if (mc.player != null) {
+            mc.player.displayClientMessage(
+                    net.minecraft.network.chat.Component.literal(
+                            (result.ok() ? "绘图师：" : "绘图师 · 失败：") + result.message()), true);
+        }
     }
 
     public static void acceptPage(MapNetwork.Page page) {
@@ -248,33 +310,55 @@ public final class CartographClient {
         if (mc.level == null || !mc.level.dimension().location().toString().equals(page.dimension()))
             return;
         String requestedId = atlasId();
+        // Fresh books are assigned an ID on first server access and sync later.
+        if (!requestedId.isBlank() && !requestedId.equals(page.atlasId())) return;
+        boolean firstCoverage = !coverageKnown || !coverageAtlas.equals(page.atlasId());
+        coverageKnown = true;
+        coverageAtlas = page.atlasId();
+        anchorX = page.anchorX(); anchorZ = page.anchorZ();
+        totalPages = page.totalPages();
         if (inFlight != null && inFlight.px() == page.pageX()
                 && inFlight.pz() == page.pageZ()
                 && inFlight.dimension().equals(page.dimension())) {
-            inFlight = null;
+            if (page.complete()) inFlight = null;
+            else sentAt = ticks; // progress packet is a heartbeat; don't time out an active scan.
         }
-        // Fresh books are assigned an ID on first server access and sync later.
-        if (!requestedId.isBlank() && !requestedId.equals(page.atlasId())) return;
+        // Ignore the dozens of out-of-coverage requests accumulated while the
+        // first page was still determining the atlas' authoritative anchor.
+        QUEUED.removeIf(q -> !SpiralCoverage.covers(anchorX, anchorZ,
+                q.px(), q.pz(), totalPages));
         lastAtlasId = page.atlasId();
+        if (firstCoverage && mc.screen instanceof AtlasScreen screen) {
+            screen.refreshVisible();
+        }
         CacheKey key = new CacheKey(page.atlasId(), page.dimension(), page.pageX(), page.pageZ());
+        REDRAW.remove(key);
         Entry previous = PAGES.remove(key);
-        if (previous != null) mc.getTextureManager().release(previous.textureId());
+        if (previous != null && previous.textureId() != null)
+            mc.getTextureManager().release(previous.textureId());
 
         Entry fresh = createEntry(page, ticks);
         PAGES.put(key, fresh);
         while (PAGES.size() > CACHE_LIMIT) {
             CacheKey oldest = PAGES.keySet().iterator().next();
             Entry removed = PAGES.remove(oldest);
-            mc.getTextureManager().release(removed.textureId());
+            if (removed.textureId() != null)
+                mc.getTextureManager().release(removed.textureId());
         }
     }
 
     public static void clear() {
         Minecraft mc = Minecraft.getInstance();
-        for (Entry e : PAGES.values()) mc.getTextureManager().release(e.textureId());
+        for (Entry e : PAGES.values()) {
+            if (e.textureId() != null) mc.getTextureManager().release(e.textureId());
+        }
         PAGES.clear();
         QUEUED.clear();
+        REDRAW.clear();
         inFlight = null;
+        coverageKnown = false;
+        coverageAtlas = "";
+        anchorX = 0; anchorZ = 0; totalPages = 0;
         lastDimension = "";
         lastAtlasId = "";
         previousAtlas = ItemStack.EMPTY;

@@ -42,6 +42,8 @@ public final class AtlasWorldData extends SavedData {
         public AtlasState state() { return state; }
 
         public boolean anchored() { return !anchorDimension.isEmpty(); }
+        public int anchorX() { return anchorX; }
+        public int anchorZ() { return anchorZ; }
         public void setAnchor(String dim, int x, int z) {
             if (!anchored()) { anchorDimension = dim; anchorX = x; anchorZ = z; }
         }

@@ -34,6 +34,8 @@ public final class MapNetwork {
     public record Page(String atlasId, String dimension, int pageX, int pageZ,
                        byte[] pixels, byte[] features, long coloredChunks, int inkUnits, int pigmentUnits,
                        int glowUnits, boolean compass, boolean inRange,
+                       boolean complete, int scanned, int generated, int painted,
+                       int anchorX, int anchorZ, int totalPages,
                        List<AtlasMarker> markers, List<SurfaceStructure> structures) implements CustomPacketPayload {
         public static final Type<Page> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "page"));
@@ -48,6 +50,11 @@ public final class MapNetwork {
                     buf.writeInt(value.inkUnits); buf.writeInt(value.pigmentUnits);
                     buf.writeInt(value.glowUnits);
                     buf.writeBoolean(value.compass); buf.writeBoolean(value.inRange);
+                    buf.writeBoolean(value.complete);
+                    buf.writeVarInt(value.scanned); buf.writeVarInt(value.generated);
+                    buf.writeVarInt(value.painted);
+                    buf.writeInt(value.anchorX); buf.writeInt(value.anchorZ);
+                    buf.writeVarInt(value.totalPages);
                     if (value.markers.size() > 128) throw new IllegalArgumentException("Too many markers");
                     buf.writeVarInt(value.markers.size());
                     for (AtlasMarker m : value.markers) {
@@ -75,6 +82,14 @@ public final class MapNetwork {
                     long colored = buf.readLong();
                     int ink = buf.readInt(), pigment = buf.readInt(), glow = buf.readInt();
                     boolean compass = buf.readBoolean(), inRange = buf.readBoolean();
+                    boolean complete = buf.readBoolean();
+                    int scanned = buf.readVarInt(), generated = buf.readVarInt();
+                    int painted = buf.readVarInt();
+                    int anchorX = buf.readInt(), anchorZ = buf.readInt();
+                    int totalPages = buf.readVarInt();
+                    if (scanned < 0 || scanned > 64 || generated < 0 || generated > 64
+                            || painted < 0 || painted > 64 || totalPages < 1 || totalPages > 65536)
+                        throw new IllegalArgumentException("Invalid survey progress");
                     int count = buf.readVarInt();
                     if (count < 0 || count > 128) throw new IllegalArgumentException("Invalid waypoint count");
                     List<AtlasMarker> markers = new ArrayList<>(count);
@@ -92,7 +107,8 @@ public final class MapNetwork {
                         structures.add(new SurfaceStructure(buf.readUtf(64), buf.readInt(), buf.readInt()));
                     }
                     return new Page(atlasId, dim, pageX, pageZ, pixels, features, colored,
-                            ink, pigment, glow, compass, inRange,
+                            ink, pigment, glow, compass, inRange, complete, scanned, generated,
+                            painted, anchorX, anchorZ, totalPages,
                             List.copyOf(markers), List.copyOf(structures));
                 });
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -173,11 +189,25 @@ public final class MapNetwork {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
+    /** A server-confirmed operation result, never a speculative client toast. */
+    public record Feedback(boolean ok, String message) implements CustomPacketPayload {
+        public static final Type<Feedback> TYPE =
+                new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "feedback"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, Feedback> CODEC = StreamCodec.of(
+                (buf, value) -> { buf.writeBoolean(value.ok); buf.writeUtf(value.message, 160); },
+                buf -> new Feedback(buf.readBoolean(), buf.readUtf(160)));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("3");
+        var registrar = event.registrar("5");
         registrar.playToServer(Request.TYPE, Request.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasMapServer.enqueue(player, request);
+                }));
+        registrar.playToClient(Feedback.TYPE, Feedback.CODEC, (result, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.acceptFeedback(result);
                 }));
         registrar.playToServer(EditMarker.TYPE, EditMarker.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {

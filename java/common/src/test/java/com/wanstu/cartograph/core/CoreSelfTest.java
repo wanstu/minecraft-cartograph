@@ -51,6 +51,22 @@ public final class CoreSelfTest {
         yes(ledger.survey(another, true, true, true, true, 0, 0, 0, 0).firstSurvey(), "zero-rate but unlocked");
         yes(ledger.survey(new SurveyLedger.ChunkKey("minecraft:the_nether", 3, -5), false, true, true, false, 1, 0, 1, 1).fullySurveyed() == false, "dimensions isolated");
 
+        // No accidental fabricated pixels: unknown and colorized areas remain
+        // untouched while isolated binary speckles are suppressed in linear time.
+        byte[] tones = new byte[128 * 128];
+        for (int z = 5; z < 80; z++) for (int x = 5; x < 80; x++)
+            tones[z * 128 + x] = 1;
+        tones[20 * 128 + 20] = 2; // isolated dark leaf on a light landmass
+        for (int z = 40; z < 55; z++) for (int x = 40; x < 55; x++)
+            tones[z * 128 + x] = 2; // real solid dark water/forest patch
+        tones[12 * 128 + 12] = 3; // previously colorized square
+        byte[] smoothed = AtlasTone.smooth(tones);
+        yes(smoothed[20 * 128 + 20] == 1, "isolated map pixel noise removed");
+        yes(smoothed[45 * 128 + 45] == 2, "real black terrain region preserved");
+        yes(smoothed[12 * 128 + 12] == 3, "color upgrades stay colored");
+        yes(smoothed[110 * 128 + 110] == 0, "never invent ungenerated terrain");
+        yes(tones[20 * 128 + 20] == 2, "survey source remains immutable");
+
         Path tmp = Files.createTempDirectory("cartograph-mca-test");
         try {
             Path file = tmp.resolve("r.-1.0.mca");
@@ -88,6 +104,6 @@ public final class CoreSelfTest {
             try (var files = Files.list(tmp)) { for (var file : files.toList()) Files.delete(file); }
             Files.delete(tmp);
         }
-        System.out.println("PASS Cartograph common: spiral coverage, exact-once debit, dimension isolation, MCA zlib decoding");
+        System.out.println("PASS Cartograph common: spiral coverage, exact-once debit, dimension isolation, MCA zlib, monochrome filter");
     }
 }
