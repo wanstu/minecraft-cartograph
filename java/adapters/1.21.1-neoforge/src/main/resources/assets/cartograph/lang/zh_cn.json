@@ -13,5 +13,13 @@
   "cartograph.message.inspect": "地图册状态 · %s 页 · 墨水 %s · 颜料 %s · 发光墨水 %s",
   "key.cartograph.open": "打开绘图师地图册",
   "key.categories.cartograph": "绘图师",
-  "screen.cartograph.atlas": "绘图师 · 世界地图"
+  "screen.cartograph.atlas": "绘图师 · 世界地图",
+  "cartograph.message.gui_compass_removed": "已取回指南针",
+  "cartograph.message.gui_compass_installed": "已安装指南针",
+  "cartograph.message.gui_refilled": "已补充地图册耗材",
+  "cartograph.message.material_missing": "背包中没有所需材料",
+  "cartograph.message.glow_needed": "需要先装入发光墨囊并有足够的发光墨水",
+  "cartograph.message.map_needed": "需要一张原版空地图才能拓印",
+  "cartograph.message.map_empty": "该页尚未测绘任何真实地表",
+  "cartograph.message.map_exported": "地图已拓印至原版地图（地图册原页保留）"
 }

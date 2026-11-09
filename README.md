@@ -1,40 +1,69 @@
 # Cartograph / 绘图师
 
-Survival-friendly Minecraft map atlas. Uses **actual generated/saved terrain**, not world-seed predictions or forced chunk generation.
+A survival atlas for Minecraft that maps **only actually generated / saved terrain**. No seed prediction, no forced chunk generation, and no underground radar.
 
-## Current status (development snapshot)
+适用于喜欢建设而不希望为了绘图遍历整张地图的玩家。已经生成、保存的区块不需要玩家亲自探索；未生成的区块保持空白。
 
-**Minecraft 1.21.1 NeoForge adapter now builds and starts on a dedicated development server.** It has the first real saved-chunk survey pipeline, in-game single-page map viewer, held-map HUD, client/server data packets and server-authoritative world SavedData ledger. **This is still an unreleased development version** and has not passed client gameplay acceptance.
+## 当前状态 / Status
 
-- Main-hand right-click with no material in the offhand, or **M** while an atlas is in inventory: open a 128×128 map page. Arrow keys switch pages, mouse wheel zooms.
-- Holding an atlas displays a small current-page minimap after the page is surveyed. Player arrow requires the nonconsumable compass upgrade.
-- Temporary material input: atlas in the main hand + ink sac, glow ink sac, red/yellow/blue dye or compass in the offhand, then right click. Sneak + empty offhand returns the compass.
-- Atlas crafting: vanilla empty map + leather + feather; extend with atlas + vanilla empty map on the standard crafting table.
-- Server loads **FULL** saved chunk surface pixels from MCA region files or already-loaded chunks only; map is black/white until colored. First survey and first colorization cost ink/pigment according to configurable server multipliers. Repeated updates are free.
-- Remaining major work: proper two-slot atlas UI, continuous multi-page map, manually edited/glowing waypoints, validated surface structure icons, vanilla/Create road and track overlays, vanilla map export, real client acceptance.
+**开发测试版，仅 Minecraft 1.21.1 NeoForge 适配器已实现并完成编译、服务端启动测试；尚无 Minecraft 客户端实机验收。** 不要当作已经验收完成的正式发布版。
 
-Full technical implementation and acceptance: [docs/SURVEY_PIPELINE.md](docs/SURVEY_PIPELINE.md). Product rules: [docs/MECHANICS_V1.md](docs/MECHANICS_V1.md).
+| Feature / 功能 | Development status |
+|---|---|
+| 地图册合成：空地图 + 皮革 + 羽毛 | 已实现 |
+| 普通工作台用地图册 + 空地图扩页 | 已实现 |
+| 每张 128×128 / 只读已生成 FULL 区块 | 已实现 |
+| 未装墨水不绘图，首绘扣费、后续免费刷新 | 已实现，需实机回归 |
+| 黑白、三原色补色、独立资源与指南针 | 已实现，需实机回归 |
+| 连续大地图平移/缩放及手持小地图 | 已编译，需客户端验收 |
+| 地图册界面：通用耗材选择入口/指南针入口 | 已编译，需客户端验收 |
+| 自定义标点、图标/颜色/名称、发光/编辑/删除 | 已编译，需客户端验收 |
+| 从已测绘页拓印原版地图，消耗 1 空地图 | 已编译，需客户端验收 |
+| 地表真实道路、原版铁轨、Create 轨道方块 | 已实现基础识别；Create 曲线需后续验收 |
+| 自动标记经地表建筑方块核验的结构 | 已实现部分原版地表结构；非全覆盖 |
+| 三个资源 0–10× 消耗倍率，服务端管理员保存 | 已编译，需实机验收 |
+| Fabric、其它 Minecraft 版本 | 计划中，未编译、未发布 |
 
-## Source layout
+## 快速使用（1.21.1 NeoForge 开发版本）
 
-```
-java/common/                          # Java 17 pure shared source and tests
-java/adapters/1.21.1-neoforge/        # compiled loader adapter (Java 21)
-config/targets.json                  # planned and implemented adapter matrix
-docs/SURVEY_PIPELINE.md              # live survey implementation / known limitations
-docs/MULTI_VERSION.md                # GeoWorld-style multi-version release contract
-preview/cartograph-prototype.html     # standalone HTML design prototype
-.github/workflows/release.yml         # test & per-target builds; releases gated
-```
+1. 用原版 **空地图 + 皮革 + 羽毛** 无序合成地图册。
+2. 主手拿地图册右键，或地图册在背包时按 **M**，打开 Cartograph。
+3. 右侧“通用耗材填入口”可选择从背包投入墨囊/发光墨囊/红黄蓝染料；“指南针”独立可装可取。需要先装墨水才会首次测绘。
+4. 在原版工作台用 **地图册 + 空地图** 扩充页数。每页固定原版 0 级地图大小（128×128 方块）。
+5. 大地图左键拖动平移、滚轮缩放。右键地表已测绘区域创建标点或**取出地图**（需要另消耗一张空地图）；右键标点进行编辑/删除。装了指南针才显示自己的位置。
+6. 彩色要红、黄、蓝染料各一份；默认倍率墨水/颜料/发光墨水都是 1.0×，服务器管理员可在地图册的消耗设置内调 0–10×。
+7. **后续变动自动更新，不再重复扣材料**。未生成/地下地形不提前绘制。
 
-## Validate in dadm
+临时兼容交互：主手地图册 + 副手耗材右键同样能补充；潜行+空副手右键可以取回指南针。图册 UI 为主要入口。
 
-```sh
+## Build / 验证
+
+需要 Java 21。构建会使用官方 NeoForge ModDevGradle 的 1.21.1 工程。
+
+```bash
 bash scripts/verify-common.sh
 cd java/adapters/1.21.1-neoforge
 ./gradlew --no-daemon check build
 ```
 
-Build JAR: `java/adapters/1.21.1-neoforge/build/libs/Cartograph-0.1.0-mc1.21.1-neoforge.jar`. Other Minecraft/loader versions remain **planned**, not available, until verified. `release_ready=false` prevents accidental formal releases.
+产物：`java/adapters/1.21.1-neoforge/build/libs/Cartograph-0.1.0-mc1.21.1-neoforge.jar`
 
-Cartograph is an independent implementation; [Map Atlases](https://github.com/Pepperoni-Jabroni/MapAtlases) serves as a feature reference, without embedding its GPL-3.0 source.
+服务器运行所需文件必须是相同版本，客户端和服务器双方都需安装 Cartograph。不要把这个 JAR 当作 Fabric 模组。
+
+## 多版本 CI / 发布
+
+- `java/common`（Java 17）保存地图坐标/实际 MCA 数据读取/免费刷新账本等公共逻辑。
+- `java/adapters/<minecraft>-<loader>` 每个版本独立编译为对应单 JAR，避免虚假的跨版本兼容。
+- `config/targets.json` 的 `status=implemented` 才加入 GitHub Actions 构建矩阵。目前唯一已实现目标是 **1.21.1 NeoForge**；其余八个是 `planned`。
+- `.github/workflows/release.yml`：main 推送及 PR 自动进行公共测试、构建、JAR 结构校验并上传 Action artifact；tag `v<version>` 可在正式放行后形成 Release JAR 和 SHA256SUMS。
+- **`release_ready=false`**：在客户端验收、存档复测完成前，GitHub Release 故意不创建；仅提供 CI 开发版 artifacts，避免误当稳定版。
+
+详细说明：[真实测绘验收与限制](docs/SURVEY_PIPELINE.md) · [正式机制契约](docs/MECHANICS_V1.md) · [多版本设计](docs/MULTI_VERSION.md) · [发布与 CI 操作](docs/GITHUB_RELEASE.md)。
+
+## 尚未实现/验收
+
+- Create 曲线轨道连线的精细还原、更多自然地表结构；不支持地下道路/铁路。
+- 客户端 GUI 实际交互、双人联机、复制物品余额防重复计费、异常关服/恢复后的计费一致性实测尚未全部验收。
+- 额外 Fabric/NeoForge 版本适配，以及 Modrinth/CurseForge 发布。
+
+Cartograph 的代码为独立实现；[Map Atlases](https://github.com/Pepperoni-Jabroni/MapAtlases) 仅作交互参考，不复制其 GPL-3.0 源码。

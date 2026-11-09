@@ -2,6 +2,8 @@ package com.wanstu.cartograph;
 
 import com.wanstu.cartograph.world.McaChunkReader;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtAccounter;
@@ -11,6 +13,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.SimpleBitStorage;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -20,20 +23,29 @@ import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.level.storage.LevelResource;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
-import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * Samples ACTUAL existing surface blocks only. Loaded chunks use getChunkNow()
- * (never getChunk()); unloaded ones are decoded from a confirmed saved MCA
- * FULL chunk. Missing/incomplete chunks remain blank. Seed is never inspected.
- * Does not scan structure starts or underground rooms.
+ * No seed, no forced chunk load. All pixels/roads/rails and structure markers
+ * derive from real loaded FULL chunks or previously saved FULL chunk NBT only.
+ * Underground materials are deliberately never scanned or drawn.
  */
 public final class SurfaceSampler {
     private SurfaceSampler() {}
+
+    /** 0 no feature, 1 natural dirt-path road, 2 vanilla railway, 3 Create railway. */
+    public record SurfaceTile(byte[] colors, byte[] features, List<SurfaceStructure> structures) {
+        public SurfaceTile {
+            if (colors == null || colors.length != 256 || features == null || features.length != 256)
+                throw new IllegalArgumentException("Expected 16x16 genuine surface samples");
+            structures = List.copyOf(structures);
+        }
+    }
 
     private static Path regionDir(ServerLevel level) {
         Path world = level.getServer().getWorldPath(LevelResource.ROOT);
@@ -44,11 +56,11 @@ public final class SurfaceSampler {
         return world.resolve("dimensions").resolve(id.getNamespace()).resolve(id.getPath()).resolve("region");
     }
 
-    public static Optional<byte[]> surface(ServerLevel level, int chunkX, int chunkZ) {
+    public static Optional<SurfaceTile> surface(ServerLevel level, int chunkX, int chunkZ) {
         try {
             LevelChunk loaded = level.getChunkSource().getChunkNow(chunkX, chunkZ);
             if (loaded != null && loaded.getPersistedStatus().isOrAfter(ChunkStatus.FULL)) {
-                return Optional.of(sampleLoaded(loaded, chunkX, chunkZ));
+                return Optional.of(sampleLoaded(level, loaded, chunkX, chunkZ));
             }
             Optional<byte[]> raw = McaChunkReader.readNbt(regionDir(level), chunkX, chunkZ);
             if (raw.isEmpty()) return Optional.empty();
@@ -60,33 +72,95 @@ public final class SurfaceSampler {
                 return Optional.ofNullable(sampleSaved(level, nbt));
             }
         } catch (Exception badOrUnsupportedSave) {
-            // Unsupported compression/chunk data must never reveal inferred terrain.
+            // Unsupported compression/chunk data remains blank, never predicted.
             return Optional.empty();
         }
     }
 
-    private static byte[] sampleLoaded(LevelChunk chunk, int chunkX, int chunkZ) {
-        byte[] result = new byte[256];
+    private static SurfaceTile sampleLoaded(ServerLevel level, LevelChunk chunk, int chunkX, int chunkZ) {
+        byte[] result = new byte[256], features = new byte[256];
+        String[] surfaceNames = new String[256];
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
+            int i = x + z * 16;
             int y = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
             pos.set(chunkX * 16 + x, y, chunkZ * 16 + z);
-            result[x + z * 16] = sampleColor(chunk.getBlockState(pos), pos);
+            BlockState block = chunk.getBlockState(pos);
+            String key = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
+            result[i] = sampleColor(block, chunk, pos);
+            features[i] = classifyFeature(key);
+            surfaceNames[i] = key;
         }
-        return result;
+        List<SurfaceStructure> markers = new ArrayList<>();
+        var structureRegistry = level.registryAccess().registryOrThrow(Registries.STRUCTURE);
+        for (var entry : chunk.getAllStarts().entrySet()) {
+            var start = entry.getValue();
+            if (start == null || !start.isValid()) continue;
+            ResourceLocation id = structureRegistry.getKey(entry.getKey());
+            if (id == null) continue;
+            String type = id.toString();
+            if (verifiedSurfaceStructure(type, surfaceNames, features)) {
+                markers.add(new SurfaceStructure(type, chunkX * 16 + 8, chunkZ * 16 + 8));
+                if (markers.size() >= 4) break;
+            }
+        }
+        return new SurfaceTile(result, features, markers);
     }
 
-    private static byte sampleColor(BlockState block, BlockPos pos) {
+    private static byte sampleColor(BlockState block, BlockGetter world, BlockPos pos) {
         try {
-            MapColor color = block.getMapColor(null, pos);
-            return (byte) (color.id + 1); // zero reserved for unmapped tiles
+            MapColor color = block.getMapColor(world, pos);
+            return (byte) (color.id + 1); // zero is never-surveyed
         } catch (Exception worldDependentColor) {
             return (byte) (MapColor.STONE.id + 1);
         }
     }
 
-    /** Version-specific decoder: 1.21.1 saved FULL chunk NBT and local block palette. */
-    private static byte[] sampleSaved(ServerLevel level, CompoundTag nbt) {
+    private static byte classifyFeature(String key) {
+        if ("minecraft:dirt_path".equals(key)) return 1;
+        if ("minecraft:rail".equals(key) || "minecraft:powered_rail".equals(key)
+                || "minecraft:detector_rail".equals(key) || "minecraft:activator_rail".equals(key)) return 2;
+        // Independent optional Create support: the mod is never a required dependency.
+        if ("create:track".equals(key)) return 3;
+        return 0;
+    }
+
+    private static boolean verifiedSurfaceStructure(String id, String[] top, byte[] features) {
+        int count = 0;
+        if (id.startsWith("minecraft:village_")) {
+            for (byte f : features) if (f == 1) count++;
+            if (count >= 2) return true;
+            for (String block : top) if ("minecraft:bell".equals(block) || "minecraft:hay_block".equals(block))
+                return true;
+            return false;
+        }
+        for (String block : top) {
+            if (block == null) continue;
+            boolean evidence;
+            if (id.equals("minecraft:desert_pyramid"))
+                evidence = block.equals("minecraft:chiseled_sandstone") || block.equals("minecraft:cut_sandstone");
+            else if (id.equals("minecraft:jungle_temple"))
+                evidence = block.equals("minecraft:mossy_cobblestone");
+            else if (id.equals("minecraft:pillager_outpost"))
+                evidence = block.equals("minecraft:dark_oak_log") || block.equals("minecraft:spruce_planks");
+            else if (id.equals("minecraft:woodland_mansion"))
+                evidence = block.equals("minecraft:dark_oak_planks");
+            else if (id.startsWith("minecraft:ruined_portal"))
+                evidence = block.equals("minecraft:obsidian") || block.equals("minecraft:crying_obsidian");
+            else if (id.equals("minecraft:swamp_hut"))
+                evidence = block.equals("minecraft:spruce_planks");
+            else if (id.equals("minecraft:igloo"))
+                evidence = block.equals("minecraft:snow_block");
+            else if (id.equals("minecraft:shipwreck_beached"))
+                evidence = block.endsWith("_planks");
+            else return false;
+            if (evidence && ++count >= 2) return true;
+        }
+        return false;
+    }
+
+    /** Decode 1.21.1 saved FULL chunk NBT without loading it into Minecraft. */
+    private static SurfaceTile sampleSaved(ServerLevel level, CompoundTag nbt) {
         CompoundTag maps = nbt.getCompound("Heightmaps");
         long[] height = maps.getLongArray("WORLD_SURFACE");
         int bits = 32 - Integer.numberOfLeadingZeros(level.getHeight());
@@ -95,6 +169,7 @@ public final class SurfaceSampler {
         SimpleBitStorage surface = new SimpleBitStorage(bits, 256, height);
 
         Map<Integer, BlockState[]> palettes = new HashMap<>();
+        Map<Integer, String[]> names = new HashMap<>();
         Map<Integer, SimpleBitStorage> indices = new HashMap<>();
         ListTag sections = nbt.getList("sections", Tag.TAG_COMPOUND);
         for (int i = 0; i < sections.size(); i++) {
@@ -104,13 +179,17 @@ public final class SurfaceSampler {
             ListTag paletteList = blocks.getList("palette", Tag.TAG_COMPOUND);
             if (paletteList.isEmpty()) continue;
             BlockState[] states = new BlockState[paletteList.size()];
+            String[] registryIds = new String[paletteList.size()];
             for (int j = 0; j < states.length; j++) {
-                // Decode actual saved palette IDs. Unknown mods use a conservative
-                // fallback color, not a guessed structure or seed-derived block.
-                states[j] = BlockState.CODEC.parse(NbtOps.INSTANCE, paletteList.get(j))
+                CompoundTag palette = paletteList.getCompound(j);
+                registryIds[j] = palette.getString("Name");
+                // Unknown mod blocks use a safe stone map color, but retaining
+                // the actual palette name still lets us identify Create:track.
+                states[j] = BlockState.CODEC.parse(NbtOps.INSTANCE, palette)
                         .result().orElse(Blocks.STONE.defaultBlockState());
             }
             palettes.put(sectionY, states);
+            names.put(sectionY, registryIds);
             if (states.length > 1) {
                 int blockBits = Math.max(4, 32 - Integer.numberOfLeadingZeros(states.length - 1));
                 long[] packed = blocks.getLongArray("data");
@@ -119,21 +198,41 @@ public final class SurfaceSampler {
                 indices.put(sectionY, new SimpleBitStorage(blockBits, 4096, packed));
             }
         }
-        byte[] result = new byte[256];
+
+        byte[] result = new byte[256], features = new byte[256];
+        String[] topNames = new String[256];
         int minBuild = level.getMinBuildHeight();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        int cx = nbt.getInt("xPos"), cz = nbt.getInt("zPos");
         for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
             int i = x + z * 16;
             int y = minBuild + surface.get(i) - 1;
             int sectionY = Math.floorDiv(y, 16);
             BlockState[] palette = palettes.get(sectionY);
-            if (palette == null) return null;
+            String[] registryIds = names.get(sectionY);
+            if (palette == null || registryIds == null) return null;
             SimpleBitStorage storage = indices.get(sectionY);
             int blockIndex = storage == null ? 0 : storage.get(((y & 15) << 8) | (z << 4) | x);
             if (blockIndex < 0 || blockIndex >= palette.length) return null;
-            pos.set(nbt.getInt("xPos") * 16 + x, y, nbt.getInt("zPos") * 16 + z);
-            result[i] = sampleColor(palette[blockIndex], pos);
+            pos.set(cx * 16 + x, y, cz * 16 + z);
+            result[i] = sampleColor(palette[blockIndex], null, pos);
+            features[i] = classifyFeature(registryIds[blockIndex]);
+            topNames[i] = registryIds[blockIndex];
         }
-        return result;
+
+        List<SurfaceStructure> markers = new ArrayList<>();
+        CompoundTag starts = nbt.getCompound("structures").getCompound("starts");
+        for (String type : starts.getAllKeys()) {
+            CompoundTag structure = starts.getCompound(type);
+            if (structure.getString("id").isBlank() || structure.getString("id").equals("INVALID")
+                    || structure.getList("Children", Tag.TAG_COMPOUND).isEmpty()) continue;
+            // A seed-predicted reference is not enough: only persisted FULL
+            // chunks with actual placed, visible signature blocks qualify.
+            if (verifiedSurfaceStructure(type, topNames, features)) {
+                markers.add(new SurfaceStructure(type, cx * 16 + 8, cz * 16 + 8));
+                if (markers.size() >= 4) break;
+            }
+        }
+        return new SurfaceTile(result, features, markers);
     }
 }

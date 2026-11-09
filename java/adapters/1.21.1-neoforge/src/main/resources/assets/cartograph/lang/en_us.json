@@ -13,5 +13,13 @@
   "cartograph.message.inspect": "Atlas · %s pages · Ink %s · Pigment %s · Glow %s",
   "key.cartograph.open": "Open Cartograph atlas",
   "key.categories.cartograph": "Cartograph",
-  "screen.cartograph.atlas": "Cartograph · World Map"
+  "screen.cartograph.atlas": "Cartograph · World Map",
+  "cartograph.message.gui_compass_removed": "Compass removed",
+  "cartograph.message.gui_compass_installed": "Compass installed",
+  "cartograph.message.gui_refilled": "Atlas supplies refilled",
+  "cartograph.message.material_missing": "Required item not found in inventory",
+  "cartograph.message.glow_needed": "Install glow ink and ensure sufficient glow charge",
+  "cartograph.message.map_needed": "One vanilla empty map is required",
+  "cartograph.message.map_empty": "This atlas page has no surveyed terrain to export",
+  "cartograph.message.map_exported": "Copied the atlas page to a vanilla map (atlas page retained)"
 }

@@ -23,7 +23,11 @@ public final class AtlasItem extends Item {
 
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
-        if (hand != InteractionHand.MAIN_HAND) return InteractionResultHolder.pass(player.getItemInHand(hand));
+        // Right-click also opens the atlas when it is held in the offhand.
+        if (hand == InteractionHand.OFF_HAND) {
+            if (level.isClientSide) CartographClient.open();
+            return InteractionResultHolder.sidedSuccess(player.getItemInHand(hand), level.isClientSide);
+        }
         ItemStack atlas = player.getItemInHand(hand);
         ItemStack input = player.getOffhandItem();
         boolean material = input.is(Items.COMPASS) || input.is(Items.INK_SAC) || input.is(Items.GLOW_INK_SAC)
