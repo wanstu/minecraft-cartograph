@@ -117,6 +117,19 @@ public final class AtlasScreen extends Screen {
         super.render(g, mouseX, mouseY, partial);
     }
 
+    /**
+     * This screen paints its own opaque full-screen background in render().
+     * Vanilla Screen.render() invokes renderBackground() AFTER our custom
+     * map/widgets rendering, and its post-process blur would consequently
+     * blur the entire atlas UI (text, buttons, map and input controls).
+     * Suppress only this redundant background pass; super.render() still
+     * renders Minecraft's actual interactive widgets above our graphics.
+     */
+    @Override
+    public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        // Intentionally no-op: render() already draws a full-screen background.
+    }
+
     private void drawMap(GuiGraphics g) {
         int l = left(), t = top(), r = right(), b = bottom();
         g.fill(l - 4, t - 4, r + 4, b + 4, 0xffb49b6f);
