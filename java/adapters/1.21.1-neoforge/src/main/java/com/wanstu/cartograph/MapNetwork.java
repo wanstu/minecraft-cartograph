@@ -140,32 +140,41 @@ public final class MapNetwork {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    public record CostSettings(int ink, int pigment, int glow, boolean editable)
+    public record CostSettings(int ink, int pigment, int glow,
+                               int inkRefill, int pigmentRefill, int glowRefill, boolean editable)
             implements CustomPacketPayload {
         public static final Type<CostSettings> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "cost_settings"));
         public static final StreamCodec<RegistryFriendlyByteBuf, CostSettings> CODEC = StreamCodec.of(
                 (buf, v) -> {
                     buf.writeByte(v.ink); buf.writeByte(v.pigment); buf.writeByte(v.glow);
+                    buf.writeVarInt(v.inkRefill); buf.writeVarInt(v.pigmentRefill);
+                    buf.writeVarInt(v.glowRefill);
                     buf.writeBoolean(v.editable);
                 },
                 buf -> new CostSettings(buf.readUnsignedByte(), buf.readUnsignedByte(),
-                        buf.readUnsignedByte(), buf.readBoolean()));
+                        buf.readUnsignedByte(), buf.readVarInt(), buf.readVarInt(),
+                        buf.readVarInt(), buf.readBoolean()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    public record SetCostSettings(int ink, int pigment, int glow) implements CustomPacketPayload {
+    public record SetCostSettings(int ink, int pigment, int glow,
+                                  int inkRefill, int pigmentRefill, int glowRefill) implements CustomPacketPayload {
         public static final Type<SetCostSettings> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "set_cost_settings"));
         public static final StreamCodec<RegistryFriendlyByteBuf, SetCostSettings> CODEC = StreamCodec.of(
-                (buf, v) -> { buf.writeByte(v.ink); buf.writeByte(v.pigment); buf.writeByte(v.glow); },
+                (buf, v) -> {
+                    buf.writeByte(v.ink); buf.writeByte(v.pigment); buf.writeByte(v.glow);
+                    buf.writeVarInt(v.inkRefill); buf.writeVarInt(v.pigmentRefill);
+                    buf.writeVarInt(v.glowRefill);
+                },
                 buf -> new SetCostSettings(buf.readUnsignedByte(), buf.readUnsignedByte(),
-                        buf.readUnsignedByte()));
+                        buf.readUnsignedByte(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("2");
+        var registrar = event.registrar("3");
         registrar.playToServer(Request.TYPE, Request.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasMapServer.enqueue(player, request);

@@ -92,20 +92,31 @@ public final class AtlasActions {
     public static MapNetwork.CostSettings settings(ServerPlayer player) {
         return new MapNetwork.CostSettings(
                 CartographConfig.inkCostUnits(), CartographConfig.pigmentCostUnits(),
-                CartographConfig.glowCostUnits(), mayConfigure(player));
+                CartographConfig.glowCostUnits(), CartographConfig.INK_REFILL.get(),
+                CartographConfig.PIGMENT_REFILL.get(), CartographConfig.GLOW_REFILL.get(),
+                mayConfigure(player));
     }
 
     public static void updateCosts(ServerPlayer player, MapNetwork.SetCostSettings request) {
         if (!mayConfigure(player) || !allowed(player)) return;
         if (request.ink() < 0 || request.ink() > 100
                 || request.pigment() < 0 || request.pigment() > 100
-                || request.glow() < 0 || request.glow() > 100) return;
+                || request.glow() < 0 || request.glow() > 100
+                || request.inkRefill() < 1 || request.inkRefill() > 10000
+                || request.pigmentRefill() < 1 || request.pigmentRefill() > 10000
+                || request.glowRefill() < 1 || request.glowRefill() > 10000) return;
         CartographConfig.INK_MULTIPLIER.set(request.ink() / 10.0);
         CartographConfig.PIGMENT_MULTIPLIER.set(request.pigment() / 10.0);
         CartographConfig.GLOW_MULTIPLIER.set(request.glow() / 10.0);
+        CartographConfig.INK_REFILL.set(request.inkRefill());
+        CartographConfig.PIGMENT_REFILL.set(request.pigmentRefill());
+        CartographConfig.GLOW_REFILL.set(request.glowRefill());
         CartographConfig.INK_MULTIPLIER.save();
         CartographConfig.PIGMENT_MULTIPLIER.save();
         CartographConfig.GLOW_MULTIPLIER.save();
+        CartographConfig.INK_REFILL.save();
+        CartographConfig.PIGMENT_REFILL.save();
+        CartographConfig.GLOW_REFILL.save();
         PacketDistributor.sendToPlayer(player, settings(player));
     }
 

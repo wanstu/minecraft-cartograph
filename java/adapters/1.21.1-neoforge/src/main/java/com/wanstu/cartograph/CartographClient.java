@@ -17,6 +17,8 @@ import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -28,16 +30,18 @@ import java.util.Set;
 public final class CartographClient {
     public static final KeyMapping OPEN =
             new KeyMapping("key.cartograph.open", GLFW.GLFW_KEY_M, "key.categories.cartograph");
-    private static final int CACHE_LIMIT = 24;
+    private static final int CACHE_LIMIT = 64;
     private static final LinkedHashMap<CacheKey, Entry> PAGES = new LinkedHashMap<>(32, 0.75f, true);
     private static final Set<CacheKey> QUEUED = new LinkedHashSet<>();
     private static int ticks;
+    private static boolean drawRoads = true;
+    private static boolean drawRails = true;
     private static CacheKey inFlight;
     private static int sentAt;
     private static String lastDimension = "";
     private static String lastAtlasId = "";
     private static ItemStack previousAtlas = ItemStack.EMPTY;
-    private static MapNetwork.CostSettings settings = new MapNetwork.CostSettings(10,10,10,false);
+    private static MapNetwork.CostSettings settings = new MapNetwork.CostSettings(10,10,10,128,128,32,false);
 
     public record CacheKey(String atlasId, String dimension, int px, int pz) {}
     public record Entry(MapNetwork.Page page, DynamicTexture texture, ResourceLocation textureId, int updated) {}
@@ -125,9 +129,11 @@ public final class CartographClient {
     public static void acceptSettings(MapNetwork.CostSettings newSettings) {
         settings = newSettings;
     }
-    public static void sendSettings(int ink, int pigment, int glow) {
+    public static void sendSettings(int ink, int pigment, int glow,
+                                    int inkRefill, int pigmentRefill, int glowRefill) {
         if (hasAtlas()) PacketDistributor.sendToServer(
-                new MapNetwork.SetCostSettings(ink, pigment, glow));
+                new MapNetwork.SetCostSettings(ink, pigment, glow,
+                        inkRefill, pigmentRefill, glowRefill));
     }
 
     public static void sendMarker(MapNetwork.EditMarker request) {
@@ -181,6 +187,61 @@ public final class CartographClient {
         }
     }
 
+    /** Layer visibility affects only locally cached rendering, never the server's survey ledger. */
+    public static void showSurfaceFeatures(boolean roads, boolean rails) {
+        if (drawRoads == roads && drawRails == rails) return;
+        drawRoads = roads;
+        drawRails = rails;
+        Minecraft mc = Minecraft.getInstance();
+        var snapshot = new ArrayList<>(PAGES.entrySet());
+        for (var item : snapshot) {
+            mc.getTextureManager().release(item.getValue().textureId());
+            PAGES.put(item.getKey(), createEntry(item.getValue().page(), item.getValue().updated()));
+        }
+    }
+
+    /** Map points panel lists markers only from pages already supplied for this atlas. */
+    public static List<MapNetwork.Page> cachedPages() {
+        String atlas = atlasId(), dimension = dimension();
+        List<MapNetwork.Page> out = new ArrayList<>();
+        for (var e : PAGES.entrySet()) {
+            CacheKey key = e.getKey();
+            if (key.atlasId().equals(atlas) && key.dimension().equals(dimension) &&
+                    e.getValue().page().inRange()) out.add(e.getValue().page());
+        }
+        return List.copyOf(out);
+    }
+
+    private static Entry createEntry(MapNetwork.Page page, int updated) {
+        Minecraft mc = Minecraft.getInstance();
+        NativeImage pixels = new NativeImage(128, 128, false);
+        for (int z = 0; z < 128; z++) for (int x = 0; x < 128; x++) {
+            int packed = Byte.toUnsignedInt(page.pixels()[x + z * 128]);
+            int rgb;
+            if (!page.inRange() || packed == 0 || packed > 64) rgb = 0xe4d5b4;
+            else {
+                int mapId = packed - 1;
+                rgb = MapColor.byId(mapId).col & 0xffffff;
+                int chunkX = x / 16, chunkZ = z / 16;
+                boolean colorized = (page.coloredChunks() & (1L << (chunkZ * 8 + chunkX))) != 0;
+                if (!colorized) {
+                    int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+                    int lightness = (r * 30 + g * 59 + b * 11) / 100;
+                    rgb = lightness >= 132 ? 0xf4efdf : 0x292724;
+                }
+                int feature = Byte.toUnsignedInt(page.features()[x + z * 128]);
+                if (feature == 1 && drawRoads) rgb = colorized ? 0xa58352 : 0x282724;
+                if (feature == 2 && drawRails) rgb = colorized ? 0x353e42 : 0x111b1a;
+                if (feature == 3 && drawRails) rgb = colorized ? 0x5b8790 : 0x111b1a;
+            }
+            int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+            pixels.setPixelRGBA(x, z, 0xff000000 | (b << 16) | (g << 8) | r);
+        }
+        DynamicTexture texture = new DynamicTexture(pixels);
+        ResourceLocation textureId = mc.getTextureManager().register("cartograph/page", texture);
+        return new Entry(page, texture, textureId, updated);
+    }
+
     public static void acceptPage(MapNetwork.Page page) {
         if (page.pixels().length != 128 * 128 || page.features().length != 128 * 128) return;
         Minecraft mc = Minecraft.getInstance();
@@ -199,32 +260,8 @@ public final class CartographClient {
         Entry previous = PAGES.remove(key);
         if (previous != null) mc.getTextureManager().release(previous.textureId());
 
-        NativeImage pixels = new NativeImage(128, 128, false);
-        for (int z = 0; z < 128; z++) for (int x = 0; x < 128; x++) {
-            int packed = Byte.toUnsignedInt(page.pixels()[x + z * 128]);
-            int rgb;
-            if (!page.inRange() || packed == 0 || packed > 64) rgb = 0xe4d5b4;
-            else {
-                int mapId = packed - 1;
-                rgb = MapColor.byId(mapId).col & 0xffffff;
-                int chunkX = x / 16, chunkZ = z / 16;
-                boolean colorized = (page.coloredChunks() & (1L << (chunkZ * 8 + chunkX))) != 0;
-                if (!colorized) {
-                    int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
-                    int lightness = (r * 30 + g * 59 + b * 11) / 100;
-                    rgb = lightness >= 132 ? 0xf4efdf : 0x292724;
-                }
-                int feature = Byte.toUnsignedInt(page.features()[x + z * 128]);
-                if (feature == 1) rgb = colorized ? 0xa58352 : 0x282724; // surface path
-                if (feature == 2) rgb = colorized ? 0x353e42 : 0x111b1a; // vanilla rail
-                if (feature == 3) rgb = colorized ? 0x5b8790 : 0x111b1a; // Create track
-            }
-            int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
-            pixels.setPixelRGBA(x, z, 0xff000000 | (b << 16) | (g << 8) | r);
-        }
-        DynamicTexture texture = new DynamicTexture(pixels);
-        ResourceLocation textureId = mc.getTextureManager().register("cartograph/page", texture);
-        PAGES.put(key, new Entry(page, texture, textureId, ticks));
+        Entry fresh = createEntry(page, ticks);
+        PAGES.put(key, fresh);
         while (PAGES.size() > CACHE_LIMIT) {
             CacheKey oldest = PAGES.keySet().iterator().next();
             Entry removed = PAGES.remove(oldest);
@@ -241,7 +278,7 @@ public final class CartographClient {
         lastDimension = "";
         lastAtlasId = "";
         previousAtlas = ItemStack.EMPTY;
-        settings = new MapNetwork.CostSettings(10,10,10,false);
+        settings = new MapNetwork.CostSettings(10,10,10,128,128,32,false);
     }
 
     public static void drawPlayer(GuiGraphics g, int left, int top, int display, int px, int pz) {

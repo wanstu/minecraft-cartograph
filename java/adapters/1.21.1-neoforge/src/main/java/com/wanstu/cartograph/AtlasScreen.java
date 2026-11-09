@@ -1,36 +1,77 @@
 package com.wanstu.cartograph;
 
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.AbstractSliderButton;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.lwjgl.glfw.GLFW;
+
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * Integrated atlas: continuous multi-page pan/zoom, verified server tiles,
- * two material groups and editable named, colored, glowing waypoints.
+ * Cartograph's full-screen atlas, adapted from preview/cartograph-fullscreen-hifi.html.
+ * The terrain itself fills the window; the toolbar, independent floating panels,
+ * context menu and modal editors never reserve permanent map margins.
+ *
+ * All changes to balances, compass, markers, map exports and settings are
+ * requests to the authoritative server, never local client mutations.
  */
 public final class AtlasScreen extends Screen {
-    private static final int[] COLORS = {0xf7f2df, 0xe99357, 0xeeca53, 0x70b67b, 0x72a7d1, 0xcf89c0};
-    private static final String[] SYMBOLS = {"⌂", "⚑", "◆", "✦", "●", "◎"};
-    private static final String[] SYMBOL_NAMES = {"住处", "旗帜", "矿区", "地标", "港口", "其他"};
+    private static final int PAPER = 0xffe6d8b7;
+    private static final int DARK = 0xff1b2d24;
+    private static final int PANEL_BG = 0xf620352b;
+    private static final int GOLD = 0xffe7cf9e;
+    private static final int CREAM = 0xfff2e6cd;
+    private static final int MUTED = 0xffb0bfae;
+    private static final int[] COLORS = {
+            0xf7f2df, 0xe99357, 0xeeca53, 0x70b67b, 0x72a7d1, 0xcf89c0
+    };
+    private static final String[] ICONS = {"住处", "旗帜", "矿区", "地标", "港口", "其他"};
+    private static final String[] TOOLS = {"图册", "标点", "图层", "设置", "居中", "信息", "×"};
+    private static final String[] MATERIALS = {"墨囊", "发光墨囊", "红色染料", "黄色染料", "蓝色染料"};
+    private static final String[] RATE_NAMES = {"墨水", "颜料", "发光墨水"};
+    private static final String[] LAYER_NAMES = {"自然结构", "地表道路", "地表铁路", "自定义标点"};
+    private static final String[] LAYER_HINTS = {
+            "仅显示真实生成且可确认的地表结构", "原版实际地表道路",
+            "原版铁轨和 Create 地表轨道", "本地图册内已保存的标点"
+    };
+
+    private enum Panel { NONE, ATLAS, MARKERS, LAYERS, INFO }
+    private enum Dialog { NONE, MARKER, SETTINGS }
+    private enum Context { NONE, MAP, MARKER, MATERIAL }
+
+    private static boolean drawStructures = true;
+    private static boolean drawRoads = true;
+    private static boolean drawRails = true;
+    private static boolean drawWaypoints = true;
 
     private double viewX, viewZ, zoom = 2.25;
-    private boolean first = true;
+    private boolean initialized, draggingMap;
     private int frameTicks, actionRefreshTicks;
-    private int menuX, menuY, pendingX, pendingZ;
-    private AtlasMarker selected;
-    private Mode mode = Mode.NONE;
-    private EditBox nameInput;
-    private int editIcon, editColor;
-    private boolean editGlow;
-
-    private enum Mode { NONE, ADD_MENU, MARKER_MENU, MATERIAL_MENU, EDIT, SETTINGS }
-    private int[] newRates = {10, 10, 10};
+    private int hoverX = -1, hoverY = -1;
+    private Panel panel = Panel.NONE;
+    private Dialog dialog = Dialog.NONE;
+    private Context context = Context.NONE;
+    private int contextX, contextY, pendingX, pendingZ;
+    private int markerScroll;
+    private String markerFilter = "";
+    private EditBox markerSearch;
+    private AtlasMarker selectedMarker;
+    private EditBox markerName;
+    private final EditBox[] refillInput = new EditBox[3];
+    private int chosenIcon, chosenColor;
+    private boolean chosenGlow;
+    private int[] rates = {10, 10, 10};
+    private String notice = "";
+    private int noticeUntil;
 
     public AtlasScreen() {
         super(Component.translatable("screen.cartograph.atlas"));
@@ -39,61 +80,46 @@ public final class AtlasScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        if (first && minecraft != null && minecraft.player != null) {
+        if (!initialized && minecraft != null && minecraft.player != null) {
             viewX = minecraft.player.getBlockX();
             viewZ = minecraft.player.getBlockZ();
-            first = false;
+            initialized = true;
         }
-        if (mode == Mode.EDIT) startEditor();
-        if (mode == Mode.SETTINGS) startSettings();
+        if (dialog == Dialog.MARKER) setupMarkerWidget();
+        else if (dialog == Dialog.SETTINGS) setupSettingsWidgets();
+        else if (panel == Panel.MARKERS) setupMarkerSearch();
         reloadVisible(false);
     }
 
-    private int panelWidth() { return width < 570 ? 140 : 196; }
-    private int left() { return 16; }
-    private int right() { return width - panelWidth() - 18; }
-    private int top() { return 40; }
-    private int bottom() { return height - 42; }
-    private int mapMidX() { return (left() + right()) / 2; }
-    private int mapMidY() { return (top() + bottom()) / 2; }
-    private int side() { return right() + 12; }
-    private boolean insideMap(double x, double y) {
-        return x >= left() && x < right() && y >= top() && y < bottom();
-    }
+    private int screenMidX() { return width / 2; }
+    private int screenMidY() { return height / 2; }
 
-    private int worldX(double mouseX) {
-        return (int) Math.floor(viewX + (mouseX - mapMidX()) / zoom);
+    private int toWorldX(double guiX) {
+        double raw = viewX + (guiX - screenMidX()) / zoom;
+        return (int) Math.floor(Math.clamp(raw, -30_000_000.0, 30_000_000.0));
     }
-    private int worldZ(double mouseY) {
-        return (int) Math.floor(viewZ + (mouseY - mapMidY()) / zoom);
+    private int toWorldZ(double guiY) {
+        double raw = viewZ + (guiY - screenMidY()) / zoom;
+        return (int) Math.floor(Math.clamp(raw, -30_000_000.0, 30_000_000.0));
     }
-    private int mapX(double world) {
-        return (int) Math.round(mapMidX() + (world - viewX) * zoom);
-    }
-    private int mapY(double world) {
-        return (int) Math.round(mapMidY() + (world - viewZ) * zoom);
-    }
-
-    private int firstPageX() { return Math.floorDiv(worldX(left()), 128); }
-    private int lastPageX() { return Math.floorDiv(worldX(right()), 128); }
-    private int firstPageZ() { return Math.floorDiv(worldZ(top()), 128); }
-    private int lastPageZ() { return Math.floorDiv(worldZ(bottom()), 128); }
+    private int toScreenX(double world) { return (int) Math.round(screenMidX() + (world - viewX) * zoom); }
+    private int toScreenZ(double world) { return (int) Math.round(screenMidY() + (world - viewZ) * zoom); }
+    private int firstPageX() { return Math.floorDiv(toWorldX(0), 128); }
+    private int lastPageX() { return Math.floorDiv(toWorldX(width), 128); }
+    private int firstPageZ() { return Math.floorDiv(toWorldZ(0), 128); }
+    private int lastPageZ() { return Math.floorDiv(toWorldZ(height), 128); }
 
     private void reloadVisible(boolean force) {
-        // No more than 64 tile requests in an extreme UI scale.
+        int cx = Math.floorDiv(toWorldX(screenMidX()), 128);
+        int cz = Math.floorDiv(toWorldZ(screenMidY()), 128);
         int count = 0;
-        int cx = Math.floorDiv((int) viewX, 128);
-        int cz = Math.floorDiv((int) viewZ, 128);
-        for (int ring = 0; ring <= 9 && count < 64; ring++) {
+        for (int ring = 0; ring <= 10 && count < 64; ring++) {
             for (int z = Math.max(firstPageZ(), cz - ring); z <= Math.min(lastPageZ(), cz + ring); z++) {
                 for (int x = Math.max(firstPageX(), cx - ring); x <= Math.min(lastPageX(), cx + ring); x++) {
-                    if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) == ring) {
-                        CartographClient.queue(x, z, force);
-                        count++;
-                        if (count >= 64) break;
-                    }
+                    if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) != ring) continue;
+                    CartographClient.queue(x, z, force);
+                    if (++count >= 64) return;
                 }
-                if (count >= 64) break;
             }
         }
     }
@@ -102,144 +128,134 @@ public final class AtlasScreen extends Screen {
     public void tick() {
         if (++frameTicks % 200 == 0) reloadVisible(true);
         if (actionRefreshTicks > 0 && --actionRefreshTicks == 0) reloadVisible(true);
-        // EditBox cursor and keyboard events are managed by the screen.
     }
 
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partial) {
-        g.fill(0, 0, width, height, 0xff142019);
-        g.drawCenteredString(font, title, width / 2, 13, 0xffe8d0a0);
-        drawMap(g);
-        drawSidebar(g);
-        drawContext(g, mouseX, mouseY);
-        if (mode == Mode.EDIT) drawEditor(g);
-        if (mode == Mode.SETTINGS) drawSettings(g);
-        super.render(g, mouseX, mouseY, partial);
+    public void render(GuiGraphics g, int mx, int my, float partialTick) {
+        hoverX = mx;
+        hoverY = my;
+        renderTerrain(g);
+        renderToolbar(g, mx, my);
+        if (panel != Panel.NONE && dialog == Dialog.NONE) renderFloatingPanel(g, mx, my);
+        if (context != Context.NONE && dialog == Dialog.NONE) renderContext(g, mx, my);
+        if (dialog != Dialog.NONE) renderDialog(g, mx, my);
+        else renderCursorInfo(g, mx, my);
+        if (!notice.isBlank() && frameTicks <= noticeUntil) {
+            int w = Math.min(width - 20, font.width(notice) + 30);
+            int x = (width - w) / 2;
+            g.fill(x, height - 45, x + w, height - 20, 0xee1b2c23);
+            g.drawCenteredString(font, shortText(notice, w - 12), width / 2, height - 36, GOLD);
+        }
+        // Handles EditBox and slider draw/input only; never blur this fullscreen map.
+        super.render(g, mx, my, partialTick);
     }
 
-    /**
-     * This screen paints its own opaque full-screen background in render().
-     * Vanilla Screen.render() invokes renderBackground() AFTER our custom
-     * map/widgets rendering, and its post-process blur would consequently
-     * blur the entire atlas UI (text, buttons, map and input controls).
-     * Suppress only this redundant background pass; super.render() still
-     * renders Minecraft's actual interactive widgets above our graphics.
-     */
     @Override
     public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        // Intentionally no-op: render() already draws a full-screen background.
+        // Minecraft Screen.render() would otherwise blur every layer already drawn.
     }
 
-    private void drawMap(GuiGraphics g) {
-        int l = left(), t = top(), r = right(), b = bottom();
-        g.fill(l - 4, t - 4, r + 4, b + 4, 0xffb49b6f);
-        g.fill(l, t, r, b, 0xffe1d2b0);
-        g.enableScissor(l, t, r, b);
-        int visible = 0;
-        for (int z = firstPageZ(); z <= lastPageZ() && visible < 100; z++) {
-            for (int x = firstPageX(); x <= lastPageX() && visible < 100; x++) {
-                visible++;
-                ResourceLocation tex = CartographClient.texture(x, z);
-                MapNetwork.Page page = CartographClient.page(x, z);
-                int sx = mapX((long) x * 128), sy = mapY((long) z * 128);
-                int ex = mapX(((long) x + 1) * 128), ey = mapY(((long) z + 1) * 128);
-                if (tex != null && page != null && page.inRange()) {
-                    g.pose().pushPose();
-                    g.pose().translate(sx, sy, 0);
-                    g.pose().scale((float) zoom, (float) zoom, 1f);
-                    g.blit(tex, 0, 0, 0, 0, 128, 128, 128, 128);
-                    g.pose().popPose();
-                    drawMarkers(g, page);
-                } else {
-                    g.fill(sx, sy, ex, ey, 0xffdbceae);
-                }
-                // Crisp page grid: visible but does not mask the surveyed terrain.
-                g.fill(sx, sy, ex, sy + 1, 0x66725d43);
-                g.fill(sx, sy, sx + 1, ey, 0x66725d43);
+    private void renderTerrain(GuiGraphics g) {
+        g.fill(0, 0, width, height, PAPER);
+        g.enableScissor(0, 0, width, height);
+        int drawn = 0;
+        for (int pz = firstPageZ(); pz <= lastPageZ() && drawn < 100; pz++) {
+            for (int px = firstPageX(); px <= lastPageX() && drawn < 100; px++) {
+                drawn++;
+                ResourceLocation texture = CartographClient.texture(px, pz);
+                MapNetwork.Page page = CartographClient.page(px, pz);
+                if (texture == null || page == null || !page.inRange()) continue;
+                int x = toScreenX((long) px * 128);
+                int y = toScreenZ((long) pz * 128);
+                g.pose().pushPose();
+                g.pose().translate(x, y, 0);
+                g.pose().scale((float) zoom, (float) zoom, 1);
+                g.blit(texture, 0, 0, 0, 0, 128, 128, 128, 128);
+                g.pose().popPose();
+                if (drawStructures || drawWaypoints) renderMarkers(g, page);
             }
         }
-        // Player position is gated by the compass installed on that atlas.
-        int px = minecraft.player == null ? 0 : minecraft.player.getBlockX();
-        int pz = minecraft.player == null ? 0 : minecraft.player.getBlockZ();
-        MapNetwork.Page playerPage = CartographClient.page(Math.floorDiv(px,128), Math.floorDiv(pz,128));
-        if (playerPage != null && playerPage.compass()) {
-            int sx = mapX(px), sy = mapY(pz);
-            g.fill(sx - 4, sy - 4, sx + 5, sy + 5, 0xffe24b42);
-            g.fill(sx - 2, sy - 2, sx + 3, sy + 3, 0xfffcefbf);
+        if (minecraft != null && minecraft.player != null) {
+            int x = minecraft.player.getBlockX(), z = minecraft.player.getBlockZ();
+            MapNetwork.Page playerPage = CartographClient.page(Math.floorDiv(x, 128), Math.floorDiv(z, 128));
+            if (playerPage != null && playerPage.inRange() && playerPage.compass()) {
+                int sx = toScreenX(x), sy = toScreenZ(z);
+                g.fill(sx - 4, sy - 4, sx + 5, sy + 5, 0xff8a382c);
+                g.fill(sx - 2, sy - 2, sx + 3, sy + 3, 0xffffe1b6);
+            }
         }
         g.disableScissor();
-        g.drawString(font, "X " + (int) viewX + "   Z " + (int) viewZ
-                + "   " + (int) (zoom * 100) + "%", l + 3, b + 10, 0xffc4bd9f);
-        g.drawString(font, "拖动平移 · 滚轮缩放 · 右键标点 · M打开",
-                l + 3, b + 23, 0xffb6b99e);
     }
 
-    private void drawMarkers(GuiGraphics g, MapNetwork.Page page) {
-        // Automatic symbols require a verified placed surface footprint on a
-        // FULL generated chunk, not simply a structure-reference lookup.
-        for (SurfaceStructure structure : page.structures()) {
-            int sx = mapX(structure.x()), sy = mapY(structure.z());
-            if (!insideMap(sx, sy)) continue;
-            g.fill(sx - 5, sy - 5, sx + 6, sy + 6, 0xff444f40);
-            g.fill(sx - 3, sy - 3, sx + 4, sy + 4, 0xffffd788);
-            g.drawString(font, "S", sx - 3, sy - 4, 0xff293522, false);
-            if (zoom >= 2.0) g.drawString(font, structureTitle(structure.type()),
-                    sx + 8, sy - 5, 0xff413527, false);
-        }
-        for (AtlasMarker marker : page.markers()) {
-            int sx = mapX(marker.x()), sy = mapY(marker.z());
-            if (!insideMap(sx, sy)) continue;
-            int color = COLORS[Math.clamp(marker.color(), 0, COLORS.length - 1)];
-            if (marker.glowing()) {
-                g.fill(sx - 6, sy - 6, sx + 7, sy + 7, 0x99fff0a4);
-                g.fill(sx - 4, sy - 4, sx + 5, sy + 5, 0xfff3d683);
+    private void renderMarkers(GuiGraphics g, MapNetwork.Page page) {
+        if (drawStructures) {
+            for (SurfaceStructure poi : page.structures()) {
+                int x = toScreenX(poi.x()), y = toScreenZ(poi.z());
+                if (x < -60 || x >= width + 60 || y < -30 || y >= height + 30) continue;
+                g.fill(x - 6, y - 6, x + 7, y + 7, 0xff334236);
+                g.fill(x - 4, y - 4, x + 5, y + 5, 0xffd3b879);
+                g.drawString(font, "◆", x - 3, y - 4, 0xff23342c, false);
+                if (zoom >= 2.0) label(g, structureTitle(poi.type()), x + 9, y - 5);
             }
-            drawIcon(g, sx, sy, marker.icon(), color);
-            if (zoom >= 2.0) {
-                g.drawString(font, marker.name(), sx + 7, sy - 5, 0xff333026, false);
+        }
+        if (drawWaypoints) {
+            for (AtlasMarker marker : page.markers()) {
+                int x = toScreenX(marker.x()), y = toScreenZ(marker.z());
+                if (x < -60 || x >= width + 60 || y < -30 || y >= height + 30) continue;
+                int color = COLORS[Math.clamp(marker.color(), 0, COLORS.length - 1)];
+                if (marker.glowing()) {
+                    g.fill(x - 8, y - 8, x + 9, y + 9, 0x88ffe3a4);
+                    g.fill(x - 6, y - 6, x + 7, y + 7, 0xffcda968);
+                }
+                renderIcon(g, x, y, marker.icon(), color);
+                if (zoom >= 2.0) label(g, marker.name(), x + 10, y - 5);
             }
         }
     }
 
-    /** Small distinct pictograms that render without an optional icon-font resource. */
-    private void drawIcon(GuiGraphics g, int x, int y, int icon, int color) {
-        int light = 0xff000000 | color;
-        int dark = 0xff252924;
+    private void label(GuiGraphics g, String value, int x, int y) {
+        String name = shortText(value, 105);
+        int w = font.width(name);
+        g.fill(x - 2, y - 2, x + w + 3, y + 11, 0xdaf3e8ce);
+        g.drawString(font, name, x, y, 0xff2c392f, false);
+    }
+
+    private void renderIcon(GuiGraphics g, int x, int y, int icon, int color) {
+        int dark = 0xff243229;
+        int ink = 0xff000000 | color;
         g.fill(x - 5, y - 5, x + 6, y + 6, dark);
-        g.fill(x - 4, y - 4, x + 5, y + 5, 0xffede1bd);
+        g.fill(x - 4, y - 4, x + 5, y + 5, 0xfff1e5c9);
         switch (icon) {
-            case 0 -> { // house
-                g.fill(x - 4, y - 1, x + 5, y, light);
-                g.fill(x - 3, y - 2, x + 4, y - 1, light);
-                g.fill(x - 2, y - 3, x + 3, y - 2, light);
-                g.fill(x - 3, y, x + 4, y + 4, light);
+            case 0 -> {
+                g.fill(x - 3, y - 1, x + 4, y + 4, ink);
+                g.fill(x - 4, y - 2, x + 5, y - 1, ink);
+                g.fill(x - 2, y - 3, x + 3, y - 2, ink);
                 g.fill(x, y + 1, x + 2, y + 4, dark);
             }
-            case 1 -> { // flag
+            case 1 -> {
                 g.fill(x - 3, y - 4, x - 2, y + 4, dark);
-                g.fill(x - 2, y - 4, x + 4, y - 1, light);
-                g.fill(x - 2, y - 1, x + 2, y + 1, light);
+                g.fill(x - 2, y - 4, x + 4, y, ink);
             }
-            case 2 -> { // crossing mining tools
+            case 2 -> {
                 for (int d = -3; d <= 3; d++) {
-                    g.fill(x + d, y + d, x + d + 1, y + d + 1, light);
+                    g.fill(x + d, y + d, x + d + 1, y + d + 1, ink);
                     g.fill(x - d, y + d, x - d + 1, y + d + 1, dark);
                 }
             }
-            case 3 -> { // diamond landmark
-                for (int d = 0; d <= 4; d++) {
-                    g.fill(x - (4 - d), y - d, x + (4 - d) + 1, y - d + 1, light);
-                    g.fill(x - (4 - d), y + d, x + (4 - d) + 1, y + d + 1, light);
+            case 3 -> {
+                for (int d = 0; d <= 3; d++) {
+                    g.fill(x - (3 - d), y - d, x + (3 - d) + 1, y - d + 1, ink);
+                    g.fill(x - (3 - d), y + d, x + (3 - d) + 1, y + d + 1, ink);
                 }
             }
-            case 4 -> { // harbor / anchor
-                g.fill(x - 1, y - 3, x + 2, y + 3, light);
-                g.fill(x - 4, y + 1, x - 3, y + 3, light);
-                g.fill(x + 3, y + 1, x + 4, y + 3, light);
-                g.fill(x - 3, y + 3, x + 4, y + 4, light);
+            case 4 -> {
+                g.fill(x - 1, y - 3, x + 2, y + 3, ink);
+                g.fill(x - 4, y + 1, x - 3, y + 3, ink);
+                g.fill(x + 3, y + 1, x + 4, y + 3, ink);
+                g.fill(x - 3, y + 3, x + 4, y + 4, ink);
             }
-            default -> { // location ring
-                g.fill(x - 3, y - 2, x + 4, y + 3, light);
+            default -> {
+                g.fill(x - 3, y - 2, x + 4, y + 3, ink);
                 g.fill(x - 1, y - 1, x + 2, y + 2, dark);
             }
         }
@@ -254,293 +270,781 @@ public final class AtlasScreen extends Screen {
             case "minecraft:woodland_mansion" -> "林地府邸";
             case "minecraft:swamp_hut" -> "沼泽小屋";
             case "minecraft:igloo" -> "雪屋";
-            case "minecraft:shipwreck_beached" -> "海滩沉船";
             default -> type.startsWith("minecraft:ruined_portal") ? "废弃传送门" : "地表建筑";
         };
     }
 
-    private void drawSidebar(GuiGraphics g) {
-        int x = side(), w = width - x - 7;
-        g.fill(x - 4, top() - 4, width - 3, bottom() + 4, 0xff29362e);
-        g.drawString(font, "地图册", x + 4, top() + 4, 0xffeed6a8);
-        MapNetwork.Page info = CartographClient.page(Math.floorDiv((int) viewX, 128),
-                Math.floorDiv((int) viewZ, 128));
-        AtlasState mirror = CartographClient.currentAtlas().getOrDefault(
+    private int toolW() { return width < 590 ? 35 : 45; }
+    private int toolY() { return 14; }
+    private int toolbarWidth() { return 7 * toolW() + 6 * 4 + 12; }
+    private int toolbarX() { return width - toolbarWidth() - 12; }
+
+    private void renderToolbar(GuiGraphics g, int mx, int my) {
+        int tw = toolW(), tx = toolbarX(), ty = toolY();
+        if (width >= 520) {
+            g.fill(14, 13, width >= 650 ? 180 : 102, 49, 0xed1b2e25);
+            g.fill(18, 18, 43, 43, 0xff405a45);
+            g.renderItem(new ItemStack(CartographMod.ATLAS.get()), 22, 22);
+            g.drawString(font, width >= 650 ? "绘图师 · 世界地图" : "绘图师", 50, 28, CREAM);
+        }
+        g.fill(tx - 6, ty - 6, tx + toolbarWidth(), ty + 45, 0xeb1b2c23);
+        for (int i = 0; i < TOOLS.length; i++) {
+            int bx = tx + i * (tw + 4);
+            boolean active = (i == 0 && panel == Panel.ATLAS)
+                    || (i == 1 && panel == Panel.MARKERS)
+                    || (i == 2 && panel == Panel.LAYERS)
+                    || (i == 5 && panel == Panel.INFO)
+                    || (i == 3 && dialog == Dialog.SETTINGS);
+            boolean hovered = contains(mx, my, bx, ty, tw, 37);
+            g.fill(bx, ty, bx + tw, ty + 37,
+                    active ? 0xff627a60 : hovered ? 0xff50664e : 0xff30483b);
+            ItemStack icon = switch (i) {
+                case 0 -> new ItemStack(CartographMod.ATLAS.get());
+                case 1 -> new ItemStack(Items.RED_BANNER);
+                case 2 -> new ItemStack(Items.MAP);
+                case 3 -> new ItemStack(Items.REPEATER);
+                case 4 -> new ItemStack(Items.COMPASS);
+                case 5 -> new ItemStack(Items.WRITABLE_BOOK);
+                default -> new ItemStack(Items.BARRIER);
+            };
+            g.renderItem(icon, bx + (tw - 16) / 2, ty + 2);
+            g.drawCenteredString(font, TOOLS[i], bx + tw / 2, ty + 23,
+                    active ? 0xffffffff : CREAM);
+        }
+    }
+
+    private int panelW() { return Math.min(274, width - 20); }
+    private int panelX() { return width - panelW() - 12; }
+    private int panelY() { return 59; }
+    private int panelH() {
+        return switch (panel) {
+            case ATLAS -> Math.min(height - panelY() - 12,
+                    height < 365 ? 247 : height < 402 ? 274 : 332);
+            case MARKERS -> Math.min(height - panelY() - 12, 352);
+            case LAYERS -> Math.min(height - panelY() - 12, 285);
+            case INFO -> Math.min(height - panelY() - 12, 242);
+            default -> 0;
+        };
+    }
+    private boolean compact() { return height < 402; }
+    private boolean tiny() { return height < 365; }
+    private boolean contains(double mx, double my, int x, int y, int w, int h) {
+        return mx >= x && mx < x + w && my >= y && my < y + h;
+    }
+
+    private void card(GuiGraphics g, int x, int y, int w, int h, String heading, String subtitle) {
+        g.fill(x - 4, y + 4, x + w + 4, y + h + 7, 0x7715201b);
+        g.fill(x, y, x + w, y + h, PANEL_BG);
+        g.fill(x, y, x + w, y + 34, 0xff344b3d);
+        g.fill(x, y + 33, x + w, y + 34, 0xffc4ab79);
+        g.drawString(font, heading, x + 13, y + 13, CREAM);
+        g.drawString(font, "×", x + w - 17, y + 13, GOLD);
+        if (!subtitle.isBlank()) {
+            g.drawString(font, shortText(subtitle, w - 22), x + 12, y + 42, MUTED);
+        }
+    }
+
+    private void button(GuiGraphics g, int x, int y, int w, int h, String title,
+                        boolean active, boolean hovered) {
+        int bg = active ? 0xff687b5e : hovered ? 0xff536a52 : 0xff3b5142;
+        g.fill(x, y, x + w, y + h, 0xff9d9470);
+        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, bg);
+        g.drawCenteredString(font, shortText(title, w - 8), x + w / 2,
+                y + (h - 8) / 2, active ? 0xffffffff : CREAM);
+    }
+
+    private String shortText(String value, int maxWidth) {
+        if (value == null) return "";
+        if (font.width(value) <= maxWidth) return value;
+        String result = value;
+        while (!result.isEmpty() && font.width(result + "…") > maxWidth) {
+            result = result.substring(0, result.length() - 1);
+        }
+        return result + "…";
+    }
+
+    private void renderFloatingPanel(GuiGraphics g, int mx, int my) {
+        int x = panelX(), y = panelY(), w = panelW(), h = panelH();
+        switch (panel) {
+            case ATLAS -> renderAtlasPanel(g, x, y, w, h, mx, my);
+            case MARKERS -> renderMarkersPanel(g, x, y, w, h, mx, my);
+            case LAYERS -> renderLayersPanel(g, x, y, w, h, mx, my);
+            case INFO -> renderInfoPanel(g, x, y, w, h, mx, my);
+            default -> { }
+        }
+    }
+
+    private AtlasState state() {
+        return CartographClient.currentAtlas().getOrDefault(
                 CartographMod.ATLAS_STATE.get(), AtlasState.blank());
-        int ink = info == null ? mirror.inkUnits() : info.inkUnits();
-        int pigment = info == null ? mirror.pigmentUnits() : info.pigmentUnits();
-        int glow = info == null ? mirror.glowUnits() : info.glowUnits();
-        g.drawString(font, "墨水 " + ink / 10.0, x + 4, top() + 24, 0xffe8e9de);
-        g.drawString(font, "颜料 " + pigment / 10.0, x + 4, top() + 38, 0xffe8e9de);
-        g.drawString(font, "发光墨水 " + glow / 10.0, x + 4, top() + 52, 0xffe8e9de);
-
-        int y = top() + 76;
-        g.drawString(font, "耗材填入口 · 通用", x + 4, y - 12, 0xffd4c8aa);
-        button(g, x + 4, y, w - 8, 26, "＋ 放入耗材");
-        int compassY = y + 48;
-        g.drawString(font, "非耗材填入口", x + 4, compassY - 12, 0xffd4c8aa);
-        button(g, x + 4, compassY, w - 8, 22,
-                (info == null ? mirror.compassInstalled() : info.compass())
-                        ? "指南针 ✓ (取出)" : "指南针 + (装入)");
-
-        int controlsY = compassY + 36;
-        g.drawString(font, "标点：地图右键", x + 4, controlsY, 0xffc8c7aa);
-        g.drawString(font, "右键已有标点可编辑", x + 4, controlsY + 16, 0xffc8c7aa);
-        button(g, x + 4, controlsY + 38, w - 8, 20, "消耗倍率设置");
     }
 
-    private void button(GuiGraphics g, int x, int y, int w, int h, String label) {
-        g.fill(x, y, x + w, y + h, 0xff435649);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, 0xff34463b);
-        g.drawCenteredString(font, label, x + w / 2, y + (h - 8) / 2, 0xffe9d9b2);
+    private MapNetwork.Page centerPage() {
+        return CartographClient.page(Math.floorDiv(toWorldX(screenMidX()), 128),
+                Math.floorDiv(toWorldZ(screenMidY()), 128));
     }
 
-    private int editorX() { return Math.max(6, (width - 244) / 2); }
-    private int editorY() { return Math.max(8, (height - 220) / 2); }
-    private void drawEditor(GuiGraphics g) {
-        int x = editorX(), y = editorY();
-        g.fill(x - 4, y - 4, x + 248, y + 220, 0xff15251e);
-        g.fill(x, y, x + 244, y + 216, 0xff2f4438);
-        g.drawString(font, selected == null ? "新增标点" : "编辑标点", x + 12, y + 12, 0xfff3dfb5);
-        g.drawString(font, "名称", x + 12, y + 30, 0xffcbd6bf);
-        button(g, x + 12, y + 68, 220, 21, "图标: " + SYMBOL_NAMES[editIcon]);
-        button(g, x + 12, y + 93, 220, 21,
-                "颜色: " + (canColor() ? ("编号 " + (editColor + 1)) : "需要三原色"));
-        g.fill(x + 15, y + 119, x + 229, y + 126, 0xff000000 | COLORS[editColor]);
-        button(g, x + 12, y + 133, 220, 21, "发光: " + (editGlow ? "开" : "关"));
-        button(g, x + 12, y + 161, 106, 24, "保存标点");
-        button(g, x + 126, y + 161, 106, 24, "取消");
-        g.drawString(font, "标点限已测绘位置 · 发光首次消耗 1", x + 12, y + 195, 0xffc1b99d);
+    private void meter(GuiGraphics g, String name, int index, int units, int x, int y, int width) {
+        g.drawString(font, name, x, y, CREAM);
+        String amount = String.format(java.util.Locale.ROOT, "%.1f", units / 10.0);
+        g.drawString(font, amount, x + width - font.width(amount), y, GOLD);
+        g.fill(x, y + 14, x + width, y + 19, 0xff526458);
+        int color = index == 0 ? 0xffdcc28e : index == 1 ? 0xffaf9169 : 0xffb8d0ab;
+        int max = index == 2 ? 32 : 128;
+        int occupied = (int) (width * Math.min(1.0, (units / 10.0) / max));
+        if (occupied > 0) g.fill(x, y + 14, x + occupied, y + 19, color);
+    }
+
+    private int consumableY() { return panelY() + (height < 295 ? 133 : tiny() ? 142 : compact() ? 167 : 198); }
+    private int compassY() { return panelY() + (height < 295 ? 181 : tiny() ? 198 : compact() ? 236 : 283); }
+
+    private void renderAtlasPanel(GuiGraphics g, int x, int y, int w, int h, int mx, int my) {
+        card(g, x, y, w, h, "地图册 · 资源", "首次测绘消耗材料，更新免费");
+        AtlasState item = state();
+        MapNetwork.Page page = centerPage();
+        int ink = page == null ? item.inkUnits() : page.inkUnits();
+        int pigment = page == null ? item.pigmentUnits() : page.pigmentUnits();
+        int glow = page == null ? item.glowUnits() : page.glowUnits();
+        int step = height < 295 ? 22 : tiny() ? 24 : compact() ? 29 : 36;
+        int firstY = height < 295 ? 50 : tiny() ? 53 : 62;
+        meter(g, "墨水", 0, ink, x + 13, y + firstY, w - 26);
+        meter(g, "颜料", 1, pigment, x + 13, y + firstY + step, w - 26);
+        meter(g, "发光墨水", 2, glow, x + 13, y + firstY + 2 * step, w - 26);
+        int consumable = consumableY();
+        g.drawString(font, "耗材填入口 · 通用槽", x + 13, consumable - 15, GOLD);
+        button(g, x + 12, consumable, w - 24, 27, "放入墨囊或染料 ＋",
+                false, contains(mx, my, x + 12, consumable, w - 24, 27));
+        g.renderItem(new ItemStack(Items.INK_SAC), x + 17, consumable + 5);
+        if (!tiny()) g.drawString(font, "红 " + item.redDyes() + "  黄 " + item.yellowDyes()
+                        + "  蓝 " + item.blueDyes() + (item.colorEnabled() ? "  ✓ 已上色" : ""),
+                x + 13, consumable + 34, MUTED);
+        int compass = compassY();
+        g.drawString(font, "非耗材填入口", x + 13, compass - 14, GOLD);
+        boolean equipped = page == null ? item.compassInstalled() : page.compass();
+        button(g, x + 12, compass, w - 24, 24,
+                equipped ? "指南针 ✓ 取出" : "指南针 ＋ 装入",
+                false, contains(mx, my, x + 12, compass, w - 24, 24));
+        g.renderItem(new ItemStack(Items.COMPASS), x + 17, compass + 4);
+    }
+
+    private List<AtlasMarker> availableMarkers() {
+        List<AtlasMarker> out = new ArrayList<>();
+        Set<String> ids = new HashSet<>();
+        for (MapNetwork.Page page : CartographClient.cachedPages()) {
+            for (AtlasMarker m : page.markers()) {
+                if (ids.add(m.id())) out.add(m);
+            }
+        }
+        if (!markerFilter.isBlank())
+            out.removeIf(m -> !m.name().toLowerCase(java.util.Locale.ROOT)
+                    .contains(markerFilter.toLowerCase(java.util.Locale.ROOT)));
+        out.sort(Comparator.comparingDouble(m ->
+                (m.x() - viewX) * (m.x() - viewX) + (m.z() - viewZ) * (m.z() - viewZ)));
+        return out;
+    }
+
+    private int markerRows() { return Math.max(1, (panelH() - 138) / 33); }
+    private void renderMarkersPanel(GuiGraphics g, int x, int y, int w, int h, int mx, int my) {
+        card(g, x, y, w, h, "我的标点", "已加载地图页的标点 · 点击定位");
+        List<AtlasMarker> markers = availableMarkers();
+        int capacity = markerRows();
+        markerScroll = Math.clamp(markerScroll, 0, Math.max(0, markers.size() - capacity));
+        g.drawString(font, "已加载区域 · " + markers.size() + " 个结果",
+                x + 13, y + 91, GOLD);
+        if (markers.isEmpty()) {
+            g.drawString(font, markerFilter.isBlank()
+                    ? "在已测绘区域右键添加标点" : "没有匹配的标点", x + 14, y + 132, MUTED);
+        } else {
+            int start = y + 111;
+            for (int i = 0; i < capacity && i + markerScroll < markers.size(); i++) {
+                AtlasMarker m = markers.get(i + markerScroll);
+                int yy = start + i * 33;
+                int bg = contains(mx, my, x + 11, yy, w - 22, 29) ? 0xff51644d : 0xff31483b;
+                g.fill(x + 11, yy, x + w - 11, yy + 29, bg);
+                int color = COLORS[Math.clamp(m.color(), 0, COLORS.length - 1)];
+                g.fill(x + 17, yy + 9, x + 28, yy + 20, 0xff000000 | color);
+                g.drawString(font, shortText(m.name() + (m.glowing() ? " ✦" : ""), w - 96),
+                        x + 33, yy + 5, CREAM);
+                g.drawString(font, "X" + m.x() + "  Z" + m.z(), x + 33, yy + 17, MUTED);
+                g.drawString(font, "编辑", x + w - 38, yy + 11, GOLD);
+            }
+        }
+        g.drawString(font, "仅显示已读取的页；滚轮查看列表", x + 13, y + h - 22, MUTED);
+    }
+
+    private int layerTop() { return height < 295 ? 52 : height < 350 ? 59 : 66; }
+    private int layerStep() { return height < 295 ? 35 : height < 350 ? 39 : 47; }
+    private int layerRowH() { return height < 295 ? 32 : height < 350 ? 35 : 39; }
+
+    private void renderLayersPanel(GuiGraphics g, int x, int y, int w, int h, int mx, int my) {
+        card(g, x, y, w, h, "地图图层", "只影响显示，不影响测绘和扣费");
+        for (int i = 0; i < 4; i++) {
+            int yy = y + layerTop() + i * layerStep(), rh = layerRowH();
+            if (yy + rh > y + h) break;
+            boolean enabled = layerOn(i);
+            g.fill(x + 10, yy, x + w - 10, yy + rh,
+                    contains(mx, my, x + 10, yy, w - 20, rh) ? 0xff4a614e : 0xff30463a);
+            g.drawString(font, LAYER_NAMES[i], x + 18, yy + 5, CREAM);
+            g.drawString(font, shortText(LAYER_HINTS[i], w - 84), x + 18, yy + rh - 13, MUTED);
+            g.fill(x + w - 41, yy + 9, x + w - 19, yy + rh - 9,
+                    enabled ? 0xffbca16f : 0xff536356);
+            g.drawString(font, enabled ? "✓" : "×", x + w - 33, yy + rh / 2 - 4,
+                    enabled ? DARK : GOLD);
+        }
+    }
+
+    private boolean layerOn(int index) {
+        return switch (index) {
+            case 0 -> drawStructures;
+            case 1 -> drawRoads;
+            case 2 -> drawRails;
+            case 3 -> drawWaypoints;
+            default -> false;
+        };
+    }
+
+    private void toggleLayer(int index) {
+        switch (index) {
+            case 0 -> drawStructures = !drawStructures;
+            case 1 -> drawRoads = !drawRoads;
+            case 2 -> drawRails = !drawRails;
+            case 3 -> drawWaypoints = !drawWaypoints;
+            default -> { return; }
+        }
+        if (index == 1 || index == 2) CartographClient.showSurfaceFeatures(drawRoads, drawRails);
+    }
+
+    private void renderInfoPanel(GuiGraphics g, int x, int y, int w, int h, int mx, int my) {
+        card(g, x, y, w, h, "地图信息", "大地图全屏 · 没有固定边框");
+        g.drawString(font, "单页尺寸   128 × 128 方块", x + 13, y + 68, CREAM);
+        g.drawString(font, "地图页数   " + state().pages(), x + 13, y + 88, CREAM);
+        g.drawString(font, "地图中心   X " + (int) viewX + "  Z " + (int) viewZ,
+                x + 13, y + 108, CREAM);
+        g.drawString(font, "地图缩放   " + (int) (zoom * 100) + "%", x + 13, y + 128, CREAM);
+        g.drawString(font, "拖动地图：左键拖动", x + 13, y + 157, MUTED);
+        g.drawString(font, "放大缩小：滚动滚轮", x + 13, y + 174, MUTED);
+        g.drawString(font, "添加/编辑标点：右键地图", x + 13, y + 191, MUTED);
+        g.drawString(font, "右键地图亦可拓印原版地图", x + 13, y + 208, MUTED);
+    }
+
+    private void renderCursorInfo(GuiGraphics g, int mx, int my) {
+        if (mx < 0 || my < 0 || mx >= width || my >= height) return;
+        if (panel != Panel.NONE && contains(mx, my, panelX(), panelY(), panelW(), panelH())) return;
+        if (contains(mx, my, toolbarX() - 6, toolY() - 6, toolbarWidth() + 6, 51)) return;
+        String str = "X " + toWorldX(mx) + "   Z " + toWorldZ(my)
+                + "    " + String.format(java.util.Locale.ROOT, "%.1f", zoom) + "×";
+        int w = Math.min(width - 20, font.width(str) + 22);
+        g.fill(12, height - 33, 12 + w, height - 12, 0xdf1b2c23);
+        g.drawString(font, shortText(str, w - 14), 20, height - 27, GOLD);
+    }
+
+    private void renderContext(GuiGraphics g, int mx, int my) {
+        int items = context == Context.MATERIAL ? 5 : 2;
+        int w = context == Context.MATERIAL ? 159 : 170;
+        int h = items * 27 + 9;
+        int x = Math.clamp(contextX, 4, Math.max(4, width - w - 4));
+        int y = Math.clamp(contextY, 4, Math.max(4, height - h - 4));
+        g.fill(x, y, x + w, y + h, 0xf91b3025);
+        g.fill(x, y, x + w, y + 1, 0xffceb27f);
+        for (int i = 0; i < items; i++) {
+            String label = switch (context) {
+                case MAP -> i == 0 ? "＋ 添加标点" : "▣ 取出原版地图";
+                case MARKER -> i == 0 ? "✎ 编辑标点" : "× 删除标点";
+                case MATERIAL -> MATERIALS[i];
+                default -> "";
+            };
+            int yy = y + 5 + i * 27;
+            button(g, x + 5, yy, w - 10, 23, label,
+                    false, contains(mx, my, x + 5, yy, w - 10, 23));
+        }
+    }
+
+    private int modalW() { return Math.min(398, Math.max(210, width - 24)); }
+    private int modalH() { return dialog == Dialog.SETTINGS ? Math.min(309, height - 22) : Math.min(302, height - 22); }
+    private int markerOffset(int wide, int medium, int tiny) {
+        return modalH() < 252 ? tiny : modalH() < 300 ? medium : wide;
+    }
+    private int settingsOffset(int wide, int medium, int tiny) {
+        return modalH() < 238 ? tiny : modalH() < 307 ? medium : wide;
+    }
+    private int modalX() { return (width - modalW()) / 2; }
+    private int modalY() { return (height - modalH()) / 2; }
+
+    private void renderDialog(GuiGraphics g, int mx, int my) {
+        g.fill(0, 0, width, height, 0xa80b1711);
+        int x = modalX(), y = modalY(), w = modalW(), h = modalH();
+        g.fill(x - 4, y + 5, x + w + 4, y + h + 6, 0x98121d16);
+        g.fill(x, y, x + w, y + h, PANEL_BG);
+        g.fill(x, y, x + w, y + 37, 0xff374c3d);
+        g.drawString(font, dialog == Dialog.SETTINGS ? "模组设置" :
+                (selectedMarker == null ? "新增地图标点" : "编辑地图标点"), x + 17, y + 15, CREAM);
+        g.drawString(font, "×", x + w - 21, y + 15, GOLD);
+        if (dialog == Dialog.MARKER) renderMarkerDialog(g, mx, my);
+        else renderSettingsDialog(g, mx, my);
+    }
+
+    private int iconBoxW() { return Math.max(25, (modalW() - 38 - 5 * 5) / 6); }
+    private void renderMarkerDialog(GuiGraphics g, int mx, int my) {
+        int x = modalX(), y = modalY(), w = modalW(), h = modalH();
+        g.drawString(font, "X " + pendingX + "  Z " + pendingZ,
+                x + 17, y + markerOffset(44, 39, 34), MUTED);
+        g.drawString(font, "标点名称", x + 17, y + markerOffset(65, 54, 46), GOLD);
+        g.drawString(font, "图标", x + 17, y + markerOffset(103, 95, 83), GOLD);
+        int iconY = y + markerOffset(118, 108, 93);
+        int iconH = markerOffset(28, 26, 22);
+        for (int i = 0; i < 6; i++) {
+            int bx = x + 17 + i * (iconBoxW() + 5);
+            button(g, bx, iconY, iconBoxW(), iconH, ICONS[i],
+                    i == chosenIcon, contains(mx, my, bx, iconY, iconBoxW(), iconH));
+        }
+        g.drawString(font, "颜色", x + 17, y + markerOffset(156, 139, 121), GOLD);
+        if (!canColor())
+            g.drawString(font, shortText("需先集齐红黄蓝三原色", w - 82),
+                    x + 53, y + markerOffset(156, 139, 121), MUTED);
+        int colorY = y + markerOffset(174, 153, 134);
+        int swatchH = markerOffset(20, 18, 16);
+        for (int i = 0; i < 6; i++) {
+            int bx = x + 21 + i * (iconBoxW() + 5);
+            g.fill(bx, colorY, bx + iconBoxW() - 7, colorY + swatchH,
+                    canColor() ? 0xff000000 | COLORS[i] : 0xff666d64);
+            if (chosenColor == i) {
+                g.fill(bx, colorY - 3, bx + iconBoxW() - 7, colorY - 1, GOLD);
+                g.fill(bx, colorY + swatchH + 1, bx + iconBoxW() - 7,
+                        colorY + swatchH + 3, GOLD);
+            }
+        }
+        int glowY = y + markerOffset(209, 182, 158);
+        int glowH = markerOffset(26, 24, 22);
+        button(g, x + 17, glowY, w - 34, glowH,
+                "发光标点  " + (chosenGlow ? "✓ 已开启" : "○ 关闭"),
+                chosenGlow, contains(mx, my, x + 17, glowY, w - 34, glowH));
+        if (modalH() >= 270)
+            g.drawString(font, "首次发光扣 1 × 倍率，编辑不重扣",
+                    x + 17, y + markerOffset(244, 216, 0), MUTED);
+        int btnY = y + h - 36, bw = (w - 43) / 2;
+        button(g, x + 17, btnY, bw, 25, "取消", false,
+                contains(mx, my, x + 17, btnY, bw, 25));
+        button(g, x + 26 + bw, btnY, bw, 25, "保存标点", true,
+                contains(mx, my, x + 26 + bw, btnY, bw, 25));
+    }
+
+    private void renderSettingsDialog(GuiGraphics g, int mx, int my) {
+        int x = modalX(), y = modalY(), w = modalW(), h = modalH();
+        boolean editable = CartographClient.settings().editable();
+        g.drawString(font, editable ? "倍率 0～10×；0 = 不扣材料" : "服务器设置 · 需要管理员权限",
+                x + 17, y + settingsOffset(44, 39, 34), MUTED);
+        g.drawString(font, "每次填充材料增加的资源量",
+                x + 17, y + settingsOffset(192, 151, 131), GOLD);
+        int boxW = (w - 46) / 3;
+        for (int i = 0; i < 3; i++) {
+            g.drawString(font, RATE_NAMES[i], x + 17 + i * (boxW + 6),
+                    y + settingsOffset(207, 164, 143), MUTED);
+        }
+        if (h >= 260)
+            g.drawString(font, "倍率为零仍需首次投入相应材料", x + 17,
+                    y + settingsOffset(254, 207, 0), MUTED);
+        int btnY = y + h - 35, bw = (w - 43) / 2;
+        button(g, x + 17, btnY, bw, 25, "取消", false,
+                contains(mx, my, x + 17, btnY, bw, 25));
+        button(g, x + 26 + bw, btnY, bw, 25, editable ? "保存设置" : "只读",
+                editable, contains(mx, my, x + 26 + bw, btnY, bw, 25));
     }
 
     private final class RateSlider extends AbstractSliderButton {
         private final int kind;
         RateSlider(int x, int y, int w, int h, int kind) {
-            super(x, y, w, h, Component.empty(), newRates[kind] / 100.0);
+            super(x, y, w, h, Component.empty(), rates[kind] / 100.0);
             this.kind = kind;
             updateMessage();
         }
         @Override protected void updateMessage() {
-            String[] names = {"墨水", "颜料", "发光墨水"};
-            setMessage(Component.literal(names[kind] + "   " + (Math.round(value * 100) / 10.0) + "×"));
+            setMessage(Component.literal(RATE_NAMES[kind] + "     " +
+                    (Math.round(value * 100) / 10.0) + "×"));
         }
         @Override protected void applyValue() {
-            newRates[kind] = Math.clamp((int) Math.round(value * 100), 0, 100);
+            rates[kind] = Math.clamp((int) Math.round(value * 100), 0, 100);
             updateMessage();
         }
     }
 
-    private void startSettings() {
-        mode = Mode.SETTINGS;
+    private void setupSettingsWidgets() {
         clearWidgets();
-        nameInput = null;
-        MapNetwork.CostSettings server = CartographClient.settings();
-        newRates = new int[]{server.ink(), server.pigment(), server.glow()};
-        int x = editorX() + 12, y = editorY() + 48;
+        int x = modalX(), y = modalY(), w = modalW();
+        MapNetwork.CostSettings settings = CartographClient.settings();
+        rates = new int[]{settings.ink(), settings.pigment(), settings.glow()};
+        int sliderStart = settingsOffset(64, 52, 44);
+        int sliderStep = settingsOffset(37, 31, 29);
         for (int i = 0; i < 3; i++) {
-            RateSlider slider = new RateSlider(x, y + i * 37, 220, 20, i);
-            slider.active = server.editable();
+            RateSlider slider = new RateSlider(x + 17, y + sliderStart + sliderStep * i,
+                    w - 34, 21, i);
+            slider.active = settings.editable();
             addRenderableWidget(slider);
         }
-    }
-
-    private void drawSettings(GuiGraphics g) {
-        int x = editorX(), y = editorY();
-        g.fill(x - 4, y - 4, x + 248, y + 220, 0xff15251e);
-        g.fill(x, y, x + 244, y + 216, 0xff2f4438);
-        g.drawString(font, "模组设置 · 资源消耗倍率", x + 12, y + 12, 0xfff3dfb5);
-        g.drawString(font, CartographClient.settings().editable()
-                        ? "0～10 倍，0 代表不消耗；服务端保存"
-                        : "仅管理员 / 单人游戏房主可修改",
-                x + 12, y + 30, 0xffcbd6bf);
-        button(g, x + 12, y + 167, 106, 24, "保存设置");
-        button(g, x + 126, y + 167, 106, 24, "取消");
-        g.drawString(font, "首次材料解锁仍是必要条件", x + 12, y + 200, 0xffc1b99d);
-    }
-
-    private void closeSettings(boolean save) {
-        if (save && CartographClient.settings().editable()) {
-            CartographClient.sendSettings(newRates[0], newRates[1], newRates[2]);
+        int[] values = {settings.inkRefill(), settings.pigmentRefill(), settings.glowRefill()};
+        int boxW = (w - 46) / 3;
+        for (int i = 0; i < 3; i++) {
+            EditBox input = new EditBox(font, x + 17 + i * (boxW + 6),
+                    y + settingsOffset(222, 178, 159), boxW, 21, Component.literal("补充量"));
+            input.setFilter(value -> value.matches("[0-9]{0,5}"));
+            input.setMaxLength(5);
+            input.setValue(String.valueOf(values[i]));
+            input.setEditable(settings.editable());
+            refillInput[i] = addRenderableWidget(input);
         }
+    }
+
+    private int readRefill(EditBox field, int fallback) {
+        try {
+            return Math.clamp(Integer.parseInt(field.getValue()), 1, 10000);
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
+    }
+
+    private void setupMarkerWidget() {
         clearWidgets();
-        mode = Mode.NONE;
+        int x = modalX(), y = modalY();
+        markerName = new EditBox(font, x + 17, y + markerOffset(79, 69, 60),
+                modalW() - 34, 19,
+                Component.literal("标点名称"));
+        markerName.setMaxLength(24);
+        markerName.setValue(selectedMarker == null ? "标点" : selectedMarker.name());
+        markerName = addRenderableWidget(markerName);
+        setInitialFocus(markerName);
     }
 
-    private boolean canColor() {
-        return CartographClient.currentAtlas().getOrDefault(
-                CartographMod.ATLAS_STATE.get(), AtlasState.blank()).colorEnabled();
+    private void openMarkerDialog(AtlasMarker existing, int x, int z) {
+        hidePanel();
+        context = Context.NONE;
+        dialog = Dialog.MARKER;
+        selectedMarker = existing;
+        pendingX = existing == null ? x : existing.x();
+        pendingZ = existing == null ? z : existing.z();
+        chosenIcon = existing == null ? 0 : existing.icon();
+        chosenColor = existing == null ? 0 : existing.color();
+        chosenGlow = existing != null && existing.glowing();
+        setupMarkerWidget();
     }
 
-    private void drawContext(GuiGraphics g, int mouseX, int mouseY) {
-        if (mode != Mode.ADD_MENU && mode != Mode.MARKER_MENU && mode != Mode.MATERIAL_MENU) return;
-        int x = Math.max(4, Math.min(menuX, width - 150));
-        int y = Math.max(4, Math.min(menuY, height - (mode == Mode.MATERIAL_MENU ? 132 : 70)));
-        g.fill(x, y, x + 136, y + (mode == Mode.MATERIAL_MENU ? 124 : 49), 0xff182b23);
-        if (mode == Mode.MATERIAL_MENU) {
-            String[] opts = {"墨囊", "发光墨囊", "红色染料", "黄色染料", "蓝色染料"};
-            for (int i = 0; i < 5; i++) button(g, x + 4, y + 4 + i * 23, 128, 21, opts[i]);
-        } else if (mode == Mode.ADD_MENU) {
-            button(g, x + 4, y + 4, 128, 19, "新增标点");
-            button(g, x + 4, y + 26, 128, 19, "取出地图 (空地图)");
-        } else {
-            button(g, x + 4, y + 4, 128, 19, "编辑标点");
-            button(g, x + 4, y + 26, 128, 19, "删除标点");
+    private void openSettings() {
+        hidePanel();
+        context = Context.NONE;
+        dialog = Dialog.SETTINGS;
+        setupSettingsWidgets();
+    }
+
+    private boolean canColor() { return state().colorEnabled(); }
+    private void closeDialog() {
+        clearWidgets();
+        markerName = null;
+        for (int i = 0; i < refillInput.length; i++) refillInput[i] = null;
+        selectedMarker = null;
+        dialog = Dialog.NONE;
+    }
+
+    private void saveMarker() {
+        if (markerName == null) return;
+        if (selectedMarker == null && !canMark(pendingX, pendingZ)) {
+            toast("仅能在已测绘位置添加标点");
+            return;
         }
+        CartographClient.sendMarker(new MapNetwork.EditMarker(
+                CartographClient.atlasId(),
+                selectedMarker == null ? "" : selectedMarker.id(),
+                pendingX, pendingZ, markerName.getValue(),
+                chosenIcon, canColor() ? chosenColor : 0, chosenGlow, false));
+        actionRefreshTicks = 50;
+        closeDialog();
+        toast("已提交标点保存请求");
+    }
+
+    private void saveSettings() {
+        MapNetwork.CostSettings server = CartographClient.settings();
+        if (!server.editable()) {
+            toast("只有管理员可以修改服务端设置");
+            return;
+        }
+        CartographClient.sendSettings(rates[0], rates[1], rates[2],
+                readRefill(refillInput[0], server.inkRefill()),
+                readRefill(refillInput[1], server.pigmentRefill()),
+                readRefill(refillInput[2], server.glowRefill()));
+        closeDialog();
+        toast("设置已提交至服务器");
+    }
+
+    private void toast(String message) {
+        notice = message;
+        noticeUntil = frameTicks + 90;
     }
 
     private AtlasMarker markerNear(double mx, double my) {
-        for (int pz = firstPageZ(); pz <= lastPageZ(); pz++) {
-            for (int px = firstPageX(); px <= lastPageX(); px++) {
-                MapNetwork.Page page = CartographClient.page(px, pz);
-                if (page == null || !page.inRange()) continue;
-                for (AtlasMarker marker : page.markers()) {
-                    if (Math.abs(mx - mapX(marker.x())) <= 7
-                            && Math.abs(my - mapY(marker.z())) <= 7)
-                        return marker;
-                }
+        if (!drawWaypoints) return null;
+        AtlasMarker nearest = null;
+        double best = 100;
+        for (MapNetwork.Page page : CartographClient.cachedPages()) {
+            for (AtlasMarker marker : page.markers()) {
+                double dx = mx - toScreenX(marker.x());
+                double dy = my - toScreenZ(marker.z());
+                double sq = dx * dx + dy * dy;
+                if (sq < best) { nearest = marker; best = sq; }
             }
         }
-        return null;
+        return nearest;
     }
 
-    private void startEditor() {
-        mode = Mode.EDIT;
-        clearWidgets();
-        int x = editorX() + 12, y = editorY() + 43;
-        nameInput = new EditBox(font, x, y, 220, 20, Component.literal("标点名称"));
-        nameInput.setMaxLength(24);
-        nameInput.setValue(selected == null ? "标点" : selected.name());
-        addRenderableWidget(nameInput);
-        setInitialFocus(nameInput);
-        editIcon = selected == null ? 0 : selected.icon();
-        editColor = selected == null ? 0 : selected.color();
-        editGlow = selected != null && selected.glowing();
-    }
-
-    private void closeEditor() {
-        nameInput = null;
-        clearWidgets();
-        mode = Mode.NONE;
-        selected = null;
-    }
-
-    private void saveEditor() {
-        if (nameInput == null) return;
-        CartographClient.sendMarker(new MapNetwork.EditMarker(CartographClient.atlasId(),
-                selected == null ? "" : selected.id(), pendingX, pendingZ,
-                nameInput.getValue(), editIcon, editColor, editGlow, false));
-        actionRefreshTicks = 55;
-        closeEditor();
+    private boolean canMark(int x, int z) {
+        MapNetwork.Page page = CartographClient.page(Math.floorDiv(x, 128), Math.floorDiv(z, 128));
+        if (page == null || !page.inRange()) return false;
+        int px = Math.floorMod(x, 128), pz = Math.floorMod(z, 128);
+        return Byte.toUnsignedInt(page.pixels()[px + pz * 128]) > 0;
     }
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
-        if (mode == Mode.SETTINGS) {
-            if (super.mouseClicked(mx, my, button)) return true;
-            int x = editorX(), y = editorY();
-            if (button == 0 && my >= y + 167 && my < y + 191) {
-                if (mx >= x + 12 && mx < x + 118) closeSettings(true);
-                else if (mx >= x + 126 && mx < x + 232) closeSettings(false);
+        if (dialog != Dialog.NONE) return dialogClicked(mx, my, button);
+        if (context != Context.NONE) {
+            if (handleContextClick(mx, my, button)) return true;
+            context = Context.NONE;
+        }
+        if (handleToolbarClick(mx, my, button)) return true;
+        if (panel != Panel.NONE) {
+            int x = panelX(), y = panelY(), w = panelW(), h = panelH();
+            if (contains(mx, my, x, y, w, h)) {
+                if (panel == Panel.MARKERS && super.mouseClicked(mx, my, button)) return true;
+                return panelClicked(mx, my, button);
             }
+            hidePanel();
+        }
+        if (button == 1) {
+            pendingX = toWorldX(mx);
+            pendingZ = toWorldZ(my);
+            selectedMarker = markerNear(mx, my);
+            if (selectedMarker != null) {
+                pendingX = selectedMarker.x();
+                pendingZ = selectedMarker.z();
+            }
+            context = selectedMarker == null ? Context.MAP : Context.MARKER;
+            contextX = (int) mx;
+            contextY = (int) my;
             return true;
         }
-        if (mode == Mode.EDIT) {
-            if (super.mouseClicked(mx, my, button)) return true;
-            int x = editorX(), y = editorY();
-            if (button == 0 && mx >= x + 12 && mx < x + 232) {
-                if (my >= y + 68 && my < y + 89) editIcon = (editIcon + 1) % SYMBOL_NAMES.length;
-                else if (my >= y + 93 && my < y + 114 && canColor())
-                    editColor = (editColor + 1) % COLORS.length;
-                else if (my >= y + 133 && my < y + 154) editGlow = !editGlow;
-                else if (my >= y + 161 && my < y + 185) {
-                    if (mx < x + 122) saveEditor();
-                    else closeEditor();
-                }
-                return true;
-            }
-            return true;
-        }
-
-        if (mode == Mode.MATERIAL_MENU) {
-            int x = Math.max(4, Math.min(menuX, width - 150));
-            int y = Math.max(4, Math.min(menuY, height - 132));
-            if (button == 0 && mx >= x + 4 && mx <= x + 132
-                    && my >= y + 4 && my < y + 4 + 5 * 23) {
-                int material = (int) ((my - y - 4) / 23);
-                CartographClient.sendRefill(Math.clamp(material, 0, 4));
-                actionRefreshTicks = 55;
-            }
-            mode = Mode.NONE;
-            return true;
-        }
-
-        if (mode == Mode.ADD_MENU || mode == Mode.MARKER_MENU) {
-            int x = Math.max(4, Math.min(menuX, width - 150));
-            int y = Math.max(4, Math.min(menuY, height - 70));
-            if (button == 0 && mx >= x && mx <= x + 136 && my >= y && my <= y + 49) {
-                if (my < y + 25) {
-                    startEditor();
-                } else if (mode == Mode.MARKER_MENU && selected != null) {
-                    CartographClient.sendMarker(new MapNetwork.EditMarker(CartographClient.atlasId(),
-                            selected.id(), selected.x(), selected.z(), selected.name(),
-                            selected.icon(), selected.color(), selected.glowing(), true));
-                    actionRefreshTicks = 55;
-                    mode = Mode.NONE;
-                    selected = null;
-                } else {
-                    // Map export is handled by a dedicated secure packet.
-                    CartographClient.exportAt(pendingX, pendingZ);
-                    mode = Mode.NONE;
-                }
-                return true;
-            }
-            mode = Mode.NONE;
-        }
-
-        if (button == 0 && mx >= side() + 4 && mx < width - 7) {
-            int y = top() + 76;
-            int compassY = y + 48;
-            int settingsY = compassY + 36 + 38;
-            if (my >= settingsY && my < settingsY + 20) {
-                startSettings();
-                return true;
-            }
-            if (my >= y && my < y + 26) {
-                mode = Mode.MATERIAL_MENU;
-                menuX = (int) (side() + 4);
-                menuY = (int) (y + 28);
-                return true;
-            }
-            if (my >= compassY && my < compassY + 22) {
-                CartographClient.sendRefill(5);
-                actionRefreshTicks = 55;
-                return true;
-            }
-        }
-
-        if (button == 1 && insideMap(mx, my)) {
-            pendingX = worldX(mx);
-            pendingZ = worldZ(my);
-            if (Math.abs((long) pendingX) > 30_000_000 || Math.abs((long) pendingZ) > 30_000_000)
-                return true;
-            selected = markerNear(mx, my);
-            if (selected != null) {
-                pendingX = selected.x();
-                pendingZ = selected.z();
-            }
-            mode = selected == null ? Mode.ADD_MENU : Mode.MARKER_MENU;
-            menuX = (int) mx;
-            menuY = (int) my;
+        if (button == 0) {
+            draggingMap = true;
             return true;
         }
         return super.mouseClicked(mx, my, button);
     }
 
+    private boolean handleToolbarClick(double mx, double my, int button) {
+        int x = toolbarX(), y = toolY(), w = toolW();
+        if (contains(mx, my, x - 6, y - 6, toolbarWidth() + 6, 51)) {
+            if (button == 0) {
+                for (int i = 0; i < TOOLS.length; i++) {
+                    if (!contains(mx, my, x + i * (w + 4), y, w, 37)) continue;
+                    context = Context.NONE;
+                    switch (i) {
+                        case 0 -> togglePanel(Panel.ATLAS);
+                        case 1 -> { markerScroll = 0; togglePanel(Panel.MARKERS); }
+                        case 2 -> togglePanel(Panel.LAYERS);
+                        case 3 -> openSettings();
+                        case 4 -> recenter();
+                        case 5 -> togglePanel(Panel.INFO);
+                        case 6 -> minecraft.setScreen(null);
+                        default -> { }
+                    }
+                    break;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void setupMarkerSearch() {
+        clearWidgets();
+        markerSearch = new EditBox(font, panelX() + 13, panelY() + 61,
+                panelW() - 26, 20, Component.literal("搜索标点"));
+        markerSearch.setMaxLength(24);
+        markerSearch.setValue(markerFilter);
+        markerSearch.setResponder(value -> {
+            markerFilter = value;
+            markerScroll = 0;
+        });
+        markerSearch = addRenderableWidget(markerSearch);
+    }
+
+    private void hidePanel() {
+        if (markerSearch != null) {
+            clearWidgets();
+            markerSearch = null;
+        }
+        panel = Panel.NONE;
+    }
+
+    private void togglePanel(Panel next) {
+        if (panel == next) hidePanel();
+        else {
+            hidePanel();
+            panel = next;
+            if (next == Panel.MARKERS) setupMarkerSearch();
+        }
+    }
+
+    private void recenter() {
+        if (minecraft != null && minecraft.player != null) {
+            viewX = minecraft.player.getBlockX();
+            viewZ = minecraft.player.getBlockZ();
+            reloadVisible(false);
+        }
+        hidePanel();
+    }
+
+    private boolean panelClicked(double mx, double my, int button) {
+        if (button != 0) return true;
+        int x = panelX(), y = panelY(), w = panelW();
+        if (contains(mx, my, x + w - 29, y, 29, 34)) {
+            hidePanel();
+            return true;
+        }
+        if (panel == Panel.ATLAS) {
+            if (contains(mx, my, x + 12, consumableY(), w - 24, 27)) {
+                context = Context.MATERIAL;
+                contextX = Math.max(8, x - 164);
+                contextY = consumableY();
+                return true;
+            }
+            if (contains(mx, my, x + 12, compassY(), w - 24, 24)) {
+                CartographClient.sendRefill(5);
+                actionRefreshTicks = 45;
+                return true;
+            }
+        } else if (panel == Panel.LAYERS) {
+            for (int i = 0; i < 4; i++) {
+                if (contains(mx, my, x + 10, y + layerTop() + i * layerStep(),
+                        w - 20, layerRowH())) {
+                    toggleLayer(i);
+                    return true;
+                }
+            }
+        } else if (panel == Panel.MARKERS) {
+            List<AtlasMarker> markers = availableMarkers();
+            for (int i = 0; i < markerRows() && i + markerScroll < markers.size(); i++) {
+                int yy = y + 111 + i * 33;
+                if (!contains(mx, my, x + 11, yy, w - 22, 29)) continue;
+                AtlasMarker marker = markers.get(i + markerScroll);
+                if (mx > x + w - 55) {
+                    openMarkerDialog(marker, marker.x(), marker.z());
+                } else {
+                    viewX = marker.x();
+                    viewZ = marker.z();
+                    reloadVisible(false);
+                }
+                return true;
+            }
+        }
+        return true;
+    }
+
+    private boolean handleContextClick(double mx, double my, int button) {
+        int items = context == Context.MATERIAL ? 5 : 2;
+        int w = context == Context.MATERIAL ? 159 : 170;
+        int h = items * 27 + 9;
+        int x = Math.clamp(contextX, 4, Math.max(4, width - w - 4));
+        int y = Math.clamp(contextY, 4, Math.max(4, height - h - 4));
+        if (!contains(mx, my, x, y, w, h)) return false;
+        if (button == 0) {
+            for (int i = 0; i < items; i++) {
+                if (!contains(mx, my, x + 5, y + 5 + i * 27, w - 10, 23)) continue;
+                switch (context) {
+                    case MATERIAL -> {
+                        CartographClient.sendRefill(i);
+                        actionRefreshTicks = 45;
+                    }
+                    case MAP -> {
+                        if (!canMark(pendingX, pendingZ)) {
+                            toast("区域尚未测绘，无法操作");
+                            break;
+                        }
+                        if (i == 0) openMarkerDialog(null, pendingX, pendingZ);
+                        else {
+                            CartographClient.exportAt(pendingX, pendingZ);
+                            toast("已请求拓印，需要背包有空地图");
+                        }
+                    }
+                    case MARKER -> {
+                        if (selectedMarker == null) break;
+                        if (i == 0) openMarkerDialog(selectedMarker, selectedMarker.x(), selectedMarker.z());
+                        else {
+                            CartographClient.sendMarker(new MapNetwork.EditMarker(
+                                    CartographClient.atlasId(), selectedMarker.id(),
+                                    selectedMarker.x(), selectedMarker.z(),
+                                    selectedMarker.name(), selectedMarker.icon(),
+                                    selectedMarker.color(), selectedMarker.glowing(), true));
+                            actionRefreshTicks = 45;
+                            selectedMarker = null;
+                        }
+                    }
+                    default -> { }
+                }
+                context = Context.NONE;
+                break;
+            }
+        }
+        return true;
+    }
+
+    private boolean dialogClicked(double mx, double my, int button) {
+        if (button != 0) return true;
+        if (super.mouseClicked(mx, my, button)) return true;
+        int x = modalX(), y = modalY(), w = modalW(), h = modalH();
+        if (contains(mx, my, x + w - 40, y, 40, 37)) {
+            closeDialog();
+            return true;
+        }
+        int bw = (w - 43) / 2, by = y + h - (dialog == Dialog.SETTINGS ? 35 : 36);
+        if (contains(mx, my, x + 17, by, bw, 25)) {
+            closeDialog();
+            return true;
+        }
+        if (contains(mx, my, x + 26 + bw, by, bw, 25)) {
+            if (dialog == Dialog.MARKER) saveMarker();
+            else saveSettings();
+            return true;
+        }
+        if (dialog == Dialog.MARKER) {
+            int iconY = y + markerOffset(118, 108, 93);
+            int iconH = markerOffset(28, 26, 22);
+            int colorY = y + markerOffset(174, 153, 134);
+            int colorH = markerOffset(20, 18, 16);
+            for (int i = 0; i < 6; i++) {
+                int bx = x + 17 + i * (iconBoxW() + 5);
+                if (contains(mx, my, bx, iconY, iconBoxW(), iconH)) {
+                    chosenIcon = i;
+                    return true;
+                }
+                if (contains(mx, my, bx + 4, colorY, iconBoxW() - 7, colorH)) {
+                    if (canColor()) chosenColor = i;
+                    else toast("需要先投入红、黄、蓝三原色");
+                    return true;
+                }
+            }
+            int glowY = y + markerOffset(209, 182, 158);
+            int glowH = markerOffset(26, 24, 22);
+            if (contains(mx, my, x + 17, glowY, w - 34, glowH)) {
+                if (!chosenGlow && !state().glowEnabled()) toast("需要先投入发光墨囊");
+                else chosenGlow = !chosenGlow;
+                return true;
+            }
+        }
+        return true;
+    }
+
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        if (button == 0 && mode == Mode.NONE && insideMap(mx, my)) {
-            viewX -= dx / zoom;
-            viewZ -= dy / zoom;
+        if (dialog != Dialog.NONE) return super.mouseDragged(mx, my, button, dx, dy);
+        if (button == 0 && draggingMap) {
+            viewX = Math.clamp(viewX - dx / zoom, -30_000_000, 30_000_000);
+            viewZ = Math.clamp(viewZ - dy / zoom, -30_000_000, 30_000_000);
             reloadVisible(false);
             return true;
         }
@@ -548,28 +1052,49 @@ public final class AtlasScreen extends Screen {
     }
 
     @Override
+    public boolean mouseReleased(double mx, double my, int button) {
+        if (button == 0) draggingMap = false;
+        return super.mouseReleased(mx, my, button);
+    }
+
+    @Override
     public boolean mouseScrolled(double mx, double my, double deltaX, double deltaY) {
-        if (!insideMap(mx, my)) return super.mouseScrolled(mx, my, deltaX, deltaY);
-        double wx = viewX + (mx - mapMidX()) / zoom;
-        double wz = viewZ + (my - mapMidY()) / zoom;
+        if (dialog != Dialog.NONE) return super.mouseScrolled(mx, my, deltaX, deltaY);
+        if (context != Context.NONE) return true;
+        if (panel == Panel.MARKERS && contains(mx, my, panelX(), panelY(), panelW(), panelH())) {
+            int max = Math.max(0, availableMarkers().size() - markerRows());
+            markerScroll = Math.clamp(markerScroll - (int) Math.signum(deltaY), 0, max);
+            return true;
+        }
+        if (panel != Panel.NONE && contains(mx, my, panelX(), panelY(), panelW(), panelH())) return true;
+        if (contains(mx, my, toolbarX() - 6, toolY() - 6, toolbarWidth() + 6, 51)) return true;
+        double originalX = viewX + (mx - screenMidX()) / zoom;
+        double originalZ = viewZ + (my - screenMidY()) / zoom;
         zoom = Math.clamp(zoom * (deltaY > 0 ? 1.25 : 0.8), 1.0, 6.0);
-        viewX = wx - (mx - mapMidX()) / zoom;
-        viewZ = wz - (my - mapMidY()) / zoom;
+        viewX = Math.clamp(originalX - (mx - screenMidX()) / zoom, -30_000_000, 30_000_000);
+        viewZ = Math.clamp(originalZ - (my - screenMidY()) / zoom, -30_000_000, 30_000_000);
         reloadVisible(false);
         return true;
     }
 
     @Override
     public boolean keyPressed(int key, int scan, int mods) {
-        if (mode == Mode.EDIT || mode == Mode.SETTINGS) return super.keyPressed(key, scan, mods);
-        int delta = 128;
+        if (key == GLFW.GLFW_KEY_ESCAPE) {
+            if (dialog != Dialog.NONE) { closeDialog(); return true; }
+            if (context != Context.NONE) { context = Context.NONE; return true; }
+            if (panel != Panel.NONE) { hidePanel(); return true; }
+            return super.keyPressed(key, scan, mods);
+        }
+        if (dialog != Dialog.NONE) return super.keyPressed(key, scan, mods);
         switch (key) {
-            case GLFW.GLFW_KEY_LEFT -> viewX -= delta;
-            case GLFW.GLFW_KEY_RIGHT -> viewX += delta;
-            case GLFW.GLFW_KEY_UP -> viewZ -= delta;
-            case GLFW.GLFW_KEY_DOWN -> viewZ += delta;
+            case GLFW.GLFW_KEY_LEFT -> viewX -= 128;
+            case GLFW.GLFW_KEY_RIGHT -> viewX += 128;
+            case GLFW.GLFW_KEY_UP -> viewZ -= 128;
+            case GLFW.GLFW_KEY_DOWN -> viewZ += 128;
             default -> { return super.keyPressed(key, scan, mods); }
         }
+        viewX = Math.clamp(viewX, -30_000_000, 30_000_000);
+        viewZ = Math.clamp(viewZ, -30_000_000, 30_000_000);
         reloadVisible(false);
         return true;
     }
