@@ -1,0 +1,17 @@
+[Unit]
+Description=Cartograph LAN HTML Prototype Preview
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wanstu/projects/minecraft-cartograph
+ExecStart=/usr/bin/python3 /home/wanstu/projects/minecraft-cartograph/scripts/cartograph_prototype_server.py --port 8765 --root /home/wanstu/projects/minecraft-cartograph/preview/live
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

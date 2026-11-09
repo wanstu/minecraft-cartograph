@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Cartograph · 世界地图</title>
+<style>
+:root{color-scheme:dark;--ink:#18241f;--glass:#20332be8;--text:#f5eee0;--muted:#c5d0bf;--gold:#e5c89b;--line:#d9e6cd28;--shadow:0 14px 45px #0b1716a6;font-family:Inter,"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif}
+*{box-sizing:border-box}html,body{height:100%;margin:0;overflow:hidden;background:#cfceb9;color:var(--text)}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible{outline:2px solid #f4cf8c;outline-offset:2px}button:disabled{opacity:.45;cursor:not-allowed}
+#mapArea,#map{position:fixed;inset:0;width:100%;height:100%}#mapArea{cursor:grab;touch-action:none;background:#e4d7bb}#mapArea.dragging{cursor:grabbing}#map{display:block;image-rendering:auto}#mapArea:after{content:"";position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 120px #1c2a2226}
+#markerLayer{position:absolute;inset:0;pointer-events:none}.marker{position:absolute;transform:translate(-50%,-100%);display:flex;gap:5px;align-items:center;white-space:nowrap;filter:drop-shadow(0 2px 2px #162b2638)}.markIcon{display:flex;align-items:center;justify-content:center;width:26px;height:26px;background:#fdf5e6;border:2px solid #304c45;border-radius:50%;font-size:14px;color:#253e38;box-shadow:0 2px 8px #162b2666}.markLabel{color:#253b34;background:#f7f4e6f0;padding:4px 7px;border-radius:5px;border:1px solid #2943342c;font-size:12px;font-weight:750;letter-spacing:.2px;text-shadow:0 1px #fff5;box-shadow:0 3px 10px #1f2d241b}.marker.ancient .markIcon{background:#eee1bd;border-color:#6a4f39;color:#4a3023}.marker.ancient .markLabel{background:#e9d4a8eb;border-color:#6a4f3960;color:#513c29;font-family:Georgia,"Microsoft YaHei",serif}
+.appbar{position:fixed;z-index:5;top:20px;right:22px;display:flex;align-items:center;gap:6px;padding:7px;background:#1b2c24ed;border:1px solid #dfc99c42;border-radius:12px;box-shadow:var(--shadow)}.tool{height:46px;min-width:52px;padding:5px 9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:#eee8d9;background:transparent;border:1px solid transparent;border-radius:8px;font-size:12px;font-weight:650}.tool:hover,.tool.active{background:#4a6252;border-color:#dfc99c38}.tool svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.tool.close{color:#f6d6bc}.sep{height:26px;width:1px;background:#eadcb12e;margin:0 2px}
+.switcher{position:fixed;z-index:5;top:90px;right:22px;display:flex;align-items:center;gap:5px;padding:6px;background:#20332be8;border:1px solid #d9c99b51;box-shadow:var(--shadow);border-radius:11px}.switcher button{border:0;background:transparent;color:#d4dfd2;border-radius:7px;padding:9px 14px;white-space:nowrap;font-size:14px;font-weight:750}.switcher button.selected{background:#edddb7;color:#293b30;box-shadow:0 2px 9px #07181244}.switcher .caption{color:#d0dccb;font-size:11px;margin:0 7px 0 5px;white-space:nowrap}
+.overlayWindow{position:fixed;z-index:7;right:22px;top:93px;width:min(350px,calc(100vw - 28px));max-height:min(650px,calc(100vh - 110px));overflow-y:auto;border:1px solid #d8caa05b;border-radius:13px;background:linear-gradient(160deg,#283e33f5,#182b23f7);box-shadow:var(--shadow);padding:19px}.overlayWindow.hidden,.modalBackdrop.hidden,.toast.hidden,.contextMenu.hidden{display:none}.panelLabel{font-size:10px;color:#dfc799;letter-spacing:2.2px;font-weight:800;text-transform:uppercase}.panelTitle{font-size:20px;line-height:1.6;font-weight:800;margin:3px 0}.panelSubtitle{color:#b9c8ba;font-size:12px;line-height:1.8;margin:0 0 12px}.smallClose{position:absolute;right:12px;top:12px;border:0;background:#ffffff12;color:#fff;border-radius:7px;width:28px;height:28px;font-size:19px}.resource{display:grid;grid-template-columns:1fr auto;gap:5px 8px;padding:11px 0;border-bottom:1px solid var(--line)}.resource small{color:#bac7b5;font-size:12px}.resource strong{font-size:14px;color:#f3d399}.btn{border:1px solid #f7d2a93c;background:#435748;color:#f6eddf;padding:10px 14px;border-radius:8px;font-weight:700}.btn:hover{background:#576d59}.btn.primary{background:#dac293;color:#23362b;border-color:#ead4a8}.btn.primary:hover{background:#f4d8a3}.panelGroup{margin-top:14px;display:grid;gap:8px}.panelGroup button{text-align:left;padding:10px 12px}.layerRow{display:flex;align-items:center;justify-content:space-between;padding:12px 3px;gap:14px;border-bottom:1px solid #ffffff14;min-height:48px}.layerRow span{color:#eeeadd;font-size:13px;font-weight:700}.layerRow small{display:block;color:#adbfb2;font-size:11px;margin-top:4px}.layerRow input{accent-color:#eccb88;width:18px;height:18px}.markList{display:flex;flex-direction:column;gap:7px}.markList button{text-align:left;display:flex;align-items:center;gap:9px;border:1px solid #ffffff16;background:#385042;color:#f8edd9;border-radius:8px;padding:10px}.markList button:hover{background:#536e57}.markList b{font-size:13px}.markList small{font-size:10px;color:#bbc7b8;display:block;margin-top:3px}
+.modalBackdrop{position:fixed;inset:0;z-index:10;background:#0a1712b8;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px)}.modal{width:min(780px,100%);max-height:95vh;overflow-y:auto;background:linear-gradient(152deg,#2b4135,#1b3026);border:1px solid #dcc7a874;border-radius:16px;box-shadow:0 30px 90px #000b;padding:27px 28px}.modalHeading{display:flex;justify-content:space-between;gap:15px;align-items:start}.modalHeading h2{font-size:23px;line-height:1.4;margin:4px 0 3px}.modalHeading p{font-size:12px;color:#b8caba;margin:3px 0 0;line-height:1.7}.modalHeading button{background:#ffffff16;color:#fff;border:0;border-radius:7px;font-size:22px;width:32px;height:32px}.settingCaption{color:#f0d29e;font-size:11px;font-weight:850;letter-spacing:1px;margin:24px 0 10px}.styleCards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.styleCard{border:2px solid #ffffff2c;border-radius:11px;overflow:hidden;background:#253c31;color:#fff;text-align:left;padding:0;min-width:0;transition:border .15s,transform .15s}.styleCard:hover{border-color:#c7b38c}.styleCard.chosen{border-color:#eed09a;box-shadow:0 0 0 2px #edcf9b2e}.miniPreview{height:112px;position:relative;overflow:hidden}.miniPreview canvas{height:100%;width:100%;display:block}.miniPreview .chip{position:absolute;top:8px;right:8px;background:#23362bdc;color:#f9eacf;font-size:10px;border-radius:4px;padding:4px 6px}.styleCard strong{display:block;font-size:16px;margin:12px 13px 4px}.styleCard small{display:block;color:#c0cbbf;font-size:11px;line-height:1.7;margin:0 13px 13px;min-height:38px;font-size:12px}.modalFooter{display:flex;justify-content:space-between;align-items:center;gap:9px;margin-top:21px;border-top:1px solid #ffffff1f;padding-top:18px}.modalFooter small{font-size:11px;color:#becdbb;line-height:1.6}.settingsToggle{display:flex;align-items:center;justify-content:space-between;font-size:13px;padding:10px 0;border-bottom:1px solid #ffffff12}.settingsToggle input{accent-color:#efd293}.settingsToggle b{font-size:12px}.settingInput{background:#20362d;border:1px solid #c6b68f7b;border-radius:7px;color:#fff;padding:10px;font-size:14px;width:100%;outline:none}.settingInput:focus{border-color:#f1d6a3}
+.toast{position:fixed;z-index:20;left:50%;bottom:35px;transform:translateX(-50%);background:#1e3429f5;border:1px solid #e4d09b80;color:#f5e8d5;box-shadow:var(--shadow);padding:11px 20px;border-radius:10px;max-width:calc(100vw - 30px);font-size:13px;font-weight:650;text-align:center}.mapFlag{position:fixed;z-index:4;left:20px;bottom:20px;color:#f1f1e3;font-size:11px;background:#1b3329bb;border:1px solid #e3d4ba62;border-radius:8px;padding:8px 11px;pointer-events:none;box-shadow:0 5px 25px #20332a42}.mapFlag b{display:block;font-size:12px;margin-bottom:3px;color:#f5d9a4}.comp-label{position:fixed;z-index:4;top:154px;padding:8px 12px;font-size:13px;font-weight:800;border-radius:8px;box-shadow:0 4px 22px #2224;pointer-events:none;white-space:nowrap}.comp-label.left{left:23px;background:#d6e8dbed;color:#1e5548}.comp-label.right{right:23px;top:154px;background:#dfc69eeb;color:#503927}.compareHandle{position:fixed;z-index:3;width:2px;background:linear-gradient(transparent 0,#ffe9c8 8%,#ffe9c8 92%,transparent);top:0;bottom:0;cursor:col-resize;box-shadow:0 0 0 1px #1b392948}.compareHandle:before{content:"⇆";position:absolute;top:51%;left:50%;transform:translate(-50%,-50%);display:grid;place-items:center;width:43px;height:43px;border-radius:50%;background:#f3e5cc;color:#2a4336;border:2px solid #a98c62;box-shadow:0 5px 20px #101a176a;font-size:23px}.compareHandle.hidden,.comp-label.hidden{display:none}.contextMenu{position:fixed;z-index:8;background:#20382dcf;color:#f8eee0;padding:6px;border-radius:10px;border:1px solid #f4d3a75a;box-shadow:0 12px 42px #101d18a8;width:176px}.contextMenu button{display:block;width:100%;text-align:left;padding:10px;border:0;border-radius:7px;background:none;color:inherit;font-size:12px}.contextMenu button:hover{background:#ffffff25}
+@media(max-width:850px){.appbar{right:8px;top:8px;gap:0;padding:4px}.tool{width:43px;min-width:0;height:45px;font-size:10px;padding:3px}.tool svg{width:17px;height:17px}.switcher{right:8px;top:67px}.switcher .caption{display:none}.switcher button{padding:8px 10px;font-size:11px}.overlayWindow{right:8px;top:118px;max-height:calc(100vh - 132px)}.comp-label.right{top:119px;right:12px}.comp-label.left{top:119px;left:10px}.mapFlag{left:8px;bottom:8px;font-size:9px}.modal{padding:18px}.miniPreview{height:92px}}
+.compareControls{position:fixed;z-index:6;top:92px;left:22px;display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:10px;background:#20332be8;border:1px solid #dfc99c70;box-shadow:var(--shadow)}
+.compareControls.hidden{display:none}.compareControls label{color:#f5e7cc;font-size:12px;font-weight:700}.compareControls select{margin-left:5px;background:#304b3b;color:#f9eed9;border:1px solid #d9c69f60;border-radius:7px;padding:7px 10px;font-size:12px}.compareControls .tip{color:#c7d0be;font-size:11px}
+.marker.pixel .markIcon{border-radius:5px;background:#f3eccf;border:2px solid #263b30;box-shadow:2px 2px 0 #102d2180}.marker.pixel .markLabel{background:#f3eccf;border-radius:1px;border:2px solid #375745;box-shadow:2px 2px 0 #203c2a88;font-family:monospace;font-size:12px}
+@media(max-width:940px){.styleCards{grid-template-columns:repeat(3,minmax(0,1fr))}.miniPreview{height:88px}.styleCard strong{font-size:14px}.styleCard small{font-size:11px;min-height:65px}}
+@media(max-width:640px){.styleCards{grid-template-columns:1fr}.styleCard{display:grid;grid-template-columns:105px 1fr;grid-template-rows:auto auto;align-items:center}.miniPreview{grid-row:1/3;height:91px}.styleCard strong{margin:8px 10px 0;font-size:15px}.styleCard small{margin:2px 10px 8px;min-height:unset}.compareControls{left:8px;top:113px;gap:5px;padding:5px}.compareControls .tip{display:none}.compareControls label{font-size:10px}.compareControls select{font-size:11px;padding:5px}}
+@media(max-width:520px){.tool{width:36px}.tool span{font-size:9px}.switcher{top:59px}.switcher button{padding:8px 8px}.styleCards{gap:7px}.styleCard small{font-size:10px}.styleCard strong{font-size:13px}.modalHeading h2{font-size:20px}.overlayWindow{top:111px}.comp-label.right{right:9px;top:110px}.comp-label.left{top:110px}}
+
+/* Distinct cartographic place names, not point-waypoints */
+#mapArea.regionDrawing{cursor:crosshair!important}
+#mapArea.regionDrawing.dragging{cursor:crosshair!important}
+.regionGuide{position:fixed;z-index:8;bottom:27px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;max-width:calc(100vw - 28px);border:1px solid #d9c69c8e;border-radius:13px;background:#203429f0;color:#f8efdc;box-shadow:var(--shadow);padding:10px 13px;backdrop-filter:blur(10px)}
+.regionGuide.hidden{display:none}.regionGuide strong{font-size:13px;color:#f5ddb1}.regionGuide small{display:block;margin-top:3px;color:#bfd0c1;font-size:11px;white-space:nowrap}.regionGuide .guideButtons{display:flex;gap:6px;flex-wrap:nowrap}.regionGuide .btn{white-space:nowrap;font-size:12px;padding:8px 11px}.regionGuide .danger{border-color:#b97a68;color:#ffe1cc}
+.regionItem{background:#3b5143b5;border:1px solid #ffffff16;border-radius:9px;padding:11px 11px 10px;margin:9px 0}.regionItem.selected{border-color:#e5ca9588;background:#4a5d4a}.regionItemHeader{display:flex;gap:9px;align-items:center}.regionItemColor{width:12px;height:12px;flex-shrink:0;border-radius:50%;border:2px solid #eee1cc}.regionItemHeader b{font-size:14px;color:#f8e9ce;flex:1}.regionItemHeader em{font-size:10px;font-style:normal;color:#c3d4c4;background:#20382db9;border-radius:4px;padding:3px 6px}.regionItemNote{color:#b4c5b9;font-size:11px;margin:8px 0}.regionItemActions{display:flex;gap:5px}.regionItemActions button{border:1px solid #e8d3a536;background:#5a6b53;color:#f9efd8;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700}.regionItemActions button:last-child{background:#6b4f44}.regionItemActions button:hover{filter:brightness(1.16)}
+.regionFormGrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.regionFormGrid label{display:block;color:#dfd5bd;font-size:12px;font-weight:700}.regionFormGrid label>.settingInput{margin-top:7px}.regionFormHint{border-left:3px solid #d9bf89;background:#fff2d60a;border-radius:4px;padding:9px 13px;margin-top:17px;color:#c2cdbb;font-size:12px;line-height:1.8}.regionColorInput{height:43px;padding:5px 7px!important}.regionInlineInfo{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;color:#d0dfc8;margin:7px 0}
+@media(max-width:750px){.regionGuide{left:10px;right:10px;bottom:10px;transform:none;flex-wrap:wrap;justify-content:space-between}.regionGuide small{white-space:normal}.regionFormGrid{grid-template-columns:1fr}}
+
+/* 最终原型: 左下角只保留真正有用的简洁状态信息 */
+.mapFlag.statusSimple{bottom:18px;left:20px;min-width:258px;max-width:460px;font-size:13px;background:#20382df0;backdrop-filter:blur(10px);padding:11px 14px;border-radius:12px;line-height:1.7}
+.statusTop{display:flex;gap:14px;align-items:center}.statusTop strong{color:#edd6a4;font-size:14px}.statusBottom{display:flex;gap:15px;align-items:center;color:#c7d4c5;font-size:11px;flex-wrap:wrap}
+.map-center{position:fixed;right:24px;bottom:24px;z-index:6;width:48px;height:48px;border:1px solid #cbb78982;background:#20372aee;border-radius:12px;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#f3e5c7}
+.map-center:hover{background:#3c5d48}.map-center svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.8}
+.selectionPoint{position:fixed;z-index:5;pointer-events:none;width:28px;height:28px;transform:translate(-50%,-50%);border-radius:50%;border:2px solid #ffe9ae;background:#283e2b66;box-shadow:0 0 0 4px #172a2645,0 0 20px #12272c55}
+.selectionPoint span{position:absolute;top:10px;left:10px;width:4px;height:4px;border-radius:50%;background:white}
+.detailFloat{position:fixed;z-index:8;width:315px;max-height:calc(100vh - 120px);overflow:auto;min-height:136px;background:linear-gradient(145deg,#283d32f7,#1d3027f9);border:1px solid #dfc99b69;box-shadow:0 14px 45px #0b1716bb;border-radius:14px;padding:18px 18px 15px;color:#f6f0de}
+.detailFloat.hidden,.selectionPoint.hidden{display:none}.detailHead{display:flex;justify-content:space-between;align-items:start;gap:10px}.detailHead small{font-weight:800;letter-spacing:1.3px;font-size:10px;color:#e2c895}.detailHead h3{margin:4px 0;font-size:22px}.detailFloat .smallClose{position:relative;right:0;top:0;flex-shrink:0}
+.detailFloat p{font-size:13px;line-height:1.7;margin:10px 0;color:#d2ded0}.detailMeta{font-size:12px;color:#dacfb2;border-top:1px solid #f4d6a52f;padding:10px 0}
+.detailActions{display:flex;gap:7px;flex-wrap:wrap}.detailActions button{padding:8px 11px;border:1px solid #e0ceaa53;background:#465c49;color:#fff1d7;border-radius:8px;font-size:12px;font-weight:800}.detailActions .delete{background:#73463a}
+#markerLayer{pointer-events:none}.marker{pointer-events:auto;cursor:pointer}.marker:hover .markLabel{outline:2px solid #f7dba8}
+.miniHudScene{height:340px;position:relative;border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#89aebd 0%,#b4b9a1 39%,#567652 40%,#55764e 63%,#4b6646 100%);border:1px solid #adc4ab59;touch-action:none;user-select:none}
+.miniHudScene:before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 24px,#263f2613 24px 27px),repeating-linear-gradient(90deg,transparent 0 26px,#fff3 26px 28px);opacity:.7}
+.miniHudScene:after{content:'';position:absolute;bottom:0;left:0;right:0;height:52%;background:linear-gradient(135deg,#2d5d47 0 20%,#4e6b3d 20% 31%,#354f32 31% 45%,#576e40 45% 60%,#36573c 60% 80%,#405e34 80%);clip-path:polygon(0 34%,14% 12%,28% 30%,43% 8%,58% 23%,74% 0,100% 28%,100% 100%,0 100%)}
+.miniHud{position:absolute;z-index:2;top:7%;right:3%;height:176px;width:176px;overflow:visible;cursor:grab;filter:drop-shadow(0 6px 13px #0007);touch-action:none}
+.miniHud.dragging{cursor:grabbing}.miniMapFace{background:#dfd1aa;height:100%;width:100%;border-radius:8px;overflow:hidden;border:3px solid #172f23ee;position:relative}
+.miniHud.round .miniMapFace{border-radius:50%}.miniMapFace canvas{width:100%;height:100%;display:block}.miniPlayer{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(24deg);font-size:23px;color:#fff8dd;text-shadow:0 2px 6px #19372d}
+.miniCardinal{position:absolute;z-index:2;font-size:12px;font-weight:900;color:#fff9e6;text-shadow:0 2px 5px #0008;pointer-events:none}
+.miniCardinal.n{left:50%;top:5px;transform:translateX(-50%)}.miniCardinal.s{left:50%;bottom:5px;transform:translateX(-50%)}.miniCardinal.w{left:8px;top:50%;transform:translateY(-50%)}.miniCardinal.e{right:8px;top:50%;transform:translateY(-50%)}
+.miniResize{position:absolute;right:-12px;bottom:-12px;background:#e8d59b;color:#253a2c;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:19px;cursor:nwse-resize;z-index:4;box-shadow:0 4px 12px #0005}
+.miniInfo{position:absolute;top:100%;left:0;margin-top:3px;background:#1b2c25e6;color:#f5eacf;font-size:10px;white-space:nowrap;padding:4px 7px;border-radius:5px;pointer-events:none}
+.configRow{display:flex;gap:10px;flex-wrap:wrap}.configRow .btn.active{background:#ddc595;color:#263c31}.miniOptions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.miniOptions label{display:flex;align-items:center;gap:7px;color:#e6eddf;font-size:13px;padding:7px;background:#fff1;border-radius:7px}.miniOptions input{accent-color:#ddc595;width:17px;height:17px}
+#miniSizeRange{accent-color:#dcc58e;width:100%}.previewHint{font-size:11px;color:#d0e1d2;line-height:1.7;margin-top:10px}
+.materialGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:10px}.materialGrid button{text-align:left;padding:12px;line-height:1.8}
+.materialGrid small{display:block;color:#b9c5b6;font-weight:400}.settingInput[type="number"]{color-scheme:dark}
+@media(max-width:850px){.overlayWindow{top:69px}.map-center{right:12px;bottom:12px}.detailFloat{max-width:calc(100vw - 28px)}.mapFlag.statusSimple{left:8px;bottom:8px;max-width:calc(100vw - 76px)}.miniHudScene{height:220px}}
+
+
+/* 小地图调整：离开地图进入不可操控的游戏视图，HUD 可拖动 */
+.gameAdjust{position:fixed;inset:0;z-index:40;background:#141f18}
+.gameAdjust.hidden{display:none}
+.gameAdjust iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.gameAdjustTop{position:absolute;left:50%;top:18px;transform:translateX(-50%);border:1px solid #e8d1a355;background:#1c3127ed;color:#f5e8c9;border-radius:12px;padding:12px 20px;text-align:center;font-weight:800;font-size:15px;pointer-events:none;box-shadow:0 6px 25px #06150a99}
+.gameAdjustTop small{display:block;color:#d7d4bd;font-size:12px;margin-top:6px;font-weight:400}
+.gameAdjustActions{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);display:flex;gap:12px;padding:9px;background:#1c3127ed;border-radius:12px;box-shadow:0 8px 32px #04180d99}
+.gameAdjustActions button{background:#445b4a;color:#fff0ce;border:1px solid #e4c68e4e;border-radius:8px;padding:10px 28px;cursor:pointer;font-weight:800}
+.gameAdjustActions .primary{background:#e5c894;color:#263a2f}
+/* 顶点调整：冻结圈选后可以抓取点和沿边增点 */
+#mapArea.regionAdjust{cursor:default!important}
+.regionGuide{z-index:12}
+.regionGuide [data-region-action="adjust"].active{background:#ddc595;color:#253b30}
+#vertexMenu button{padding:10px 18px;border:0;background:transparent;color:#f3e6cd;cursor:pointer}
+#vertexMenu button:hover{background:#4b5744}
+
+.materialSlots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 18px}
+.materialSlots.triple{grid-template-columns:repeat(3,minmax(0,1fr))}
+.itemSlot{min-height:66px;display:flex;align-items:center;gap:10px;text-align:left;border-radius:10px;background:#405949;color:#f6efda;border:1px solid #e6d0a453;padding:10px 12px;width:100%;cursor:pointer}
+.itemSlot:hover{background:#536e56}.itemSlot.installed{border-color:#e3ca7f}
+.itemSlotIcon{width:44px;height:44px;border:2px solid #b8ae8a;display:grid;place-items:center;border-radius:5px;background:#273a2c;font-size:23px;flex-shrink:0}
+.itemSlot .dye-red{color:#e2574c}.itemSlot .dye-yellow{color:#f5d35a}.itemSlot .dye-blue{color:#649fe0}
+.itemSlot strong{display:block;font-size:13px}.itemSlot small{display:block;font-size:11px;color:#c5d1c0;margin-top:6px;line-height:1.5}
+.dyeStatus{padding:10px 13px;background:#244333;border-radius:8px;border-left:3px solid #e6ce90;color:#efe0bb;font-size:13px}
+.compassSlot{max-width:340px;margin-top:12px}
+@media(max-width:580px){.materialSlots.triple{grid-template-columns:1fr}.materialSlots{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<svg style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true"><defs>
+<symbol id="s-book" viewBox="0 0 24 24"><path d="M12 5c-3-3-7-3-10-2v16c3-1 7-1 10 2 3-3 7-3 10-2V3c-3-1-7-1-10 2zm0 0v16"/></symbol>
+<symbol id="s-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+<symbol id="s-layers" viewBox="0 0 24 24"><path d="m12 3 10 5-10 5L2 8l10-5zm-10 10 10 5 10-5M2 18l10 5 10-5"/></symbol>
+<symbol id="s-settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="#253a2e"/><circle cx="15" cy="12" r="2" fill="#253a2e"/><circle cx="11" cy="18" r="2" fill="#253a2e"/></symbol>
+<symbol id="s-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 1v5m0 12v5M1 12h5m12 0h5"/><circle cx="12" cy="12" r="2"/></symbol>
+<symbol id="s-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9 9a3 3 0 0 1 6 0c0 3-3 3-3 5m0 4v.1"/></symbol>
+<symbol id="s-region" viewBox="0 0 24 24"><path d="M3 5 11 2 21 7 18 20 8 22 2 14z"/><circle cx="3" cy="5" r="2"/><circle cx="11" cy="2" r="2"/><circle cx="21" cy="7" r="2"/><circle cx="18" cy="20" r="2"/><circle cx="8" cy="22" r="2"/></symbol>
+<symbol id="s-close" viewBox="0 0 24 24"><path d="M5 5 19 19M19 5 5 19"/></symbol>
+</defs></svg>
+<div id="mapArea" tabindex="0"><canvas id="map"></canvas><div id="markerLayer"></div></div>
+<div class="appbar" role="toolbar" aria-label="地图工具">
+ <button class="tool" data-act="layers" title="地图图层"><svg><use href="#s-layers"/></svg><span>图层</span></button>
+ <button class="tool" data-act="markers" title="管理标点"><svg><use href="#s-pin"/></svg><span>标点</span></button>
+ <button class="tool" data-act="regions" title="区域命名"><svg><use href="#s-region"/></svg><span>区域</span></button>
+ <button class="tool" data-act="atlas" title="地图册资源"><svg><use href="#s-book"/></svg><span>地图册</span></button>
+ <button class="tool" data-act="settings" title="大地图及小地图设置"><svg><use href="#s-settings"/></svg><span>设置</span></button>
+ <button class="tool" data-act="info" title="地图信息"><svg><use href="#s-help"/></svg><span>信息</span></button>
+ <div class="sep"></div>
+ <button class="tool close" data-act="exit" title="返回游戏"><svg><use href="#s-close"/></svg><span>返回</span></button>
+</div>
+<!-- 比较模式底层实现保留，正常游戏界面无快速切换条。全部风格入口统一在设置内。 -->
+<div class="switcher" style="display:none" aria-hidden="true"><button data-mode="pixel">像素</button><button data-mode="realistic">写实</button><button data-mode="illustrated">手绘</button><button data-mode="compare">左右对照</button></div>
+<div id="compareControls" class="compareControls hidden"><select id="compareStyleLeft"><option value="pixel">像素</option><option value="realistic">写实</option><option value="illustrated">手绘</option></select><select id="compareStyleRight"><option value="pixel">像素</option><option value="realistic">写实</option><option value="illustrated">手绘</option></select></div>
+<div id="splitLine" class="compareHandle hidden" aria-hidden="true"></div>
+<div id="compareLeft" class="comp-label left hidden"></div><div id="compareRight" class="comp-label right hidden"></div>
+<div class="map-center" id="centerBtn" title="回到玩家位置"><svg><use href="#s-target"/></svg></div>
+<div id="panel" class="overlayWindow hidden"></div>
+<div id="gameAdjust" class="gameAdjust hidden">
+  <iframe id="gameFrame" title="游戏画面 · 小地图位置与尺寸" src="cartograph_小地图_HUD原型.html?edit=1"></iframe>
+  <div class="gameAdjustTop">调整小地图位置与大小 <small>拖动地图移动 · 拖动右下角调整大小 · 仅小地图可拖动</small></div>
+  <div class="gameAdjustActions"><button data-mini-adjust="cancel">取消</button><button class="primary" data-mini-adjust="save">完成</button></div>
+</div>
+<div id="modalBackdrop" class="modalBackdrop hidden" role="presentation"><div id="modal" class="modal" role="dialog" aria-modal="true" aria-label="地图设置"></div></div>
+<div id="vertexMenu" class="contextMenu hidden" style="z-index:13"><button id="vertexDelete" type="button">删除顶点</button></div>
+<div id="contextMenu" class="contextMenu hidden"></div>
+<div id="toast" class="toast hidden" role="status"></div>
+<div id="regionGuide" class="regionGuide hidden" role="status"><div><strong>圈出你要命名的区域</strong><small id="regionProgress">单击添加边界点 · 双击或点击起点完成 · Esc 取消</small></div><div class="guideButtons"><button class="btn" data-region-action="undo">撤销点</button><button class="btn" data-region-action="adjust">调整顶点</button><button class="btn primary" data-region-action="finish">完成圈选</button><button class="btn danger" data-region-action="cancel">取消</button></div></div>
+<div class="mapFlag statusSimple" id="statusPanel"><div class="statusTop"><strong>主世界</strong><span id="coords">X 0 · Z 0</span><span id="zoomValue">1.0×</span></div><div class="statusBottom"><span id="statusName">悬停地图查看位置</span><span id="statusAction">左键详情 · 右键操作 · 滚轮缩放</span></div></div>
+<div class="selectionPoint hidden" id="selectedPoint" aria-hidden="true"><span></span></div>
+<div class="detailFloat hidden" id="detailFloat" role="dialog" aria-label="地图位置详情"><div class="detailHead"><div><small id="detailType">位置详情</small><h3 id="detailName">当前位置</h3></div><button id="detailClose" class="smallClose" title="关闭">×</button></div><p id="detailDescription"></p><div class="detailMeta" id="detailMeta"></div><div class="detailActions" id="detailActions"></div></div>
+<script>
+(()=>{'use strict';
+const $=s=>document.querySelector(s),all=s=>Array.from(document.querySelectorAll(s));
+const map=$('#map'),ctx=map.getContext('2d',{alpha:false}),area=$('#mapArea');
+const W=1280,H=960,GRID=2,GW=W/GRID,GH=H/GRID;
+const elevation=new Float32Array(GW*GH),moisture=new Float32Array(GW*GH),land=new Uint8Array(GW*GH),biome=new Uint8Array(GW*GH);
+let mode='illustrated',split=.50,compareLeft='pixel',compareRight='realistic',scale=1,cx=710,cy=470,w=innerWidth,h=innerHeight,dpr=Math.min(devicePixelRatio||1,2),drag=null,splitDrag=false,panel='',modal='',layers={roads:true,rail:true,structures:true,waypoints:true,contours:true,regions:true,regionBoundaries:false},waypoints=[],toastTimer,renderQueued=false;
+const icons={home:'⌂',port:'⚓',mine:'◆',tower:'♜',star:'✦',camp:'⚑',farm:'❀',warehouse:'▣',bridge:'≋',rail:'▤',tree:'♠',cave:'⛰',flag:'⚐',danger:'⚠',bed:'☾',village:'▥'};
+const structures=[{x:780,y:420,name:'白河镇',type:'home'},{x:365,y:642,name:'北湾港',type:'port'},{x:1020,y:286,name:'高岭矿区',type:'mine'},{x:890,y:685,name:'古堡遗址',type:'tower'},{x:603,y:253,name:'湖畔村',type:'home'}];
+waypoints=[{x:655,y:497,name:'我的营地',type:'camp',color:'#c58c4a'},{x:1001,y:490,name:'山口驿站',type:'star',color:'#ad6a67'}];
+const roadA=[[350,647],[406,608],[469,550],[557,526],[646,496],[706,477],[780,420],[832,374],[916,346],[1016,286]];
+const roadB=[[787,419],[817,483],[846,550],[895,619],[887,687]];
+const railway=[[351,701],[407,686],[477,661],[552,618],[622,564],[698,535],[776,522],[860,548],[959,584],[1117,597]];
+const riverA=[[1075,84],[1037,123],[999,155],[973,184],[928,221],[898,257],[866,293],[840,330],[822,369],[803,399],[788,423],[750,445],[713,472],[668,488],[615,507],[573,538],[523,575],[477,606],[432,628],[377,659],[323,675],[254,692],[204,712],[137,730]];
+const riverB=[[898,217],[850,241],[816,259],[770,288],[721,316],[690,353],[654,387],[641,433],[668,488]];
+const riverC=[[1073,405],[1032,414],[991,417],[953,447],[916,475],[878,488],[842,478],[802,457],[788,423]];
+function hash(i,j,k=0){let n=Math.imul(i+19,374761393)+Math.imul(j+31,668265263)+Math.imul(k+7,1274126177);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295;}
+function smooth(t){return t*t*(3-2*t)}
+function noise(x,y,seed=0){const ix=Math.floor(x),iy=Math.floor(y),tx=smooth(x-ix),ty=smooth(y-iy),a=hash(ix,iy,seed),b=hash(ix+1,iy,seed),c=hash(ix,iy+1,seed),d=hash(ix+1,iy+1,seed);return (a+(b-a)*tx)+(c+(d-c)*tx-(a+(b-a)*tx))*ty}
+function fbm(x,y,seed=0){let s=0,w=.56;for(let i=0;i<4;i++){s+=(noise(x,y,seed+i*11)-.5)*w;x*=2.03;y*=2.03;w*=.47}return s}
+function clamp(x,a,b){return Math.max(a,Math.min(b,x))}
+function gaussian(x,y,cx,cy,sx,sy){let dx=(x-cx)/sx,dy=(y-cy)/sy;return Math.exp(-.5*(dx*dx+dy*dy))}
+function coast(y){return 238+36*Math.sin(y/105)+25*Math.sin(y/52)-80*Math.exp(-(((y-290)/100)**2))+60*Math.exp(-(((y-670)/130)**2))}
+function sample(x,y){let rough=fbm(x/125,y/125,3),detail=fbm(x/33,y/33,15);let ridgeX=1025-(y-270)*.39;let ridges=Math.exp(-(((x-ridgeX)/225)**2))*(.42+.14*Math.sin(y/90))+Math.exp(-(((x-1070)/140)**2)-(((y-180)/245)**2))*.24;let hills=gaussian(x,y,675,730,185,138)*.13+gaussian(x,y,565,205,220,135)*.14;let shore=Math.tanh((x-coast(y))/170);let lake=gaussian(x,y,621,258,81,47)*.64;let h0=shore*.24+rough*.46+detail*.052+ridges+hills-lake-.032;let forest=fbm(x/150+13,y/150+31,21)+gaussian(x,y,920,716,320,210)*.48+gaussian(x,y,460,370,160,140)*.28;let wet=fbm(x/230,y/230,47)+gaussian(x,y,641,254,185,120)*.4;let bi= h0<0?0:h0>.62?5: h0>.42?4:forest>.135?2:wet>.17?3:1;return [h0,wet,forest,bi];}
+function collectGeometry(){for(let y=0;y<GH;y++){for(let x=0;x<GW;x++){let [v,wet,forest,b]=sample(x*GRID,y*GRID),i=y*GW+x;elevation[i]=v;moisture[i]=wet;land[i]=v>0?1:0;biome[i]=b;}}}
+function getElev(x,y){return elevation[clamp(Math.floor(y/GRID),0,GH-1)*GW+clamp(Math.floor(x/GRID),0,GW-1)]}
+function getBiome(x,y){return biome[clamp(Math.floor(y/GRID),0,GH-1)*GW+clamp(Math.floor(x/GRID),0,GW-1)]}
+function col(r,g,b){return [clamp(Math.round(r),0,255),clamp(Math.round(g),0,255),clamp(Math.round(b),0,255)]}
+function blend(a,b,t){return col(a[0]*(1-t)+b[0]*t,a[1]*(1-t)+b[1]*t,a[2]*(1-t)+b[2]*t)}
+const realPal={water:[81,137,155],beach:[207,201,164],plains:[191,193,146],forest:[96,143,108],wet:[127,165,139],hill:[174,180,136],mountain:[175,169,143],snow:[231,231,220]};
+const inkPal={water:[167,195,185],beach:[230,206,163],plains:[229,212,171],forest:[205,190,148],wet:[217,201,163],hill:[219,199,157],mountain:[215,191,147],snow:[233,219,186]};
+let realBase,inkBase,pixelBase;
+const pixelPal={water:[48,119,199],beach:[226,218,158],plains:[104,169,74],forest:[48,115,68],wet:[65,134,105],hill:[133,163,92],mountain:[133,140,131],snow:[241,244,241]};
+// Pixel style must portray Minecraft's actual SURFACE blocks, not just apply
+// a low-resolution filter to the modern/antique map. This deterministic demo
+// uses the same elevation + biome fields as the other styles; the real mod
+// will instead consume validated FULL-chunk top-block/height/biome snapshots.
+function makePixelRaster(){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),image=c.createImageData(GW,GH),data=image.data;for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
+  const i=y*GW+x,h=elevation[i],b=biome[i],wx=x*GRID,wz=y*GRID;
+  const shore=h<.038,water=h<=0,beach=shore&&!water;
+  const slope=(getElev(wx-4,wz-4)-getElev(wx+4,wz+4));
+  const patch=hash(Math.floor(x/4),Math.floor(y/4),32);
+  let base;
+  if(water){base=h<-.18?[39,99,172]:h<-.075?[43,120,194]:[60,151,217]}
+  else if(beach)base=pixelPal.beach;
+  else if(h>.75)base=pixelPal.snow;
+  else if(h>.49)base=pixelPal.mountain;
+  else if(b===2)base=pixelPal.forest;
+  else if(b===3)base=pixelPal.wet;
+  else if(h>.27)base=pixelPal.hill;
+  else base=pixelPal.plains;
+  // Chunky material variants: grass blocks/trees, sand, stone, snow, ocean.
+  // Not photographic shading and not random black/white noise.
+  let n=hash(x,y,41),variation=(patch-.5)*11+(n-.5)*11;
+  if(!water&&b===2&&h<.52){if(n>.74)base=[40,95,52];else if(n<.17)base=[69,130,65];}
+  if(!water&&!beach&&h>.53&&h<.75&&n>.88)base=[170,175,166];
+  if(beach&&patch>.72)base=[232,224,175];
+  if(!water&&h<.4&&b===1&&n>.96)base=[159,176,85];
+  let heightBand=water?0:Math.round(clamp(slope*20,-14,14)/4)*4;
+  const shade=variation+heightBand;
+  let k=i*4;data[k]=clamp(base[0]+shade,0,255);data[k+1]=clamp(base[1]+shade,0,255);data[k+2]=clamp(base[2]+shade,0,255);data[k+3]=255;
+ }c.putImageData(image,0,0);return out;}
+function pixelPath(c,pts,outer,inner,width){c.save();c.scale(.5,.5);c.lineCap='square';c.lineJoin='miter';drawStroke(c,pts,outer,width+4);drawStroke(c,pts,inner,width);c.restore()}
+function makePixelLayer(){const c=document.createElement('canvas');c.width=GW;c.height=GH;const g=c.getContext('2d',{alpha:false});g.imageSmoothingEnabled=false;g.drawImage(pixelBase,0,0);
+  // Low-resolution overlay drawn on the SAME source coordinate system.
+  // Path thickness and corners preserve the block-like top-down feel.
+  g.save();g.scale(.5,.5);g.lineJoin='bevel';g.lineCap='square';
+  // These lines stand in for actual top-level flowing-water blocks.
+  const riverLayers=[[riverA,18],[riverB,11],[riverC,10]];
+  for(const [points,width] of riverLayers){drawStroke(g,points,'#2c75ae',width+4);drawStroke(g,points,'#5298c9',width)}
+  g.beginPath();g.ellipse(624,254,75,39,-.22,0,Math.PI*2);g.fillStyle='#4d9ed5';g.fill();
+  if(layers.roads){for(const points of [roadA,roadB]){drawStroke(g,points,'#8a7650',9);drawStroke(g,points,'#c9b28b',6)}}
+  if(layers.rail){drawStroke(g,railway,'#403f3a',6);drawStroke(g,railway,'#898d82',3);drawStroke(g,railway,'#454843',1.4,[3,8])}
+  g.restore();return c;}
+
+function makeRaster(style){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),im=c.createImageData(GW,GH),data=im.data;const pal=style==='realistic'?realPal:inkPal;for(let y=0;y<GH;y++){for(let x=0;x<GW;x++){let i=y*GW+x,px=x*GRID,py=y*GRID,hi=elevation[i],bi=biome[i],rr=0,cc;
+ if(hi<=0){let depth=clamp(-hi,0,.3)/.3;cc=style==='realistic'?blend([122,173,179],[50,117,141],depth):blend([188,208,192],pal.water,depth*.5)}
+ else {if(bi===2)cc=pal.forest;else if(bi===3)cc=pal.wet;else if(hi>.74)cc=pal.snow;else if(hi>.45)cc=pal.mountain;else if(hi>.24)cc=pal.hill;else cc=pal.plains;
+ if(hi<.045)cc=blend(pal.beach,cc,hi/.045);
+ let sh=clamp((getElev(px-4,py-4)-getElev(px+4,py+5))*2.15,-.35,.35);
+ let n=hash(x,y,6)-.5;
+ rr=style==='realistic'?sh*63+n*11:sh*17+n*10;
+ if(style==='realistic'&&bi===2)rr-=4;}
+ if(hi<=0){let n=hash(x,y,8)-.5;rr=n*(style==='realistic'?8:7)}
+ const p=i*4;data[p]=clamp(Math.round(cc[0]+rr),0,255);data[p+1]=clamp(Math.round(cc[1]+rr),0,255);data[p+2]=clamp(Math.round(cc[2]+rr),0,255);data[p+3]=255;
+ }}c.putImageData(im,0,0);return out;}
+function path(c,points){c.moveTo(points[0][0],points[0][1]);for(let i=1;i<points.length-1;i++){const [x,y]=points[i],[nx,ny]=points[i+1];c.quadraticCurveTo(x,y,(x+nx)/2,(y+ny)/2)}let q=points.at(-1);c.lineTo(q[0],q[1]);}
+function drawStroke(c,pts,color,width,dash=[]){c.beginPath();path(c,pts);c.strokeStyle=color;c.lineWidth=width;c.lineCap='round';c.lineJoin='round';c.setLineDash(dash);c.stroke();c.setLineDash([])}
+function textureContours(c,style){const spacing=4,levels=style==='realistic'?[.08,.16,.24,.33,.42,.51,.60,.69,.78]:[.11,.22,.33,.44,.55,.66,.77];c.save();for(let level of levels){c.beginPath();for(let y=spacing;y<H-spacing;y+=spacing){for(let x=spacing;x<W-spacing;x+=spacing){let p=getElev(x,y),right=getElev(x+spacing,y),down=getElev(x,y+spacing);if((p-level)*(right-level)<0){let t=(level-p)/(right-p);c.moveTo(x+t*spacing,y-1.3);c.lineTo(x+t*spacing,y+2.9)}if((p-level)*(down-level)<0){let t=(level-p)/(down-p);c.moveTo(x-1.3,y+t*spacing);c.lineTo(x+2.9,y+t*spacing)}}}c.strokeStyle=style==='realistic'?'#374f4160':'#775a3a9b';c.lineWidth=style==='realistic'?.55:.8;c.stroke()}c.restore()}
+function coastline(c,style){const st=style==='realistic'?'#3e817b80':'#654f38c9';const segments=[];for(let y=0;y<H;y+=3){let x=6;while(x<W-6&&getElev(x,y)<=0)x+=2;if(x>=W-6)continue;segments.push([x,y])}drawStroke(c,segments,st,style==='realistic'?3:1.8);if(style==='illustrated'){drawStroke(c,segments,'#b6a47e',6);drawStroke(c,segments,st,1.4);for(let y=30;y<H-40;y+=20){let x=coast(y)-7-((y*17)%9);c.beginPath();c.arc(x,y,5,Math.PI*.15,Math.PI*.85);c.strokeStyle='#7b8065a8';c.lineWidth=.85;c.stroke()}}}
+function drawLakes(c,style){c.save();c.beginPath();c.ellipse(624,254,75,39,-.22,0,Math.PI*2);c.fillStyle=style==='realistic'?'#7fb8c5':'#aec7b6';c.fill();c.lineWidth=style==='realistic'?2.6:2;c.strokeStyle=style==='realistic'?'#397c878a':'#6e6f56bb';c.stroke();if(style==='illustrated'){for(let j=0;j<11;j++){let x=581+j*8,y=260+Math.sin(j)*3;c.beginPath();c.moveTo(x,y);c.quadraticCurveTo(x+3,y-2,x+6,y);c.strokeStyle='#6a8e8ba1';c.lineWidth=.8;c.stroke()}}c.restore()}
+function rivers(c,style){for(const [pts,main] of [[riverA,true],[riverB,false],[riverC,false]]){if(style==='realistic'){drawStroke(c,pts,'#3e7887ac',main?17:10);drawStroke(c,pts,'#a0cbd2',main?11:6);drawStroke(c,pts,'#c6e1df6c',main?3:2)}else{drawStroke(c,pts,'#8eaa9a',main?14:8);drawStroke(c,pts,'#567f83',main?2.7:1.9);drawStroke(c,pts,'#d6dec950',main?1.1:.7)}}}
+function drawRoads(c,style){if(layers.roads){for(let pts of [roadA,roadB]){if(style==='realistic'){drawStroke(c,pts,'#8c8060b8',10);drawStroke(c,pts,'#f0e5c7',6.2);drawStroke(c,pts,'#e8d9b1dd',1.2,[3,8])}else{drawStroke(c,pts,'#ba9a68',6);drawStroke(c,pts,'#674d2e',2.5);drawStroke(c,pts,'#dfc99b',1,[4,6])}}}if(layers.rail){drawStroke(c,railway,style==='realistic'?'#444e4b':'#604d3d',5);drawStroke(c,railway,style==='realistic'?'#d2d6d1':'#efdaaf',2.5);drawStroke(c,railway,style==='realistic'?'#535552':'#583e30',1,[1.6,10])}}
+function forest(c,style){c.save();for(let y=35;y<H-40;y+=18){for(let x=260;x<W-30;x+=18){let jx=x+(hash(x,y,3)-.5)*10,jy=y+(hash(x,y,5)-.5)*10,bi=getBiome(jx,jy),h=getElev(jx,jy);if(bi!==2||h<=0||hash(x,y,18)<.12)continue;if(style==='realistic'){c.fillStyle=hash(x,y,1)>.5?'#335e3d40':'#254c3a32';c.beginPath();c.arc(jx,jy,1.4+hash(x,y,4)*3,0,Math.PI*2);c.fill()}else{const u=.7+hash(x,y,5)*.45;c.save();c.translate(jx,jy);c.scale(u,u);c.strokeStyle='#6b6e4289';c.lineWidth=1.25;c.beginPath();c.moveTo(0,-8);c.lineTo(-6,0);c.lineTo(6,0);c.closePath();c.moveTo(0,-4);c.lineTo(-7,5);c.lineTo(7,5);c.closePath();c.moveTo(0,3);c.lineTo(0,10);c.stroke();c.restore()}}}c.restore()}
+function mountainInk(c){c.save();for(let y=45;y<H-40;y+=54){for(let x=420;x<W-25;x+=60){let px=x+(hash(x,y,11)-.5)*22,py=y+(hash(x,y,17)-.5)*22,v=getElev(px,py);if(v<.49||Math.abs(px-(1025-(py-270)*.39))>250||hash(x,y,10)>.58)continue;let f=clamp((v-.42)*1.8,.55,1.33);c.save();c.translate(px,py);c.scale(f,f);c.strokeStyle='#6e513ba6';c.lineWidth=1.1;c.beginPath();c.moveTo(-16,9);c.lineTo(-2,-17);c.lineTo(5,-9);c.lineTo(13,-20);c.lineTo(23,10);c.moveTo(-4,-15);c.lineTo(1,-4);c.lineTo(5,-9);c.moveTo(13,-19);c.lineTo(15,-3);c.stroke();c.strokeStyle='#8c684a7d';for(let i=0;i<4;i++){c.beginPath();c.moveTo(4+i*4,0+i*2);c.lineTo(7+i*4,3+i*2);c.stroke()}c.restore()}}c.restore()}
+function seaHatch(c){c.save();c.strokeStyle='#638a8199';c.lineWidth=1;for(let y=30;y<H;y+=27){for(let x=25;x<250;x+=43){let px=x+(hash(x,y,2)-.5)*12,py=y+(hash(x,y,4)-.5)*9;if(getElev(px,py)>-.02||hash(x,y,5)<.22)continue;c.beginPath();c.moveTo(px-7,py);c.quadraticCurveTo(px-2,py-3,px+4,py);c.quadraticCurveTo(px+7,py+2,px+10,py);c.stroke();if(hash(x,y,8)>.65){c.beginPath();c.moveTo(px-2,py+5);c.lineTo(px+6,py+5);c.stroke()}}}c.restore()}
+function paperGrain(c){c.save();for(let i=0;i<12500;i++){let x=hash(i,77)*W,y=hash(i,19)*H;c.fillStyle=i%3?'#5a402006':'#fff2b515';c.fillRect(x,y,1.5,1.5)}c.restore()}
+function addLabels(c,style){c.save();const old=style==='illustrated';const labels=[{s:'北镜海',x:75,y:395,z:29,rotation:-.07,color:old?'#5f806d':'#e0f6ef'},{s:'苍岚山脉',x:990,y:163,z:21,rotation:-.25,color:old?'#66503b':'#eaf0e5'},{s:'白 河 谷 地',x:573,y:634,z:19,rotation:-.16,color:old?'#80684c':'#eef3d3'},{s:'雾松林',x:924,y:750,z:20,rotation:.10,color:old?'#5d6441':'#e6efdd'}];for(let t of labels){c.save();c.translate(t.x,t.y);c.rotate(t.rotation);c.textAlign='center';c.font=(old?'bold ':'600 ')+t.z+'px '+(old?'Georgia,"SimSun",serif':'"Microsoft YaHei",sans-serif');c.fillStyle=t.color;c.globalAlpha=old?.76:.69;if(!old){c.shadowColor='#3045339a';c.shadowBlur=9;c.shadowOffsetY=1}c.fillText(t.s,0,0);c.restore()}c.restore()}
+function makeLayer(style){if(style==='pixel')return makePixelLayer();const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d',{alpha:false});g.imageSmoothingEnabled=true;g.drawImage(style==='realistic'?realBase:inkBase,0,0,W,H);if(style==='illustrated')paperGrain(g);if(layers.contours)textureContours(g,style);coastline(g,style);drawLakes(g,style);rivers(g,style);forest(g,style);if(style==='illustrated'){mountainInk(g);seaHatch(g)}drawRoads(g,style);if(style==='illustrated'){g.strokeStyle='#b08e5b67';g.lineWidth=6;g.strokeRect(14,14,W-28,H-28);g.strokeStyle='#795b3f48';g.lineWidth=1;g.strokeRect(22,22,W-44,H-44)}return c}
+const textures={};function rebuild(){textures.pixel=makeLayer('pixel');textures.realistic=makeLayer('realistic');textures.illustrated=makeLayer('illustrated');scheduleDraw()}
+function syncSize(){w=innerWidth;h=innerHeight;dpr=Math.min(devicePixelRatio||1,2);map.width=Math.round(w*dpr);map.height=Math.round(h*dpr);map.style.width=w+'px';map.style.height=h+'px';ctx.setTransform(dpr,0,0,dpr,0,0);scheduleDraw()}
+function view(){return {left:w/2-cx*scale,top:h/2-cy*scale,ww:W*scale,hh:H*scale}}
+function screenPos(x,y){const v=view();return [v.left+x*scale,v.top+y*scale]}
+function worldPos(x,y){const v=view();return [(x-v.left)/scale,(y-v.top)/scale]}
+function paint(g){g.save();g.setTransform(dpr,0,0,dpr,0,0);g.fillStyle='#d4d6be';g.fillRect(0,0,w,h);const v=view();function draw(which){g.imageSmoothingEnabled=which==='pixel'?false:scale<1.25;g.drawImage(textures[which],v.left,v.top,v.ww,v.hh)}if(mode==='compare'){g.save();g.beginPath();g.rect(0,0,w*split,h);g.clip();draw(compareLeft);g.restore();g.save();g.beginPath();g.rect(w*split,0,w*(1-split),h);g.clip();draw(compareRight);g.restore()}else draw(mode);g.restore();drawRegions(g);}
+function requestRender(){if(renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;paint(ctx);drawMarkers();updateSelection();updateStatus()})}
+function scheduleDraw(){requestRender()}
+function drawMarkers(){const holder=$('#markerLayer');holder.innerHTML='';const points=[...(layers.structures?structures.map(p=>({...p,structure:true})):[]),...(layers.waypoints?waypoints:[])];for(const p of points){const [x,y]=screenPos(p.x,p.y);if(x< -110||x>w+110||y< -50||y>h+60)continue;const atStyle=mode==='compare'?(x>w*split?compareRight:compareLeft):mode;const ancient=atStyle==='illustrated';const box=document.createElement('div');box.dataset.markerIndex=String(waypoints.indexOf(p));box.dataset.structureIndex=String(p.structure?structures.findIndex(q=>q.x===p.x&&q.y===p.y):-1);box.className='marker'+(ancient?' ancient':atStyle==='pixel'?' pixel':'');box.style.left=x+'px';box.style.top=y+'px';const icon=document.createElement('span');icon.className='markIcon';icon.textContent=icons[p.type]||'✦';if(p.color)icon.style.borderColor=p.color;const label=document.createElement('span');label.className='markLabel';label.textContent=p.name;box.append(icon,label);holder.appendChild(box)}}
+const styleNames={pixel:'像素 · MC 方块地表',realistic:'写实 · 自然地形',illustrated:'手绘 · 古式地图'};function syncCompare(){const is=mode==='compare';$('#splitLine').classList.toggle('hidden',!is);$('#compareLeft').classList.toggle('hidden',!is);$('#compareRight').classList.toggle('hidden',!is);$('#compareControls').classList.toggle('hidden',!is);$('#compareLeft').textContent=styleNames[compareLeft];$('#compareRight').textContent=styleNames[compareRight];$('#compareStyleLeft').value=compareLeft;$('#compareStyleRight').value=compareRight;$('#splitLine').style.left=(split*100)+'%';$('#splitLine').setAttribute('aria-valuenow',Math.round(split*100));}
+function setMode(v,quiet=false){if(!['pixel','realistic','illustrated','compare'].includes(v))return;mode=v;try{if(v!=='compare')localStorage.setItem('cartograph-final-map-style-v3',v)}catch(_){}all('[data-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.mode===v));scheduleDraw();if(!quiet)toast(v==='pixel'?'已切换至像素':v==='realistic'?'已切换至写实':v==='illustrated'?'已切换至手绘':'已开启地图对照');}
+function toast(message){const el=$('#toast');el.textContent=message;el.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),2500)}
+ function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+ const panelEl=$('#panel'),backdrop=$('#modalBackdrop'),modalEl=$('#modal');
+ const detailEl=$('#detailFloat'),pinEl=$('#selectedPoint'),minimapStorageKey='cartograph-final-minimap-v3',waypointStorageKey='cartograph-final-waypoints-v3';
+ let mapDismissThisPointer=false,markerDismissClick=false;let selectedPoint=null,selectedHit=null,selectedIcon='star',settingTab='map',lastClick=[630,465],lastAction='';
+ let miniCfg={enabled:true,shape:'round',northUp:true,cardinals:true,showCoords:true,showRegions:true,showIcons:true,zoom:1.5,size:184,x:.96,y:.06};
+ try{let tmp=JSON.parse(localStorage.getItem(minimapStorageKey));if(tmp && typeof tmp==='object')miniCfg={...miniCfg,...tmp};}catch(_){ }
+ try{let tmp=JSON.parse(localStorage.getItem(waypointStorageKey));if(Array.isArray(tmp)&&tmp.length<120)waypoints=tmp.filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&typeof p.name==='string').map(p=>({...p,id:p.id||'marker'+Math.random()}));}catch(_){ }
+ const saveMini=()=>{try{localStorage.setItem(minimapStorageKey,JSON.stringify(miniCfg))}catch(_){ }};
+ const savePins=()=>{try{localStorage.setItem(waypointStorageKey,JSON.stringify(waypoints))}catch(_){ }};
+ function title(t,k,desc){return `<button class="smallClose" data-act="panel-close" aria-label="关闭">×</button><div class="panelLabel">${k}</div><h3 class="panelTitle">${t}</h3><p class="panelSubtitle">${desc}</p>`}
+ function panelClose(){panel='';panelEl.classList.add('hidden');all('.tool').forEach(b=>b.classList.remove('active'))}
+ function panelOpen(p){detailClose();$('#contextMenu').classList.add('hidden');if(panel===p){panelClose();return}panel=p;backdrop.classList.add('hidden');all('.tool').forEach(b=>b.classList.toggle('active',b.dataset.act===p));let html='';
+   if(p==='atlas'){html=title('地图册 · 资源','ATLAS / RESOURCES','地图页与测绘范围')+
+      `<div class="resource"><small>地图页</small><strong>24 页</strong></div><div class="resource"><small>测绘覆盖</small><strong>已扩展 24 页</strong></div><div class="resource"><small>墨水 · 首次测绘消耗</small><strong id="resInk">84 / 100</strong></div><div class="resource"><small>染料 · 红 / 黄 / 蓝</small><strong id="resDye">${dyeReady()?'已装齐':'未装齐'}</strong></div><div class="resource"><small>发光墨水 · 发光标点</small><strong id="resGlow">17 / 40</strong></div><div class="resource"><small>指南针 · 显示玩家位置</small><strong id="resCompass">已装入</strong></div><div class="panelGroup"><button class="btn primary" data-act="materials">添加材料 / 管理指南针</button></div><p class="panelSubtitle" style="margin-top:13px"></p>`}
+   else if(p==='layers'){html=title('地图图层','MAP LAYERS','图层只决定显示内容。关闭或开启不重新读取世界。')+Object.entries({roads:['地表道路','原版真实已生成地面路径'],rail:['铁路','原版及兼容模组的真实铁轨'],structures:['地表结构','村庄 / 已发现的地表结构'],waypoints:['玩家标点','独立标记层'],regions:['区域名称','海域 / 山脉 / 森林 / 河谷'],regionBoundaries:['区域边界','默认隐藏轮廓线'],contours:['等高线','跟随真实地表高度']}).map(([k,[name,desc]])=>`<label class="layerRow"><div><span>${name}</span><small>${desc}</small></div><input data-layer="${k}" type="checkbox" ${layers[k]?'checked':''}/></label>`).join('')}
+   else if(p==='regions'){html=regionPanelHtml()}
+   else if(p==='markers'){html=title('我的标点','WAYPOINTS','查看和编辑已经记录的地点')+`<button class="btn primary" style="width:100%" data-act="create-marker">＋ 新增标点</button><div class="markList" style="margin-top:14px">${waypoints.map((m,i)=>`<button data-open-marker="${i}"><span style="font-size:22px">${escapeHtml(icons[m.type]||'✦')}</span><div><b>${escapeHtml(m.name)}</b><small>X ${Math.round(m.x*3)} · Z ${Math.round(m.y*3)} · 点击查看详情</small></div></button>`).join('')}</div>`}
+   else if(p==='info'){html=title('地图信息','CARTOGRAPH / MAP','地图与当前世界信息')+`<div class="resource"><small>维度</small><strong>主世界</strong></div><div class="resource"><small>地图样式</small><strong>${styleNames[mode]||'手绘'}</strong></div><div class="resource"><small>区域名称</small><strong>${regions.length} 个</strong></div><div class="resource"><small>自定义标点</small><strong>${waypoints.length} 个</strong></div><p class="panelSubtitle" style="margin-top:14px"></p>`}
+   panelEl.innerHTML=html;panelEl.classList.remove('hidden');}
+ function modalClose(){modal='';backdrop.classList.add('hidden');modalEl.innerHTML=''}
+ function mini(which){return `<div class="miniPreview"><canvas id="mini-${which}"></canvas><span class="chip">${which==='pixel'?'MC 方块':which==='realistic'?'自然地貌':'古式地图'}</span></div>`}
+ function paintMiniThumbs(){for(let m of ['pixel','realistic','illustrated']){const el=$('#mini-'+m);if(!el)continue;el.width=360;el.height=180;const g=el.getContext('2d');g.imageSmoothingEnabled=m!=='pixel';g.drawImage(textures[m],m==='pixel'?180:360,m==='pixel'?100:200,m==='pixel'?270:540,m==='pixel'?135:270,0,0,360,180)}}
+ function settingsOpen(tab='map'){detailClose();panelClose();settingTab=tab;modal='settings';const header=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / SETTINGS</div><h2>地图设置</h2><p>配置地图画面和小地图</p></div><button data-act="modal-close">×</button></div><div class="configRow" style="margin-top:14px"><button class="btn ${tab==='map'?'active':''}" data-settings-tab="map">大地图 / 风格</button><button class="btn ${tab==='mini'?'active':''}" data-settings-tab="mini">小地图设置</button></div>`;
+ if(tab==='map')modalEl.innerHTML=header+`<div class="settingCaption">地图风格</div><div class="styleCards">${[['pixel','像素 · Minecraft','方块地表，清晰辨认建筑与道路'],['realistic','写实 · 现代地形图','自然地貌、坡面阴影、森林与水系'],['illustrated','手绘 · 古式地图','羊皮纸、墨线、山脉与树林符号']].map(([key,t,desc])=>`<button class="styleCard ${mode===key?'chosen':''}" data-style="${key}">${mini(key)}<strong>${t}</strong><small>${desc}</small></button>`).join('')}</div><div class="settingCaption">显示选项</div><label class="settingsToggle"><b>显示区域名称</b><input type="checkbox" data-layer="regions" ${layers.regions?'checked':''}></label><label class="settingsToggle"><b>显示区域边界</b><input type="checkbox" data-layer="regionBoundaries" ${layers.regionBoundaries?'checked':''}></label><label class="settingsToggle"><b>显示等高线</b><input type="checkbox" data-layer="contours" ${layers.contours?'checked':''}></label><div class="modalFooter"><small></small><button class="btn primary" data-act="modal-close">完成</button></div>`;
+ else modalEl.innerHTML=header+`<div class="settingCaption">显示</div><div class="miniOptions"><label><input type="checkbox" data-mini-check="enabled" ${miniCfg.enabled?'checked':''}> 启用小地图</label><label><input type="checkbox" data-mini-check="cardinals" ${miniCfg.cardinals?'checked':''}> 显示东南西北</label><label><input type="checkbox" data-mini-check="northUp" ${miniCfg.northUp?'checked':''}> 锁定北方</label><label><input type="checkbox" data-mini-check="showCoords" ${miniCfg.showCoords?'checked':''}> 显示坐标</label><label><input type="checkbox" data-mini-check="showRegions" ${miniCfg.showRegions?'checked':''}> 显示区域名称</label><label><input type="checkbox" data-mini-check="showIcons" ${miniCfg.showIcons?'checked':''}> 显示地图图标</label></div><div class="settingCaption">形状</div><div class="configRow"><button class="btn ${miniCfg.shape==='square'?'active':''}" data-mini-shape="square">▢ 方形</button><button class="btn ${miniCfg.shape==='round'?'active':''}" data-mini-shape="round">◯ 圆形</button></div><div class="settingCaption">缩放等级 · <span id="miniZoomText">${Number(miniCfg.zoom||1.5).toFixed(1)}×</span></div><input id="miniZoomRange" type="range" min="0.5" max="4" step="0.1" value="${miniCfg.zoom||1.5}" style="width:100%;accent-color:#dec58b"><div class="settingCaption">位置与大小</div><button class="btn primary" data-act="mini-position" style="width:100%;padding:14px">进入游戏画面调整位置与大小</button><div class="modalFooter"><button class="btn" data-act="mini-reset">恢复默认设置</button><button class="btn primary" data-act="modal-close">完成</button></div>`;
+ backdrop.classList.remove('hidden');if(tab==='map')paintMiniThumbs()}
+
+ let adjustPrevious=null;
+ function openGameAdjust(){
+   adjustPrevious=structuredClone(miniCfg);
+   modalClose();panelClose();detailClose();
+   $('#gameAdjust').classList.remove('hidden');
+   const frame=$('#gameFrame');
+   const send=()=>frame.contentWindow?.postMessage({type:'cartograph:edit-start',config:miniCfg,style:mode==='compare'?'illustrated':mode},'*');
+   frame.addEventListener('load',send,{once:true});
+   if(frame.contentDocument?.readyState==='complete')send();
+ }
+ function stopGameAdjust(save){
+   if(!save && adjustPrevious)miniCfg=adjustPrevious;
+   if(save)saveMini();
+   $('#gameFrame').contentWindow?.postMessage({type:'cartograph:edit-finish',config:miniCfg},'*');
+   $('#gameAdjust').classList.add('hidden');
+   adjustPrevious=null;
+   settingsOpen('mini');
+ }
+ window.addEventListener('message',e=>{
+   if(e.source!==$('#gameFrame').contentWindow||e.data?.type!=='cartograph:edit-change')return;
+   const n=e.data.config;
+   if(!n||typeof n!=='object')return;
+   miniCfg={...miniCfg,size:clamp(Number(n.size)||184,100,360),x:clamp(Number(n.x)||0,0,1),y:clamp(Number(n.y)||0,0,1)};
+ });
+
+ let resources={ink:84,glow:17,compass:true,dyes:{red:true,yellow:true,blue:true}};
+ const dyeNames={red:'红色染料',yellow:'黄色染料',blue:'蓝色染料'};
+ function dyeReady(){return Object.values(resources.dyes).every(Boolean)}
+ function materialsOpen(){
+   detailClose();panelClose();modal='materials';
+   const slot=(name,amount,desc)=>`<div class="itemSlot"><span class="itemSlotIcon">${name}</span><div><strong>${amount}</strong><small>${desc}</small></div></div>`;
+   modalEl.innerHTML=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / INVENTORY</div><h2>地图册 · 材料槽</h2></div><button data-act="modal-close">×</button></div>
+     <div class="settingCaption">地图册</div>
+     <div class="resource"><small>测绘墨水</small><strong>${resources.ink} / 100</strong></div><div class="resource"><small>发光墨水</small><strong>${resources.glow} / 40</strong></div>
+     <div class="settingCaption">消耗品</div>
+     <div class="materialSlots">
+       <button class="itemSlot" data-material="ink"><span class="itemSlotIcon">✒</span><div><strong>墨囊</strong><small>投入 · +8 墨水</small></div></button>
+       <button class="itemSlot" data-material="glow"><span class="itemSlotIcon">✧</span><div><strong>发光墨囊</strong><small>投入 · +5 发光墨水</small></div></button>
+     </div>
+     <div class="settingCaption">彩色绘制 · 三个独立的染料槽</div>
+     <div class="materialSlots triple">${Object.entries(dyeNames).map(([key,label])=>`<button class="itemSlot ${resources.dyes[key]?'installed':''}" data-material="dye-${key}"><span class="itemSlotIcon dye-${key}">⬟</span><div><strong>${label}</strong><small>${resources.dyes[key]?'已装入 · 点击取出':'未装入 · 点击装入'}</small></div></button>`).join('')}</div>
+     <div class="dyeStatus">${dyeReady()?'彩色绘制已启用':'尚缺 '+Object.entries(dyeNames).filter(([key])=>!resources.dyes[key]).map(([,name])=>name).join('、')}</div>
+     <div class="settingCaption">非消耗品</div>
+     <button class="itemSlot compassSlot" data-material="compass"><span class="itemSlotIcon">⌖</span><div><strong>指南针</strong><small>${resources.compass?'已装入 · 点击取出':'未装入 · 点击装入'}</small></div></button>
+     <div class="modalFooter"><button class="btn primary" data-act="modal-close">完成</button></div>`;
+   backdrop.classList.remove('hidden');
+ }
+
+ function waypointModal(x,y,editIndex=null){detailClose();panelClose();selectedIcon=editIndex==null?'star':waypoints[editIndex].type;const edit=editIndex!==null,m=edit?waypoints[editIndex]:null;modal='marker';const startX=Math.round((m?m.x:x)*3),startZ=Math.round((m?m.y:y)*3);
+ modalEl.innerHTML=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / WAYPOINT</div><h2>${edit?'编辑标点':'新增地图标点'}</h2><p></p></div><button data-act="modal-close">×</button></div><div class="settingCaption">标点名称</div><input class="settingInput" id="markerName" maxlength="30" value="${escapeHtml(m?.name||'自定义标点')}"><div class="settingCaption">指定位置 · 游戏方块坐标</div><div class="regionFormGrid"><label>X 坐标<input id="markerX" class="settingInput" type="number" min="-30000000" max="30000000" step="1" value="${startX}"></label><label>Z 坐标<input id="markerZ" class="settingInput" type="number" min="-30000000" max="30000000" step="1" value="${startZ}"></label></div><div class="settingCaption">标点图标（16 种）</div><div class="materialGrid" style="grid-template-columns:repeat(4,1fr);gap:6px">${Object.entries(icons).map(([k,v])=>`<button class="btn ${selectedIcon===k?'active':''}" data-marker-icon="${k}" style="padding:8px;text-align:center">${v} ${escapeHtml({home:'住所',port:'港口',mine:'矿区',tower:'遗迹',star:'地标',camp:'营地',farm:'农场',warehouse:'仓库',bridge:'桥梁',rail:'铁路',tree:'森林',cave:'洞穴',flag:'旗帜',danger:'危险',bed:'休息',village:'村庄'}[k])}</button>`).join('')}</div><div class="settingCaption">标点颜色</div><input id="markerColor" type="color" value="${escapeHtml(m?.color||'#bc7a55')}" style="width:88px;height:39px;background:transparent;border:0"><div class="settingCaption">备注</div><input class="settingInput" id="markerNote" maxlength="160" value="${escapeHtml(m?.note||'')}"><div class="modalFooter"><small id="markerValidation"></small><div style="display:flex;gap:8px"><button class="btn" data-act="modal-close">取消</button><button class="btn primary" data-act="save-marker">${edit?'保存修改':'创建标点'}</button></div></div>`;
+ backdrop.classList.remove('hidden');modalEl.dataset.editIndex=editIndex===null?'':String(editIndex)}
+ function saveWaypoint(){const name=$('#markerName')?.value?.trim(),x=Number($('#markerX')?.value),z=Number($('#markerZ')?.value);if(!name||!Number.isInteger(x)||!Number.isInteger(z)||Math.abs(x)>30000000||Math.abs(z)>30000000){$('#markerValidation').textContent='请输入名称和有效的整数 X/Z 坐标（±3000万以内）';return}const i=modalEl.dataset.editIndex;const pin={id:i!==''?waypoints[Number(i)].id:'pin-'+Date.now()+'-'+Math.random().toString(36).slice(2,5),name,type:selectedIcon,color:$('#markerColor').value,x:x/3,y:z/3,note:$('#markerNote').value.trim()};if(i==='')waypoints.push(pin);else waypoints[Number(i)]=pin;savePins();modalClose();requestRender();showSelected([pin.x,pin.y],pin,{kind:'marker'});toast('标点已保存：'+name)}
+ function removeWaypoint(index){const p=waypoints[index];if(!p||!confirm('删除标点「'+p.name+'」？'))return;waypoints.splice(index,1);savePins();detailClose();requestRender();toast('标点已删除')}
+ function detailClose(){detailEl.classList.add('hidden');selectedHit=null}
+ function pointOnMap(x,y){selectedPoint=[x,y];requestRender()}
+ function showSelected(point,record=null,opts={}){detailClose();$('#contextMenu').classList.add('hidden');pointOnMap(...point);lastClick=point;const foundRegion=record&&opts.kind==='region'?record:regionAt(...point),meta=(record&&opts.kind==='marker')?'玩家标点':(record&&opts.kind==='structure')?'已生成地表结构':foundRegion?regionTypes[foundRegion.type].name:'地图位置';selectedHit={point,record,kind:opts.kind||'position'};
+ let name=record?.name||(foundRegion?'区域内位置':'地图位置');
+ const biomeText={0:'水域',1:'平原',2:'森林',3:'湿地',4:'丘陵',5:'山地'}[getBiome(...point)]||'未知';
+ const height=Math.round(80+getElev(...point)*110);
+ let description=record?.note||'';
+ if(opts.kind==='region'&&record){const square=Math.round(Math.abs(polygonArea(record.points))*9);description=[description,`类型：${regionTypes[record.type].name}`,`面积：约 ${square.toLocaleString()} 平方方块`,`边界：${record.points.length} 个顶点`].filter(Boolean).join(' · ')}
+ else if(opts.kind==='position'||!record){description=[`地表：${biomeText}`,`高度：约 Y ${height}`,foundRegion?`所属区域：${foundRegion.name}`:'未命名区域'].join(' · ')}
+ else if(!description)description=`地表：${biomeText} · 高度：约 Y ${height}`;
+ const [px,py]=screenPos(...point);detailEl.style.left=clamp(px+17,12,w-332)+'px';detailEl.style.top=clamp(py+16,85,h-235)+'px';$('#detailType').textContent=meta.toUpperCase();$('#detailName').textContent=name;$('#detailDescription').textContent=description;$('#detailMeta').textContent=`主世界 · X ${Math.round(point[0]*3)} · Z ${Math.round(point[1]*3)}${foundRegion?' · '+foundRegion.name:''}`;
+ const actions=$('#detailActions');actions.innerHTML='<button data-detail="center">定位这里</button>'+(opts.kind==='marker'?'<button data-detail="edit">编辑标点</button><button class="delete" data-detail="delete">删除</button>':opts.kind==='region'?'<button data-detail="edit">编辑区域</button><button data-detail="redraw">重圈边界</button><button class="delete" data-detail="delete">删除</button>':'');detailEl.classList.remove('hidden');updateStatus('已选中 '+name)}
+ function updateStatus(action){if(action)lastAction=action;$('#coords').textContent=selectedPoint?`X ${Math.round(selectedPoint[0]*3)} · Z ${Math.round(selectedPoint[1]*3)}`:`X ${Math.round(cx*3)} · Z ${Math.round(cy*3)}`;$('#zoomValue').textContent=scale.toFixed(2)+'×';$('#statusName').textContent=lastAction||'点击地图查看位置';}
+ function updateSelection(){if(!selectedPoint){pinEl.classList.add('hidden');return}const [x,y]=screenPos(...selectedPoint);pinEl.classList.toggle('hidden',x<0||x>w||y<0||y>h);pinEl.style.left=x+'px';pinEl.style.top=y+'px'}
+ function detailAction(act){if(!selectedHit)return;const {point,record,kind}=selectedHit;
+ if(act==='center'){[cx,cy]=point;detailClose();requestRender();toast('已定位到选中位置')}
+ else if(act==='edit'){if(kind==='marker'){let i=waypoints.findIndex(p=>p.id===record.id);if(i>=0)waypointModal(record.x,record.y,i)} else if(kind==='region')openRegionEditor(record.id)}
+ else if(act==='delete'){if(kind==='marker')removeWaypoint(waypoints.findIndex(p=>p.id===record.id));else if(kind==='region' && confirm('删除区域「'+record.name+'」？')){regions=regions.filter(r=>r.id!==record.id);saveRegions();detailClose();requestRender();toast('区域已删除')}}
+ else if(act==='redraw'&&kind==='region')startRegionDrawing(record.id)}
+ function initEvents(){
+ document.addEventListener('click',e=>{
+   const b=e.target.closest('[data-act]');if(b){const a=b.dataset.act;if(a==='settings')settingsOpen();else if(a==='panel-close')panelClose();else if(a==='modal-close')modalClose();else if(a==='materials')materialsOpen();else if(a==='mini-position')openGameAdjust();else if(a==='create-marker')waypointModal(...(selectedPoint||[cx,cy]));else if(a==='save-marker')saveWaypoint();else if(a==='mini-reset'){miniCfg={enabled:true,shape:'round',northUp:true,cardinals:true,showCoords:true,showRegions:true,showIcons:true,zoom:1.5,size:184,x:.96,y:.06};saveMini();settingsOpen('mini')}else if(a==='center'){cx=630;cy=465;scale=Math.max(w/W,h/H)*1.08;requestRender();toast('已返回玩家位置')}else if(a==='exit')toast('已关闭地图');else if(['atlas','markers','regions','layers','info'].includes(a))panelOpen(a)}
+   const sub=e.target.closest('[data-settings-tab]');if(sub)settingsOpen(sub.dataset.settingsTab);
+   const st=e.target.closest('[data-style]');if(st){setMode(st.dataset.style);settingsOpen('map')}
+   const icon=e.target.closest('[data-marker-icon]');if(icon){selectedIcon=icon.dataset.markerIcon;all('[data-marker-icon]').forEach(b=>b.classList.toggle('active',b===icon))}
+   const marker=e.target.closest('[data-open-marker]');if(marker){const p=waypoints[+marker.dataset.openMarker];if(p){panelClose();showSelected([p.x,p.y],p,{kind:'marker'})}}
+   const act=e.target.closest('[data-detail]');if(act)detailAction(act.dataset.detail);
+   const shape=e.target.closest('[data-mini-shape]');if(shape){miniCfg.shape=shape.dataset.miniShape;saveMini();settingsOpen('mini')}
+   const mat=e.target.closest('[data-material]');if(mat){const kind=mat.dataset.material;if(kind==='ink')resources.ink=Math.min(100,resources.ink+8);if(kind==='glow')resources.glow=Math.min(40,resources.glow+5);if(kind.startsWith('dye-')){const dye=kind.slice(4);if(dye in resources.dyes)resources.dyes[dye]=!resources.dyes[dye]}if(kind==='compass')resources.compass=!resources.compass;materialsOpen()}
+ });
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-mini-adjust]');if(b)stopGameAdjust(b.dataset.miniAdjust==='save')});
+ document.addEventListener('change',e=>{let cb=e.target.closest('[data-layer]');if(cb){layers[cb.dataset.layer]=cb.checked;if(['regions','regionBoundaries','waypoints','structures'].includes(cb.dataset.layer))requestRender();else rebuild();toast('图层已更新')}let mc=e.target.closest('[data-mini-check]');if(mc){miniCfg[mc.dataset.miniCheck]=mc.checked;saveMini()}});
+ document.addEventListener('input',e=>{if(e.target.id==='miniZoomRange'){miniCfg.zoom=+e.target.value;$('#miniZoomText').textContent=miniCfg.zoom.toFixed(1)+'×';saveMini()}});
+ $('#centerBtn').addEventListener('click',()=>{detailClose();$('#contextMenu').classList.add('hidden');cx=630;cy=465;scale=Math.max(w/W,h/H)*1.08;requestRender();toast('已回到玩家位置')});
+ $('#detailClose').addEventListener('click',detailClose);
+ backdrop.addEventListener('click',e=>{if(e.target===backdrop)modalClose()});
+ $('#markerLayer').addEventListener('pointerdown',e=>{e.stopPropagation();if(e.button===0&&!detailEl.classList.contains('hidden')){detailClose();markerDismissClick=true}else markerDismissClick=false});
+ $('#markerLayer').addEventListener('click',e=>{const el=e.target.closest('.marker');if(!el)return;e.stopPropagation();if(markerDismissClick){markerDismissClick=false;return}const i=+el.dataset.markerIndex,si=+el.dataset.structureIndex;if(si>=0){const p=structures[si];showSelected([p.x,p.y],p,{kind:'structure'})}else if(i>=0){const p=waypoints[i];showSelected([p.x,p.y],p,{kind:'marker'})}});
+ $('#markerLayer').addEventListener('contextmenu',e=>{const m=e.target.closest('.marker');if(!m)return;e.preventDefault();e.stopPropagation();const i=+m.dataset.markerIndex,si=+m.dataset.structureIndex;let p=si>=0?structures[si]:waypoints[i];if(p)showContext(e.clientX,e.clientY,p.x,p.y)});
+ function showContext(px,py,x,y){detailClose();const menu=$('#contextMenu');menu.style.left=clamp(px,7,w-192)+'px';menu.style.top=clamp(py,7,h-175)+'px';menu.innerHTML=`<button data-cmd="add">＋ 在此添加标点</button><button data-cmd="region">⬡ 从此开始圈选区域</button><button data-cmd="inspect">ⓘ 查看位置详情</button><button data-cmd="recenter">⌖ 以此位置居中</button>`;menu.dataset.x=x;menu.dataset.y=y;menu.classList.remove('hidden')}
+ area.addEventListener('contextmenu',e=>{e.preventDefault();if(regionDrawing)return;const [x,y]=worldPos(e.clientX,e.clientY);showContext(e.clientX,e.clientY,x,y)});
+ $('#contextMenu').addEventListener('click',e=>{const b=e.target.closest('[data-cmd]');if(!b)return;const menu=$('#contextMenu'),x=+menu.dataset.x,y=+menu.dataset.y;menu.classList.add('hidden');if(b.dataset.cmd==='add')waypointModal(x,y);else if(b.dataset.cmd==='region')startRegionDrawing();else if(b.dataset.cmd==='inspect'){const r=regionAt(x,y);showSelected([x,y],r,{kind:r?'region':'position'})}else{cx=x;cy=y;requestRender();toast('已居中到该位置')}});
+ area.addEventListener('pointerdown',e=>{if(e.button!==0||regionDrawing)return;const detailWasOpen=!detailEl.classList.contains('hidden');if(detailWasOpen){detailClose();mapDismissThisPointer=true}drag={x:e.clientX,y:e.clientY,cx,cy,moved:false};area.classList.add('dragging');area.setPointerCapture(e.pointerId);$('#contextMenu').classList.add('hidden')});
+ area.addEventListener('pointermove',e=>{if(drag){let dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.hypot(dx,dy)>5)drag.moved=true;if(drag.moved){cx=drag.cx-dx/scale;cy=drag.cy-dy/scale;requestRender()}}if(!drag) {let [x,y]=worldPos(e.clientX,e.clientY);$('#coords').textContent=`X ${Math.round(x*3)} · Z ${Math.round(y*3)}`}});
+ area.addEventListener('pointerup',e=>{if(drag&&!drag.moved&&!regionDrawing&&e.button===0&&!mapDismissThisPointer){const [x,y]=worldPos(e.clientX,e.clientY),r=regionAt(x,y);showSelected([x,y],r,{kind:r?'region':'position'})}drag=null;mapDismissThisPointer=false;area.classList.remove('dragging')});
+ area.addEventListener('pointercancel',()=>{drag=null;mapDismissThisPointer=false;area.classList.remove('dragging')});
+ area.addEventListener('wheel',e=>{e.preventDefault();detailClose();$('#contextMenu').classList.add('hidden');let [ax,ay]=worldPos(e.clientX,e.clientY);scale=clamp(scale*Math.exp(-e.deltaY*.0012),.40,4.3);cx=ax-(e.clientX-w/2)/scale;cy=ay-(e.clientY-h/2)/scale;requestRender()},{passive:false});
+ window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;if(e.key==='Escape'){detailClose();modalClose();panelClose();$('#contextMenu').classList.add('hidden')}});
+ window.addEventListener('resize',syncSize);
+ }
+ // ─── Place-name regions: polygon geometry is independent of terrain and of pins. ───
+// Demo coordinates are in map/world space. In-game implementation would use
+// per-dimension block polygons and server-authoritative atlas or shared ownership.
+const regionTypes={sea:{name:'海域',color:'#629ab4'},mountain:{name:'山脉',color:'#ab855e'},forest:{name:'森林',color:'#6d9a70'},plain:{name:'平原',color:'#c3af73'},lake:{name:'湖泊',color:'#81adb1'},valley:{name:'河谷',color:'#a0ae7d'},other:{name:'自定义',color:'#b99fc7'}};
+const demoRegions=[
+  {id:'sea-north',name:'北境海',type:'sea',color:'#79b9cc',label:[115,390],points:[[18,55],[180,53],[239,146],[222,286],[225,394],[193,524],[132,659],[19,715]]},
+  {id:'mount-azure',name:'苍岚山脉',type:'mountain',color:'#c5ae83',label:[1025,355],points:[[833,66],[1075,24],[1205,127],[1244,315],[1160,441],[1042,424],[921,311],[812,177]]},
+  {id:'river-valley',name:'白河谷地',type:'valley',color:'#c4b18b',label:[780,610],points:[[424,476],[587,421],[779,426],[934,545],[913,734],[687,795],[496,692]]},
+  {id:'pinewoods',name:'雾松林',type:'forest',color:'#9ab78a',label:[1030,750],points:[[870,674],[1117,612],[1250,746],[1252,927],[966,933],[841,825]]}
+];
+const REGION_STORE_KEY='cartograph-hifi-region-names-v2';
+const regionClone=r=>({id:r.id,name:r.name,type:r.type,color:r.color,note:r.note||'',points:r.points.map(p=>[p[0],p[1]]),...(Array.isArray(r.label)&&r.label.length===2?{label:r.label.slice()}: {})});
+function loadRegions(){
+ try{const raw=localStorage.getItem(REGION_STORE_KEY);if(raw){let arr=JSON.parse(raw);if(Array.isArray(arr)&&arr.length<=80&&arr.every(r=>typeof r.id==='string'&&typeof r.name==='string'&&r.name.length<=30&&regionTypes[r.type]&&Array.isArray(r.points)&&r.points.length>=3&&r.points.length<=64&&r.points.every(p=>Array.isArray(p)&&p.length===2&&p.every(n=>Number.isFinite(n)))))return arr.map(regionClone)}}catch(e){console.warn('区域数据未加载',e)}
+ return demoRegions.map(regionClone);
+}
+let regions=loadRegions(),regionDrawing=null,regionPreview=null,selectedRegionId='',regionEditId=null,regionRedrawingId=null,regionAdjust=false,regionPointer=null,vertexMenuIndex=-1;
+function saveRegions(){try{localStorage.setItem(REGION_STORE_KEY,JSON.stringify(regions))}catch(e){console.warn('此浏览器禁用了本地保存',e)}}
+function polygonArea(pts){let a=0;for(let i=0;i<pts.length;i++){const p=pts[i],q=pts[(i+1)%pts.length];a+=p[0]*q[1]-q[0]*p[1]}return a/2}
+function pointInPoly(p,pts){let inside=false;for(let i=0,j=pts.length-1;i<pts.length;j=i++){const a=pts[i],b=pts[j];if((a[1]>p[1])!== (b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])inside=!inside}return inside}
+// True area-weighted centroid; concave shapes fall back to a known inside point.
+function regionCenter(r){if(r.label&&pointInPoly(r.label,r.points))return r.label;const pts=r.points,twice=polygonArea(pts)*6;if(Math.abs(twice)>1e-6){let cx=0,cy=0;for(let i=0;i<pts.length;i++){const a=pts[i],b=pts[(i+1)%pts.length],cross=a[0]*b[1]-b[0]*a[1];cx+=(a[0]+b[0])*cross;cy+=(a[1]+b[1])*cross}const c=[cx/twice,cy/twice];if(pointInPoly(c,pts))return c}return pts[Math.floor(pts.length/2)]}
+function regionAt(x,y){for(let i=regions.length-1;i>=0;i--)if(pointInPoly([x,y],regions[i].points))return regions[i];return null}
+function regionStyleAt(screenX){return mode==='compare'?(screenX<w*split?compareLeft:compareRight):mode}
+function regionStroke(g,r,points,selected){const type=regionTypes[r.type]||regionTypes.other;g.beginPath();points.forEach((p,i)=>i?g.lineTo(...p):g.moveTo(...p));g.closePath();g.fillStyle=selected?`${r.color}2e`:`${type.color}06`;g.fill();if(selected||layers.regionBoundaries){g.strokeStyle=selected?'#ffe5a6':`${type.color}91`;g.lineWidth=selected?2.1:1.2;g.setLineDash(selected?[8,5]:[6,7]);g.stroke();g.setLineDash([])}}
+function drawRegions(g){
+ g.save();g.setTransform(dpr,0,0,dpr,0,0);g.textAlign='center';g.textBaseline='middle';
+ if(layers.regions){for(const r of regions){const scr=r.points.map(p=>screenPos(...p)),[xc,yc]=screenPos(...regionCenter(r)),selected=r.id===selectedRegionId;
+   if(scr.every(p=>p[0]<-60||p[0]>w+60||p[1]<-60||p[1]>h+60))continue;
+   regionStroke(g,r,scr,selected);
+   if(xc< -100||xc>w+100||yc< -70||yc>h+70)continue;
+   const at=regionStyleAt(xc),ancient=at==='illustrated',pixel=at==='pixel';
+   const type=regionTypes[r.type],zoom=Math.min(1.13,Math.max(.78,Math.sqrt(scale/1.3))),size=Math.round((r.type==='sea'||r.type==='mountain'?25:21)*zoom);
+   g.save();g.translate(xc,yc);if(ancient)g.rotate(r.type==='mountain'?-.14:r.type==='sea'?-.04:0);
+   g.font=(pixel?'800 ':'650 ')+size+'px '+(ancient?'"KaiTi","STKaiti","Songti SC",serif':pixel?'"Microsoft YaHei",monospace':'"Microsoft YaHei",sans-serif');
+   g.letterSpacing=ancient?'3px':'1.1px';g.shadowColor=ancient?'#f4e7cfc2':'#162d2bcf';g.shadowBlur=ancient?5:7;
+   g.lineWidth=ancient?2.8:pixel?3.5:3;g.strokeStyle=ancient?'#dfd0aa99':'#101b1ba8';
+   g.fillStyle=ancient?'#60472f':pixel?(r.type==='sea'?'#f4ffff':'#f8efc4'):r.type==='sea'?'#e9f8f7':'#fff6d9';
+   g.strokeText(r.name,0,0);g.fillText(r.name,0,0);g.shadowBlur=0;
+   if(selected){g.font='600 11px "Microsoft YaHei",sans-serif';g.fillStyle='#f8e0a9';g.fillText('选中区域 · '+type.name,0,size/2+15)}
+   g.restore();
+ }}
+ if(regionDrawing){
+   const pts=regionDrawing.map(p=>screenPos(...p));if(pts.length){
+     g.beginPath();pts.forEach((p,i)=>i?g.lineTo(...p):g.moveTo(...p));
+     if(regionAdjust&&pts.length>=3){g.closePath();g.fillStyle='#f6d38a20';g.fill()}
+     else if(regionPreview)g.lineTo(...screenPos(...regionPreview));
+     if(!regionAdjust&&pts.length>=3)g.closePath();
+     g.strokeStyle='#ffe3a9';g.lineWidth=2.6;g.setLineDash([8,5]);g.stroke();g.setLineDash([]);
+     pts.forEach((p,i)=>{g.beginPath();g.arc(p[0],p[1],regionAdjust?8:(i===0?7:5),0,Math.PI*2);g.fillStyle=regionAdjust?'#fff1c9':i===0?'#f8d69a':'#f2f4e6';g.fill();g.strokeStyle='#243e31';g.lineWidth=2;g.stroke()});
+   }
+ }
+ g.restore();
+}
+function regionPanelHtml(){let html=title('区域命名','NAMED REGIONS','海域、山脉、森林与其他命名区域')+`<button class="btn primary" style="width:100%;text-align:center" data-region-action="draw">＋ 在地图上圈选区域</button><div class="regionInlineInfo"><span>已命名 ${regions.length} 片区域</span><span></span></div>`;
+ for(let i=0;i<regions.length;i++){const r=regions[i];html+=`<div class="regionItem ${r.id===selectedRegionId?'selected':''}"><div class="regionItemHeader"><i class="regionItemColor" style="background:${escapeHtml(r.color)}"></i><b>${escapeHtml(r.name)}</b><em>${regionTypes[r.type].name}</em></div><div class="regionItemNote">${r.points.length} 个边界点 · 地名</div><div class="regionItemActions"><button data-region-action="focus" data-region-id="${escapeHtml(r.id)}">定位</button><button data-region-action="edit" data-region-id="${escapeHtml(r.id)}">编辑</button><button data-region-action="delete" data-region-id="${escapeHtml(r.id)}">删除</button></div></div>`}
+ return html}
+function repaintRegionPanel(){if(panel==='regions')panelEl.innerHTML=regionPanelHtml();requestRender()}
+function startRegionDrawing(editId=null){
+ detailClose();pinEl.classList.add('hidden');modalClose();panelClose();
+ const existing=editId?regions.find(r=>r.id===editId):null;
+ regionRedrawingId=existing?.id||null;
+ regionDrawing=existing?existing.points.map(p=>p.slice()):[];
+ regionAdjust=!!existing;regionPointer=null;regionPreview=null;
+ selectedRegionId=existing?.id||'';
+ area.classList.add('regionDrawing');area.classList.toggle('regionAdjust',regionAdjust);
+ $('#regionGuide').classList.remove('hidden');$('#contextMenu').classList.add('hidden');
+ updateRegionGuide();requestRender();
+}
+function updateRegionGuide(){
+ const n=regionDrawing?.length||0;
+ const title=$('#regionGuide strong');
+ title.textContent=regionAdjust?'调整区域边界':'圈选命名区域';
+ $('#regionProgress').textContent=regionAdjust
+    ?`${n} 个顶点 · 拖动顶点调整 · 双击边线增点 · 右键顶点删除 · 拖动空白平移`
+    :`${n} 个顶点 · 单击布点 · 点击「调整顶点」后可逐点修改`;
+ const btn=$('#regionGuide').querySelector('[data-region-action="adjust"]');
+ btn.disabled=n<3;btn.textContent=regionAdjust?'继续布点':'调整顶点';btn.classList.toggle('active',regionAdjust);
+ $('#regionGuide').querySelector('[data-region-action="finish"]').disabled=n<3;
+ $('#regionGuide').querySelector('[data-region-action="finish"]').textContent=regionRedrawingId?'保存边界':'完成圈选';
+ $('#regionGuide').querySelector('[data-region-action="undo"]').disabled=n<1;
+}
+function cancelRegionDrawing(){
+ regionDrawing=null;regionPreview=null;regionAdjust=false;regionPointer=null;
+ area.classList.remove('regionDrawing','regionAdjust');$('#regionGuide').classList.add('hidden');
+ $('#vertexMenu').classList.add('hidden');regionRedrawingId=null;requestRender();
+}
+function addRegionVertex(x,y){
+ if(!regionDrawing||regionAdjust)return;
+ const p=[clamp(x,0,W),clamp(y,0,H)];
+ if(regionDrawing.length>=64){toast('最多 64 个边界点');return}
+ const last=regionDrawing.at(-1);
+ if(last&&Math.hypot(p[0]-last[0],p[1]-last[1])<5)return;
+ regionDrawing.push(p);updateRegionGuide();requestRender();
+}
+function finishRegionDrawing(){
+ if(!regionDrawing)return;
+ if(regionDrawing.length<3){toast('至少需要三个顶点');return}
+ if(Math.abs(polygonArea(regionDrawing))<250){toast('区域过小');return}
+ const points=regionDrawing.map(p=>p.slice()),editId=regionRedrawingId;
+ cancelRegionDrawing();openRegionEditor(editId,points);
+}
+function closestVertex(clientX,clientY){
+ if(!regionDrawing)return -1;
+ let idx=-1,min=13*13;
+ for(let i=0;i<regionDrawing.length;i++){
+   const [x,y]=screenPos(...regionDrawing[i]);const d=(x-clientX)**2+(y-clientY)**2;
+   if(d<min){min=d;idx=i}
+ }
+ return idx;
+}
+function closestEdge(clientX,clientY){
+ if(!regionDrawing||regionDrawing.length<2)return -1;
+ let idx=-1,min=11*11;
+ for(let i=0;i<regionDrawing.length;i++){
+   const a=screenPos(...regionDrawing[i]);const b=screenPos(...regionDrawing[(i+1)%regionDrawing.length]);
+   const dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy;
+   if(!l)continue;
+   const t=clamp(((clientX-a[0])*dx+(clientY-a[1])*dy)/l,0,1);
+   const dd=(a[0]+dx*t-clientX)**2+(a[1]+dy*t-clientY)**2;
+   if(dd<min){min=dd;idx=i}
+ }
+ return idx;
+}
+function openRegionEditor(id,points){detailClose();panelClose();const region=id?regions.find(r=>r.id===id):null;regionEditId=region?.id||null;const pts=points||region?.points;if(!pts)return;modal='region';const name=region?.name||'',type=region?.type||'other',color=region?.color||regionTypes.other.color;
+  modalEl.innerHTML=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / NAMED REGION</div><h2>${region?'编辑区域名称':'为这片区域命名'}</h2><p>边界顶点 ${pts.length} 个</p></div><button data-act="modal-close">×</button></div><div class="settingCaption">区域名称</div><input class="settingInput" id="regionName" maxlength="24" placeholder="例如：北境海、苍岚山脉、雾松林" value="${escapeHtml(name)}"/><div class="regionFormGrid"><label style="margin-top:17px">地理区域类型<select id="regionType" class="settingInput">${Object.entries(regionTypes).map(([key,v])=>`<option value="${key}" ${key===type?'selected':''}>${v.name}</option>`).join('')}</select></label><label style="margin-top:17px">注记颜色<input class="settingInput regionColorInput" type="color" id="regionColor" value="${escapeHtml(color)}"/></label></div>${region?`<div style="margin-top:15px"><button class="btn" data-region-action="redraw" data-region-id="${escapeHtml(region.id)}">调整边界 · ${pts.length} 个顶点</button></div>`:''}<div class="settingCaption">区域简介 / 备注</div><input class="settingInput" id="regionNote" maxlength="160" value="${escapeHtml(region?.note||'')}" placeholder="例如：沿岸深海、林区或山脉简介"><div class="regionFormHint"></div><div class="modalFooter"><small></small><div style="display:flex;gap:9px"><button class="btn" data-act="modal-close">取消</button><button class="btn primary" data-region-action="save">保存区域</button></div></div>`;
+  modalEl.dataset.regionPoints=JSON.stringify(pts);backdrop.classList.remove('hidden');setTimeout(()=>$('#regionName')?.focus(),0);
+}
+function saveRegionEditor(){const name=$('#regionName')?.value?.trim(),type=$('#regionType')?.value||'other',color=$('#regionColor')?.value||regionTypes.other.color;if(!name){toast('请输入区域名称');$('#regionName')?.focus();return}if(!regionTypes[type]){toast('无效区域类型');return}let pts;try{pts=JSON.parse(modalEl.dataset.regionPoints)}catch{return}if(!Array.isArray(pts)||pts.length<3)return;
+ const existing=regionEditId?regions.find(r=>r.id===regionEditId):null;
+ if(existing){existing.name=name;existing.type=type;existing.color=color;existing.points=pts;existing.note=$('#regionNote')?.value||'';delete existing.label;selectedRegionId=existing.id}
+ else{if(regions.length>=80){toast('最多支持 80 个区域');return}const region={id:'region-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7),name,type,color,points:pts,note:$('#regionNote')?.value||''};regions.push(region);selectedRegionId=region.id}
+ saveRegions();modalClose();panel='regions';panelEl.classList.remove('hidden');repaintRegionPanel();toast(`区域「${name}」已保存 · 三种地图风格共用`);const saved=regions.find(r=>r.id===selectedRegionId);if(saved)showSelected(regionCenter(saved),saved,{kind:'region'});
+}
+function handleRegionButton(e){const b=e.target.closest('[data-region-action]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();const act=b.dataset.regionAction,id=b.dataset.regionId;
+ if(act==='draw')startRegionDrawing();
+ else if(act==='redraw'){const item=regions.find(x=>x.id===id);if(item)startRegionDrawing(item.id)}
+ else if(act==='finish')finishRegionDrawing();
+ else if(act==='adjust'){if(regionDrawing?.length>=3){regionAdjust=!regionAdjust;regionPreview=null;area.classList.toggle('regionAdjust',regionAdjust);updateRegionGuide();requestRender()}}
+ else if(act==='undo'){if(regionDrawing?.length){regionDrawing.pop();updateRegionGuide();requestRender()}}
+ else if(act==='cancel')cancelRegionDrawing();
+ else if(act==='save')saveRegionEditor();
+ else if(['focus','edit','delete'].includes(act)){const r=regions.find(x=>x.id===id);if(!r)return;
+  if(act==='focus'){[cx,cy]=regionCenter(r);selectedRegionId=r.id;panelClose();requestRender();toast('已定位至「'+r.name+'」')}
+  else if(act==='edit')openRegionEditor(id);
+  else if(act==='delete'){if(confirm('删除区域「'+r.name+'」？这不会删除任何地图地形或标点。')){regions=regions.filter(x=>x.id!==id);if(selectedRegionId===id)selectedRegionId='';saveRegions();repaintRegionPanel();toast('已删除区域名称')}}
+ }
+}
+function initRegionEvents(){
+ document.addEventListener('click',handleRegionButton,true);
+ const vm=$('#vertexMenu');
+ $('#vertexDelete').addEventListener('click',e=>{
+   e.stopPropagation();
+   if(regionDrawing&&vertexMenuIndex>=0&&regionDrawing.length>3){
+     regionDrawing.splice(vertexMenuIndex,1);updateRegionGuide();requestRender();
+   }else if(regionDrawing)toast('区域至少需要三个顶点');
+   vertexMenuIndex=-1;vm.classList.add('hidden');
+ });
+ area.addEventListener('pointerdown',e=>{
+   if(!regionDrawing||e.button!==0)return;
+   e.preventDefault();e.stopImmediatePropagation();
+   detailClose();vm.classList.add('hidden');
+   if(regionAdjust){
+     const idx=closestVertex(e.clientX,e.clientY);
+     if(idx>=0){regionPointer={kind:'vertex',index:idx,id:e.pointerId};area.setPointerCapture(e.pointerId)}
+     else{regionPointer={kind:'pan',id:e.pointerId,x:e.clientX,y:e.clientY,cx,cy};area.setPointerCapture(e.pointerId)}
+   }else{
+     const [x,y]=worldPos(e.clientX,e.clientY);
+     if(regionDrawing.length>=3&&Math.hypot(x-regionDrawing[0][0],y-regionDrawing[0][1])*scale<14){regionAdjust=true;regionPreview=null;area.classList.add('regionAdjust');updateRegionGuide();requestRender();return}
+     if(e.detail<2)addRegionVertex(x,y);
+   }
+ },true);
+ area.addEventListener('pointermove',e=>{
+   if(!regionDrawing)return;
+   if(regionPointer?.kind==='vertex'){
+     regionDrawing[regionPointer.index]=worldPos(e.clientX,e.clientY).map((v,i)=>clamp(v,0,i?H:W));
+     requestRender();e.stopImmediatePropagation();return;
+   }
+   if(regionPointer?.kind==='pan'){
+     cx=regionPointer.cx-(e.clientX-regionPointer.x)/scale;
+     cy=regionPointer.cy-(e.clientY-regionPointer.y)/scale;
+     requestRender();e.stopImmediatePropagation();return;
+   }
+   if(!regionAdjust){regionPreview=worldPos(e.clientX,e.clientY);requestRender()}
+ },true);
+ area.addEventListener('pointerup',e=>{
+   if(!regionDrawing||!regionPointer)return;
+   if(regionPointer.id===e.pointerId){regionPointer=null;try{area.releasePointerCapture(e.pointerId)}catch(_){}}
+   updateRegionGuide();requestRender();e.stopImmediatePropagation();
+ },true);
+ area.addEventListener('dblclick',e=>{
+   if(!regionDrawing)return;
+   e.preventDefault();e.stopImmediatePropagation();
+   if(!regionAdjust){if(regionDrawing.length>=3){regionAdjust=true;area.classList.add('regionAdjust');updateRegionGuide();requestRender()}return}
+   const idx=closestEdge(e.clientX,e.clientY);
+   if(idx>=0&&regionDrawing.length<64){regionDrawing.splice(idx+1,0,worldPos(e.clientX,e.clientY));updateRegionGuide();requestRender()}
+ },true);
+ area.addEventListener('contextmenu',e=>{
+   if(!regionDrawing)return;
+   e.preventDefault();e.stopImmediatePropagation();
+   if(!regionAdjust){if(regionDrawing.length>=3){regionAdjust=true;regionPreview=null;area.classList.add('regionAdjust');updateRegionGuide();requestRender()}return}
+   const index=closestVertex(e.clientX,e.clientY);vertexMenuIndex=index;
+   if(index>=0){vm.style.left=clamp(e.clientX,9,w-170)+'px';vm.style.top=clamp(e.clientY,9,h-70)+'px';vm.classList.remove('hidden')}
+   else vm.classList.add('hidden');
+ },true);
+ window.addEventListener('keydown',e=>{
+   if($('#gameAdjust').classList.contains('hidden')===false){if(e.key==='Escape')stopGameAdjust(false);else if(e.key==='Enter')stopGameAdjust(true);return}
+   if(!regionDrawing)return;
+   if(e.key==='Escape'){e.preventDefault();cancelRegionDrawing()}
+   else if(e.key==='Enter'){e.preventDefault();finishRegionDrawing()}
+   else if(e.key==='Backspace'&&!['INPUT','TEXTAREA'].includes(document.activeElement?.tagName)){
+      e.preventDefault();if(regionDrawing.length){regionDrawing.pop();updateRegionGuide();requestRender()}
+   }
+ },true);
+}
+
+function start(){initRegionEvents();collectGeometry();realBase=makeRaster('realistic');inkBase=makeRaster('illustrated');pixelBase=makePixelRaster();scale=Math.max(innerWidth/W,innerHeight/H)*1.08;cx=630;cy=465;rebuild();initEvents();syncSize();let preferred='illustrated';try{let saved=localStorage.getItem('cartograph-final-map-style-v3');if(['pixel','realistic','illustrated'].includes(saved))preferred=saved}catch(_){}setMode(preferred,true);updateStatus();}
+start();
+})();
+</script>
+</body>
+</html>

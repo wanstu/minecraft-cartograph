@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cartograph · 局域网原型预览</title>
+<style>
+:root{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;color:#263d32;background:#d4d9c9}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 20% 0,#e8e2c9,#cdd6c8 68%)}
+main{max-width:1040px;margin:0 auto;padding:64px 30px}
+.eyebrow{font-size:12px;letter-spacing:.28em;font-weight:800;color:#687d64;text-transform:uppercase}
+h1{font-size:clamp(32px,6vw,56px);line-height:1.1;margin:16px 0 15px}
+.lead{font-size:16px;color:#50695b;line-height:1.8;margin:0 0 38px;max-width:700px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.card{display:flex;flex-direction:column;min-height:300px;background:#f3f0e4;border:1px solid #b9baa5;border-radius:20px;padding:26px;text-decoration:none;color:inherit;box-shadow:0 14px 35px #3b4b3930;transition:transform .15s,box-shadow .15s}
+.card:hover{transform:translateY(-5px);box-shadow:0 18px 38px #3b4b3940}
+.symbol{font-size:43px;line-height:1;margin-bottom:20px;color:#567460}
+h2{font-size:24px;margin:0 0 12px}
+p{color:#637164;line-height:1.7;font-size:14px}
+.go{margin-top:auto;padding-top:22px;color:#284b3a;font-weight:800}
+.note{margin-top:32px;background:#eff0e2;border:1px solid #bbc6ad;padding:18px 22px;border-radius:16px;color:#496052;font-size:13px;line-height:1.8}
+small{font-size:13px;opacity:.65}
+@media(max-width:800px){main{padding:40px 18px}.grid{grid-template-columns:1fr}.card{min-height:215px}}
+</style></head>
+<body><main><div class="eyebrow">Minecraft • NeoForge • LAN Preview</div>
+<h1>Cartograph <small>原型预览中心</small></h1>
+<p class="lead">在 dadm 上实时提供 Cartograph 的交互原型。用 eadm 浏览器打开即可体验；后续修改直接更新服务目录，不需要重复下载 HTML 或 ZIP。</p>
+<div class="grid">
+<a class="card" href="./cartograph_大地图_交互高保真.html"><span class="symbol">▧</span><h2>大地图</h2><p>三种地图风格、标点、区域圈选与编辑、材料操作和小地图设置。</p><span class="go">打开大地图原型 →</span></a>
+<a class="card" href="./cartograph_小地图_HUD原型.html"><span class="symbol">◉</span><h2>小地图 / 游戏 HUD</h2><p>游戏背景、圆形或方形小地图、定位与尺寸拖动调整。</p><span class="go">打开小地图原型 →</span></a>
+<a class="card" href="./cartograph_总设计与开发规范.html"><span class="symbol">≡</span><h2>总设计规范</h2><p>模组定位、设计理念、操作方式、资源机制以及后续原生开发依据。</p><span class="go">查看设计规范 →</span></a>
+</div><div class="note"><strong>当前：V3 原型</strong> · 只提供静态预览与浏览器交互，不代表 Minecraft JAR 已经实现全部功能。<br>此服务仅允许同一局域网访问。修改文件后刷新页面即可看到更新。</div></main></body></html>
