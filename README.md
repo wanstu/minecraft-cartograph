@@ -1,32 +1,33 @@
 # Cartograph / 绘图师
 
-An intentionally survival-friendly Minecraft atlas. It can represent **actually saved/generated chunks without player travel**; it must never predict an ungenerated region from the seed or cause chunk generation while viewing a map.
+Survival-friendly Minecraft map atlas. Uses **actual generated/saved terrain**, not world-seed predictions or forced chunk generation.
 
-## Current development status
+## Current status (development snapshot)
 
-**Work in progress.** The playable world-map rendering and save-backed live cartography are **not yet integrated**. Do not publish this as a finished map mod.
+**Minecraft 1.21.1 NeoForge adapter now builds and starts on a dedicated development server.** It has the first real saved-chunk survey pipeline, in-game single-page map viewer, held-map HUD, client/server data packets and server-authoritative world SavedData ledger. **This is still an unreleased development version** and has not passed client gameplay acceptance.
 
-- First adapter: Minecraft 1.21.1 NeoForge (Java 21).
-- Shared Java 17 core: 128×128 map page coordinates, read-only MCA region presence checks, exact-once survey/color payment ledger, independent world/dimension keys.
-- Initial NeoForge mechanics: atlas item, leather + empty map + feather crafting, atlas + empty map expansion recipe that preserves atlas data, ink/glow dye/compass data component and server-side resource settings.
-- Existing HTML UI prototype: `preview/cartograph-prototype.html`.
-- Common acceptance checks: `bash scripts/verify-common.sh`.
-- Version matrix and publication policy: [docs/MULTI_VERSION.md](docs/MULTI_VERSION.md); complete gameplay contract: [docs/MECHANICS_V1.md](docs/MECHANICS_V1.md).
+- Main-hand right-click with no material in the offhand, or **M** while an atlas is in inventory: open a 128×128 map page. Arrow keys switch pages, mouse wheel zooms.
+- Holding an atlas displays a small current-page minimap after the page is surveyed. Player arrow requires the nonconsumable compass upgrade.
+- Temporary material input: atlas in the main hand + ink sac, glow ink sac, red/yellow/blue dye or compass in the offhand, then right click. Sneak + empty offhand returns the compass.
+- Atlas crafting: vanilla empty map + leather + feather; extend with atlas + vanilla empty map on the standard crafting table.
+- Server loads **FULL** saved chunk surface pixels from MCA region files or already-loaded chunks only; map is black/white until colored. First survey and first colorization cost ink/pigment according to configurable server multipliers. Repeated updates are free.
+- Remaining major work: proper two-slot atlas UI, continuous multi-page map, manually edited/glowing waypoints, validated surface structure icons, vanilla/Create road and track overlays, vanilla map export, real client acceptance.
 
-## Adapter layout
+Full technical implementation and acceptance: [docs/SURVEY_PIPELINE.md](docs/SURVEY_PIPELINE.md). Product rules: [docs/MECHANICS_V1.md](docs/MECHANICS_V1.md).
+
+## Source layout
 
 ```
-java/common/src/main/java/           # pure Java, Java 17 compatible
-java/common/src/test/java/           # pure Java acceptance
-java/adapters/1.21.1-neoforge/       # official NeoForge ModDevGradle 1.21.1 project
-config/targets.json                 # planned vs. implemented targets
-scripts/release-matrix.py           # machine-readable release target list
-scripts/verify-common.sh            # portable common tests
-scripts/verify-jar.py               # validates actual built artifact
-.github/workflows/release.yml        # per-target CI, tag-triggered GitHub release
+java/common/                          # Java 17 pure shared source and tests
+java/adapters/1.21.1-neoforge/        # compiled loader adapter (Java 21)
+config/targets.json                  # planned and implemented adapter matrix
+docs/SURVEY_PIPELINE.md              # live survey implementation / known limitations
+docs/MULTI_VERSION.md                # GeoWorld-style multi-version release contract
+preview/cartograph-prototype.html     # standalone HTML design prototype
+.github/workflows/release.yml         # test & per-target builds; releases gated
 ```
 
-## Local build on Linux (Java 21)
+## Validate in dadm
 
 ```sh
 bash scripts/verify-common.sh
@@ -34,18 +35,6 @@ cd java/adapters/1.21.1-neoforge
 ./gradlew --no-daemon check build
 ```
 
-Expected artifact name: `Cartograph-0.1.0-mc1.21.1-neoforge.jar`. Other target directories are **not** implemented and do not produce releases.
+Build JAR: `java/adapters/1.21.1-neoforge/build/libs/Cartograph-0.1.0-mc1.21.1-neoforge.jar`. Other Minecraft/loader versions remain **planned**, not available, until verified. `release_ready=false` prevents accidental formal releases.
 
-## Current in-game development interaction
-
-Until the atlas GUI is implemented, hold the atlas in the **main hand** and an input item in the **offhand**, then use the atlas. It stores consumed ink sacs, glow ink sacs and red/yellow/blue dye counts, and can install a compass; sneak-use with empty offhand returns the installed compass. This is a **temporary functional input test**, not the final unified material-slot UI. Tooltips display balances and pages.
-
-Importantly, the mere existence of a saved region header is not sufficient to display terrain or claim a surface structure exists. The final adapter must read and validate the actual saved **fully generated chunk and surface** without invoking new chunk generation. The current index is only a cheap first-stage filter.
-
-## Multi-version release
-
-`config/targets.json` lists the same 9 **intended** Minecraft/loader pairs as GeoWorld. Do **not** flip a target to `implemented` until its own corresponding loader adapter has actually passed tests. Each built loader JAR compiles in the same common logic, uses its own Minecraft/loader metadata, and has a unique filename. Tags matching `v<mod_version>` cause GitHub CI to package the completed targets with SHA-256 checksums **only when `release_ready=true`**. The gate is intentionally `false` until actual playable cartography has passed acceptance.
-
-## Implementation independence
-
-The original [Map Atlases](https://github.com/Pepperoni-Jabroni/MapAtlases) is a feature reference only, not the source of this implementation. Its code is GPL-3.0; this project does not embed it. Cartograph's map-reading and rendering code must be written independently.
+Cartograph is an independent implementation; [Map Atlases](https://github.com/Pepperoni-Jabroni/MapAtlases) serves as a feature reference, without embedding its GPL-3.0 source.

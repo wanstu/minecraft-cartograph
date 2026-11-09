@@ -2,7 +2,7 @@
   "item.cartograph.atlas": "Cartograph Atlas",
   "cartograph.tooltip.pages": "Pages: %s",
   "cartograph.tooltip.resources": "Ink %s · Pigment %s · Glow ink %s",
-  "cartograph.tooltip.hint": "Atlas in main hand, material in offhand: use to fill. Sneak-use to detach compass.",
+  "cartograph.tooltip.hint": "Press M for map; temporary refill: atlas in main hand, material in offhand, right-click",
   "cartograph.message.compass_removed": "Compass detached · %s pages · Ink %s · Pigment %s · Glow %s",
   "cartograph.message.compass_installed": "Compass installed · %s pages · Ink %s · Pigment %s · Glow %s",
   "cartograph.message.compass_present": "Compass already installed · %s pages · Ink %s · Pigment %s · Glow %s",
@@ -10,5 +10,8 @@
   "cartograph.message.glow_filled": "Glow ink refilled · %s pages · Ink %s · Pigment %s · Glow %s",
   "cartograph.message.dye_installed": "Primary pigments refilled · %s pages · Ink %s · Pigment %s · Glow %s",
   "cartograph.message.dye_waiting": "Dye stored: need red + yellow + blue · %s pages · Ink %s · Pigment %s · Glow %s",
-  "cartograph.message.inspect": "Atlas · %s pages · Ink %s · Pigment %s · Glow %s"
+  "cartograph.message.inspect": "Atlas · %s pages · Ink %s · Pigment %s · Glow %s",
+  "key.cartograph.open": "Open Cartograph atlas",
+  "key.categories.cartograph": "Cartograph",
+  "screen.cartograph.atlas": "Cartograph · World Map"
 }

@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
+import net.minecraft.server.level.ServerLevel;
 import java.util.List;
 
 /**
@@ -24,9 +25,17 @@ public final class AtlasItem extends Item {
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         if (hand != InteractionHand.MAIN_HAND) return InteractionResultHolder.pass(player.getItemInHand(hand));
         ItemStack atlas = player.getItemInHand(hand);
+        ItemStack input = player.getOffhandItem();
+        boolean material = input.is(Items.COMPASS) || input.is(Items.INK_SAC) || input.is(Items.GLOW_INK_SAC)
+                || input.is(Items.RED_DYE) || input.is(Items.YELLOW_DYE) || input.is(Items.BLUE_DYE);
+        if (!material && !player.isShiftKeyDown()) {
+            if (level.isClientSide) CartographClient.open();
+            return InteractionResultHolder.sidedSuccess(atlas, level.isClientSide);
+        }
         if (!level.isClientSide) {
-            AtlasState current = atlas.getOrDefault(CartographMod.ATLAS_STATE.get(), AtlasState.blank()).identified();
-            ItemStack input = player.getOffhandItem();
+            AtlasWorldData data = AtlasWorldData.get((ServerLevel) level);
+            AtlasWorldData.Entry entry = data.access(atlas);
+            AtlasState current = entry.state();
             AtlasState next = current;
             String message;
             boolean consume = false;
@@ -57,7 +66,7 @@ public final class AtlasItem extends Item {
                 message = next.colorEnabled() ? "cartograph.message.dye_installed" : "cartograph.message.dye_waiting";
             } else message = "cartograph.message.inspect";
 
-            atlas.set(CartographMod.ATLAS_STATE.get(), next);
+            data.update(entry, next, atlas);
             if (consume && !player.getAbilities().instabuild) input.shrink(1);
             player.displayClientMessage(Component.translatable(message,
                     next.pages(), next.inkUnits() / 10.0, next.pigmentUnits() / 10.0,

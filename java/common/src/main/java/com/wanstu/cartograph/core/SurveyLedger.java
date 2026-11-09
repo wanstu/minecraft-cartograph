@@ -73,6 +73,7 @@ public final class SurveyLedger {
 
     /** Rendering an already-surveyed chunk is always free; do not call survey for dirty-only updates. */
     public boolean updateMayRender(ChunkKey key) { return surveyed.contains(key); }
+    public boolean isColored(ChunkKey key) { return colorized.contains(key); }
 
     public Snapshot snapshot() { return new Snapshot(surveyed, colorized); }
 }

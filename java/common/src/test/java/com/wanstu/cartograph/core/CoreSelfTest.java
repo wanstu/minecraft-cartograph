@@ -1,6 +1,10 @@
 package com.wanstu.cartograph.core;
 
 import com.wanstu.cartograph.world.ExistingRegionIndex;
+import com.wanstu.cartograph.world.McaChunkReader;
+import java.io.ByteArrayOutputStream;
+import java.util.Arrays;
+import java.util.zip.DeflaterOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
@@ -14,6 +18,17 @@ public final class CoreSelfTest {
         yes(AtlasPage.atBlock("minecraft:overworld", 0, 0).containsChunk(7, 7), "128-block boundary");
         yes(!AtlasPage.atBlock("minecraft:overworld", 0, 0).containsChunk(8, 0), "next page");
         yes(AtlasPage.atBlock("minecraft:overworld", -1, -1).pageX() == -1, "negative floor");
+
+        // Exhaustive O(1) coverage checks across all directions and negative anchors.
+        for (int index = 0; index < 1024; index++) {
+            var offset = SpiralCoverage.offsetFor(index);
+            yes(SpiralCoverage.covers(-1000, 500, -1000 + offset.x(), 500 + offset.z(), index + 1),
+                    "spiral must cover its just-acquired page " + index);
+            yes(!SpiralCoverage.covers(-1000, 500, -1000 + offset.x(), 500 + offset.z(), index),
+                    "spiral must not grant unacquired page " + index);
+        }
+        yes(!SpiralCoverage.covers(0, 0, Integer.MAX_VALUE, Integer.MAX_VALUE, 512),
+                "huge request must not overflow atlas coverage");
 
         SurveyLedger ledger = new SurveyLedger();
         var c = new SurveyLedger.ChunkKey("minecraft:overworld", 3, -5);
@@ -49,6 +64,23 @@ public final class CoreSelfTest {
             yes(ExistingRegionIndex.isPersisted(tmp, -1, 0), "negative chunk header lookup");
             yes(!ExistingRegionIndex.isPersisted(tmp, -2, 0), "absent neighbor");
             yes(ExistingRegionIndex.listPersisted(tmp, -1, 0).size() == 1, "valid region listing");
+
+            // Write a complete zlib-compressed NBT root into the same synthetic
+            // region sector, then verify that readNbt never generates a chunk.
+            byte[] originalNbt = {10, 0, 0, 0};
+            ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+            try (DeflaterOutputStream out = new DeflaterOutputStream(compressed)) {
+                out.write(originalNbt);
+            }
+            byte[] payload = compressed.toByteArray();
+            int length = payload.length + 1;
+            data[8192] = (byte) (length >>> 24); data[8193] = (byte) (length >>> 16);
+            data[8194] = (byte) (length >>> 8); data[8195] = (byte) length;
+            System.arraycopy(payload, 0, data, 8197, payload.length);
+            Files.write(file, data);
+            yes(Arrays.equals(originalNbt, McaChunkReader.readNbt(tmp, -1, 0).orElseThrow()),
+                    "real zlib MCA read without creating chunks");
+            yes(McaChunkReader.readNbt(tmp, -2, 0).isEmpty(), "unpersisted region remains unknown");
             data[8192+3] = 0;
             Files.write(file, data);
             yes(!ExistingRegionIndex.isPersisted(tmp, -1, 0), "invalid empty chunk payload");
@@ -56,6 +88,6 @@ public final class CoreSelfTest {
             try (var files = Files.list(tmp)) { for (var file : files.toList()) Files.delete(file); }
             Files.delete(tmp);
         }
-        System.out.println("PASS Cartograph common: page scaling, exact-once debits, dimension isolation, MCA existence");
+        System.out.println("PASS Cartograph common: spiral coverage, exact-once debit, dimension isolation, MCA zlib decoding");
     }
 }
