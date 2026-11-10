@@ -341,8 +341,16 @@ public final class AtlasScreen extends Screen {
             boolean active = selection != null && selection.region() == region;
             if (cfg.layer(BOUNDARIES) || active)
                 drawBoundary(g, region.boundary(), true, active ? GOLD : 0x96000000 | region.color());
-            if (cfg.layer(REGIONS) && CartographClient.surveyed(pos.x(), pos.z()))
-                g.drawCenteredString(font, region.name(), (int) screenX(pos.x()), (int) screenZ(pos.z()), CREAM);
+            // Far-away zooms must not be dominated by full-size region text.
+            if (zoomPixels >= 4.5 && cfg.layer(REGIONS)
+                    && CartographClient.surveyed(pos.x(), pos.z())) {
+                float size = (float) Math.clamp(zoomPixels / 8.0, .45, 1);
+                g.pose().pushPose();
+                g.pose().translate(screenX(pos.x()), screenZ(pos.z()), 0);
+                g.pose().scale(size, size, 1);
+                g.drawCenteredString(font, region.name(), 0, 0, CREAM);
+                g.pose().popPose();
+            }
         }
         for (MapNetwork.Page page : CartographClient.cachedPages()) {
             if (cfg.layer(WAYPOINTS)) for (AtlasMarker m : page.markers())
@@ -354,14 +362,18 @@ public final class AtlasScreen extends Screen {
         if (CartographClient.state().compassInstalled()
                 && CartographClient.surveyed(minecraft.player.getBlockX(), minecraft.player.getBlockZ())) {
             double x = screenX(minecraft.player.getX()), z = screenZ(minecraft.player.getZ());
-            arrow(g, x, z, Math.toRadians(minecraft.player.getYRot() + 180), .9);
-            g.pose().pushPose();
-            g.pose().translate(x, z + 7, 0);
-            g.pose().scale(ui, ui, 1);
-            int half = font.width("玩家") / 2 + 4;
-            rounded(g, -half, 0, half * 2 + 1, 11, 3, PANEL);
-            g.drawCenteredString(font, "玩家", 0, 2, CREAM);
-            g.pose().popPose();
+            double iconScale = Math.clamp(zoomPixels / 7.0, .36, 1.0);
+            arrow(g, x, z, Math.toRadians(minecraft.player.getYRot() + 180),
+                    .9 * iconScale);
+            if (zoomPixels >= 5.5) {
+                g.pose().pushPose();
+                g.pose().translate(x, z + 7 * iconScale, 0);
+                g.pose().scale((float) (ui * iconScale), (float) (ui * iconScale), 1);
+                int half = font.width("玩家") / 2 + 4;
+                rounded(g, -half, 0, half * 2 + 1, 11, 3, PANEL);
+                g.drawCenteredString(font, "玩家", 0, 2, CREAM);
+                g.pose().popPose();
+            }
         }
         g.disableScissor();
     }
@@ -369,13 +381,21 @@ public final class AtlasScreen extends Screen {
     private void mapIcon(GuiGraphics g, int x, int z, String glyph, String label, int color, boolean glow) {
         int sx = (int) screenX(x), sy = (int) screenZ(z);
         if (!inside(sx, sy, -40, -40, width + 80, height + 80)) return;
-        if (glow) rounded(g, sx - 8, sy - 8, 17, 17, 5, 0x80ffe4a0);
-        rounded(g, sx - 6, sy - 6, 13, 13, cfg.style == Style.PIXEL ? 2 : 4, 0xfff6e7c6);
-        g.drawCenteredString(font, glyph, sx, sy - 4, 0xff000000 | color);
-        if (zoomPixels >= 1.65) {
+        // Icon size follows the ACTUAL pixel zoom. A constant 13px marker
+        // covered entire map tiles when zoomed far out (see screenshots).
+        float iconScale = (float) Math.clamp(zoomPixels / 7.0, .30, 1.0);
+        g.pose().pushPose();
+        g.pose().translate(sx, sy, 0);
+        g.pose().scale(iconScale, iconScale, 1);
+        if (glow) rounded(g, -8, -8, 17, 17, 5, 0x80ffe4a0);
+        rounded(g, -6, -6, 13, 13, cfg.style == Style.PIXEL ? 2 : 4, 0xfff6e7c6);
+        g.drawCenteredString(font, glyph, 0, -4, 0xff000000 | color);
+        g.pose().popPose();
+        // At distant zoom, labels obscure more terrain than the marker.
+        if (zoomPixels >= 5.5) {
             g.pose().pushPose();
-            g.pose().translate(sx + 8, sy, 0);
-            g.pose().scale(ui, ui, 1);
+            g.pose().translate(sx + 8 * iconScale, sy, 0);
+            g.pose().scale((float) (ui * iconScale), (float) (ui * iconScale), 1);
             String text = shorten(label, 100);
             int w = font.width(text) + 8;
             rounded(g, 0, -7, w, 15, 2, PANEL);
@@ -761,7 +781,7 @@ public final class AtlasScreen extends Screen {
     private int modalW() { return Math.min(486, w() - 24); }
     private int modalH() { return switch (dialog) {
         case SETTINGS -> switch (settingsTab) {
-            case MAP -> 366; case MINI -> 416; case COST -> 381; case CACHE -> 353;
+            case MAP -> 366; case MINI -> 312; case COST -> 381; case CACHE -> 353;
         };
         case MATERIALS -> 366;
         case MARKER -> 291;
@@ -852,43 +872,26 @@ public final class AtlasScreen extends Screen {
                     left, y + 312, MUTED);
         } else if (settingsTab == SettingsTab.MINI) {
             int half = (inner - 7) / 2;
-            // Float and held are visually different on purpose. Every control
-            // is clearly scoped: the preview for either draws the ACTUAL
-            // matching in-game surface, never a different map mode.
-            g.drawString(font, "悬浮小地图（未手持地图册时）", left, y + 80, GOLD, false);
+            g.drawString(font, "小地图与手持地图共用图层、方位及地图风格", left, y + 79, GOLD, false);
             for (int i = 0; i < HUD_FLAGS.length; i++) {
                 int flag = i;
-                check(g, left + i % 2 * (half + 7), y + 97 + i / 2 * 24, half,
+                check(g, left + i % 2 * (half + 7), y + 94 + i / 2 * 24, half,
                         HUD_FLAGS[i], cfg.hud(flag), () -> cfg.toggleHud(flag));
             }
-            g.drawString(font, "形状", left, y + 172, GOLD, false);
-            button(g, left + 33, y + 167, 52, 23, "方形", !cfg.round,
+            g.drawString(font, "悬浮小地图形状", left, y + 170, GOLD, false);
+            button(g, left + 100, y + 165, 52, 23, "方形", !cfg.round,
                     () -> { cfg.round = false; cfg.save(); });
-            button(g, left + 91, y + 167, 52, 23, "圆形", cfg.round,
+            button(g, left + 158, y + 165, 52, 23, "圆形", cfg.round,
                     () -> { cfg.round = true; cfg.save(); });
             g.drawString(font, "缩放 " + String.format(Locale.ROOT, "%.1f×", cfg.hudZoom),
-                    left, y + 204, CREAM, false);
-            slider(g, left + 92, y + 198, inner - 95, (cfg.hudZoom - .5) / 3.5,
-                    n -> cfg.hudZoom = Math.round((.5 + n * 3.5) * 10) / 10.0);
-            button(g, left, y + 224, inner, 23, "预览及调整悬浮小地图位置与大小", true,
-                    () -> minecraft.setScreen(new HudAdjustScreen(this, HudAdjustScreen.Mode.FLOAT)));
-
-            g.drawString(font, "手持古式地图（拿在手中时；独立方形样式）",
-                    left, y + 260, GOLD, false);
-            int[] heldFlags = {ICONS, CARDINALS, COORDS, NORTH_UP};
-            String[] heldNames = {"显示地标图标", "显示方位刻度", "显示坐标", "锁定北方"};
-            for (int i = 0; i < heldFlags.length; i++) {
-                int flag = heldFlags[i];
-                check(g, left + i % 2 * (half + 7), y + 274 + i / 2 * 23, half,
-                        heldNames[i], cfg.held(flag), () -> cfg.toggleHeld(flag));
-            }
-            g.drawString(font, "缩放 " + String.format(Locale.ROOT, "%.1f×", cfg.heldZoom),
-                    left, y + 332, CREAM, false);
-            slider(g, left + 92, y + 326, inner - 95, (cfg.heldZoom - .5) / 3.5,
-                    n -> cfg.heldZoom = Math.round((.5 + n * 3.5) * 10) / 10.0);
-            button(g, left, y + 349, inner, 23, "预览及调整手持地图位置与大小", true,
-                    () -> minecraft.setScreen(new HudAdjustScreen(this, HudAdjustScreen.Mode.HELD)));
-            button(g, left, y + h - 28, 100, 21, "恢复两种地图默认", false, cfg::resetHud);
+                    left, y + 201, CREAM, false);
+            slider(g, left + 92, y + 195, inner - 95, (cfg.hudZoom - .5) / 3.5,
+                    n -> { cfg.hudZoom = Math.round((.5 + n * 3.5) * 10) / 10.0; cfg.save(); });
+            button(g, left, y + 219, inner, 23, "调整悬浮小地图位置与大小", true,
+                    () -> minecraft.setScreen(new HudAdjustScreen(this)));
+            g.drawString(font, shorten("手持地图：主手居中、副手左下；位置不需调整", inner),
+                    left, y + 252, MUTED, false);
+            button(g, left, y + h - 28, 93, 21, "恢复紧凑默认", false, cfg::resetHud);
         } else if (settingsTab == SettingsTab.COST) {
             if (!ratesDirty) {
                 MapNetwork.MaterialRates rates = CartographClient.settings().rates();

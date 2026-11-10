@@ -30,7 +30,7 @@ assert 'sendAddPage' not in panel, 'Extra expand button returned to resource pan
 materials=ui.split('private void materials(',1)[1].split('private String refillAmount(',1)[0]
 assert 'CartographClient.sendAddPage()' in materials
 for token in (
-    'task.next == 8 || task.next == 32',
+    'boolean milestone = done;',
     'MAX_SURVEY_NANOS_PER_TICK',
     'index + 13',
     'Map tile still awaiting saved chunk:',
@@ -40,4 +40,4 @@ assert 'if (page.complete()) {' in client and 'IN_FLIGHT.remove(currentRequest)'
 assert 'MAX_PARALLEL_PAGES = 4' in client
 assert 'if (changedHeights && page.complete()' in client
 assert 'case 6 -> "空地图投入成功' in actions
-print('PASS modal EditBox Z order, feedback, color/marker save, map controls, progressive tile updates')
+print('PASS modal EditBox Z order, feedback, color/marker save, map controls, complete-only tile updates')

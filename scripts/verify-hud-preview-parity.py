@@ -1,35 +1,29 @@
 #!/usr/bin/env python3
-'''Structural contract: in-game and editor use the same HUD layouts/renderers.'''
+'''Hand-map fixed natural pose, float map WYSIWYG and shared style flags.'''
 from pathlib import Path
-root=Path(__file__).resolve().parent.parent
-folder=root/'java/adapters/1.21.1-neoforge/src/main/java/com/wanstu/cartograph'
-read=lambda file:(folder/file).read_text(encoding='utf8')
+root=Path(__file__).resolve().parents[1]
+path=root/'java/adapters/1.21.1-neoforge/src/main/java/com/wanstu/cartograph'
+read=lambda fn:(path/fn).read_text(encoding='utf8')
 hud=read('AtlasHud.java')
-edit=read('HudAdjustScreen.java')
-cfg=read('ClientMapSettings.java')
+screen=read('AtlasScreen.java')
+adjust=read('HudAdjustScreen.java')
 client=read('CartographClient.java')
-settings=read('AtlasScreen.java')
-assert 'static Layout heldLayout(int width, int height)' in hud
-assert 'Layout area = heldLayout(g.guiWidth(), g.guiHeight());' in hud
-assert 'drawWithin(g, editing, true, area);' in hud
-assert 'drawWithin(g, editing, false, layout(g.guiWidth(), g.guiHeight()));' in hud
-assert 'if (held()) AtlasHud.drawHeld(g, true);' in edit
-assert 'else AtlasHud.draw(g, true);' in edit
-assert 'return held() ? AtlasHud.heldLayout(width, height) : AtlasHud.layout(width, height);' in edit
-assert 'mode == Mode.HELD' in edit
-assert 'screen.previewingFloating()' in client
-assert 'if (holdingAtlas()) AtlasHud.drawHeld(event.getGuiGraphics());' in client
-assert 'else if (ClientMapSettings.get().hud(ClientMapSettings.ENABLED))' in client
-for key in ('heldSize','heldX','heldY','heldZoom','heldFlags'):
-    assert f'out.{key} = ' in cfg, f'{key} not loaded'
-    assert f'p.setProperty("{key}"' in cfg, f'{key} not persisted'
-for key in ('hudX', 'hudY', 'hudSize', 'heldX', 'heldY', 'heldSize'):
-    assert f'cfg.{key} =' in edit, f'{key} not editable/restored'
-assert 'private enum SettingsTab { MAP, MINI, COST, CACHE }' in settings
-assert 'new HudAdjustScreen(this, HudAdjustScreen.Mode.FLOAT)' in settings
-assert 'new HudAdjustScreen(this, HudAdjustScreen.Mode.HELD)' in settings
-for key in ('held(ClientMapSettings.ICONS)', 'held(ClientMapSettings.COORDS)',
-            'held(ClientMapSettings.CARDINALS)', 'held(ClientMapSettings.NORTH_UP)'):
-    assert key in hud, f'held toggle missing in actual renderer: {key}'
-assert 'case MAP -> 366; case MINI -> 416;' in settings
-print('PASS FLOAT/HELD preview is actual renderer/layout, per-mode flags/zoom/position/size persisted, cancel restores both')
+settings=read('ClientMapSettings.java')
+assert 'static Layout layout(int width, int height)' in hud
+assert 'AtlasHud.draw(g, true);' in adjust
+assert 'AtlasHud.layout(width, height)' in adjust
+assert 'private static void drawWithin(GuiGraphics g, boolean editing, Layout area)' in hud
+assert 'new HudAdjustScreen(this)' in screen
+assert 'new HudAdjustScreen(this,' not in screen
+assert 'heldX' not in adjust and 'heldY' not in adjust
+assert 'heldSize' not in settings
+assert 'held ?' not in hud
+assert 'drawHeld(event.getGuiGraphics())' in client
+assert 'event.setCanceled(true);' in client
+assert 'cfg.style, CartographClient.revision()' in hud
+assert 'cfg.hud(ClientMapSettings.CARDINALS)' in hud
+assert 'cfg.hud(ClientMapSettings.COORDS)' in hud
+assert 'cfg.hud(ClientMapSettings.NORTH_UP)' in hud
+assert 'cfg.hud(ClientMapSettings.ICONS)' in hud
+assert 'Book' not in adjust
+print('PASS floating preview maps to real layout, hand book is fixed and shares same style/overlay settings')

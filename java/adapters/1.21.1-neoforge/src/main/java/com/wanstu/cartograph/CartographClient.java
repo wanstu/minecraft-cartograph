@@ -254,8 +254,28 @@ public final class CartographClient {
             if (!PAGES.isEmpty() || coverage != null || !IN_FLIGHT.isEmpty() || !QUEUED.isEmpty()) clear();
             return;
         }
-        String dim = dimension(), id = atlasId();
-        if (!lastDimension.equals(dim) || !lastAtlasId.equals(id)) {
+        String dim = dimension();
+        // Dropping the atlas for a moment must not erase the paid map already
+        // in memory. Keep pages bound to their atlas ID, idle while no atlas is
+        // held/in inventory, then reuse them when the same item is picked up.
+        // World/dimension changes are still a hard boundary.
+        if (!lastDimension.equals(dim)) {
+            clear();
+            lastDimension = dim;
+        }
+        if (!hasAtlas()) {
+            // Server cancels map scans when the item leaves inventory. Drop
+            // stale transport jobs, NOT the expensive surveyed pixels and GPU
+            // textures. Same atlas re-picked immediately uses local cache.
+            IN_FLIGHT.clear();
+            QUEUED.clear();
+            STALE.clear();
+            while (OPEN.consumeClick()) { } // no atlas: key cannot open
+            ticks++;
+            return;
+        }
+        String id = atlasId();
+        if (!lastAtlasId.equals(id)) {
             clear();
             lastDimension = dim; lastAtlasId = id;
         }
@@ -500,12 +520,14 @@ public final class CartographClient {
     private static void hideAtlasDuringHudEditing(
             net.neoforged.neoforge.client.event.RenderHandEvent event) {
         Minecraft mc = Minecraft.getInstance();
-        // Floating HUD preview simulates putting the atlas away. Held preview
-        // deliberately leaves the real first-person book/hand model visible,
-        // so it matches the eventual in-game visual footprint.
-        if (mc.screen instanceof HudAdjustScreen screen && screen.previewingFloating()
-                && event.getItemStack().is(CartographMod.ATLAS.get()))
+        // Vanilla would draw a flat inventory icon in front of our custom
+        // book folio. Suppress that item-only first-person render (the
+        // inventory/hotbar icon is unaffected), avoiding duplicate visuals.
+        if (event.getItemStack().is(CartographMod.ATLAS.get())) {
+            // The dynamic open folio is rendered at the correct fixed hand
+            // anchor by AtlasHud. Do not also render the flat inventory icon.
             event.setCanceled(true);
+        }
     }
 
     private static void hud(RenderGuiEvent.Post event) {

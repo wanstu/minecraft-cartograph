@@ -27,12 +27,6 @@ final class ClientMapSettings {
     double hudX = .96, hudY = .06, hudZoom = 1.5;
     int hudSize = 130;
 
-    // The held antique page is a different visual surface from the floating
-    // minimap. Keep its configuration separate, persistent and previewable.
-    int heldFlags = 1 << ICONS;
-    double heldX = 1, heldY = 1, heldZoom = 1.2;
-    int heldSize = 120; // physical screen pixels, not Minecraft GUI pixels
-
 
     static ClientMapSettings get() {
         if (instance == null) instance = load();
@@ -41,7 +35,6 @@ final class ClientMapSettings {
 
     boolean layer(int index) { return (layers & 1 << index) != 0; }
     boolean hud(int index) { return (hudFlags & 1 << index) != 0; }
-    boolean held(int index) { return (heldFlags & 1 << index) != 0; }
 
     void toggleLayer(int index) {
         layers ^= 1 << index;
@@ -50,18 +43,12 @@ final class ClientMapSettings {
     }
 
     void toggleHud(int index) { hudFlags ^= 1 << index; save(); }
-    void toggleHeld(int index) {
-        if (index == ENABLED) return; // held item draws even with float HUD off
-        heldFlags ^= 1 << index; save();
-    }
 
     void resetHud() {
         hudFlags = (1 << ENABLED) | (1 << ICONS);
         round = true;
         hudSize = 130;
         hudX = .96; hudY = .06; hudZoom = 1.5;
-        heldFlags = 1 << ICONS;
-        heldSize = 120; heldX = 1; heldY = 1; heldZoom = 1.2;
         save();
     }
 
@@ -87,11 +74,6 @@ final class ClientMapSettings {
         out.hudY = value(p, "hudY", out.hudY, 0, 1);
         out.hudZoom = value(p, "hudZoom", out.hudZoom, .5, 4);
         out.hudSize = (int) value(p, "hudSize", out.hudSize, 80, 360);
-        out.heldFlags = (int) value(p, "heldFlags", out.heldFlags, 0, 63);
-        out.heldX = value(p, "heldX", out.heldX, 0, 1);
-        out.heldY = value(p, "heldY", out.heldY, 0, 1);
-        out.heldZoom = value(p, "heldZoom", out.heldZoom, .5, 4);
-        out.heldSize = (int) value(p, "heldSize", out.heldSize, 72, 240);
         return out;
     }
 
@@ -111,10 +93,6 @@ final class ClientMapSettings {
         p.setProperty("round", Boolean.toString(round));
         p.setProperty("hudX", Double.toString(hudX)); p.setProperty("hudY", Double.toString(hudY));
         p.setProperty("hudZoom", Double.toString(hudZoom)); p.setProperty("hudSize", Integer.toString(hudSize));
-        p.setProperty("heldFlags", Integer.toString(heldFlags));
-        p.setProperty("heldX", Double.toString(heldX)); p.setProperty("heldY", Double.toString(heldY));
-        p.setProperty("heldZoom", Double.toString(heldZoom));
-        p.setProperty("heldSize", Integer.toString(heldSize));
         try {
             Files.createDirectories(dest.getParent());
             try (var out = Files.newOutputStream(tmp)) { p.store(out, "Cartograph map settings"); }

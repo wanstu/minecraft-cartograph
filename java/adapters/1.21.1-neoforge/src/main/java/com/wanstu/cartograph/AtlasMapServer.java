@@ -264,10 +264,11 @@ public final class AtlasMapServer {
             }
 
             boolean done = task.next >= 64;
-            // Display real partial terrain as soon as 8/32 chunks have
-            // finished. No guessed pixels: unscanned locations remain blank.
-            // Three snapshots per tile balance responsiveness and GPU work.
-            boolean milestone = done || task.next == 8 || task.next == 32;
+            // Only publish a FINISHED page. 8/32-chunk updates caused
+            // moving pale stripes when the camera pans into a newly scanned
+            // area, even though the actual world and paint state were stable.
+            // Server still scans in the background; old pages stay visible.
+            boolean milestone = done;
             if (milestone) {
                 PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
                         task.atlasId, task.dimension, task.pageX, task.pageZ,
