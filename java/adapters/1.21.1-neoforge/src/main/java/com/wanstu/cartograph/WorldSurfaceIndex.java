@@ -51,7 +51,7 @@ public final class WorldSurfaceIndex implements AutoCloseable {
                              long nanos, long submittedRevision) {}
 
     private static final int MAX_CACHED_CHUNKS = 8192;
-    private static final int MAX_PENDING_DISK = 128;
+    private static final int MAX_PENDING_DISK = 256;
     private static final int CACHE_TTL_LOADED = 60;  // 3s: updates even without dedicated block event
     private static final int CACHE_TTL_SAVED = 200;  // 10s: saved disk files are read in background
     private static final int CACHE_TTL_ABSENT = 160; // 8s: newly saved chunks become visible
@@ -66,6 +66,8 @@ public final class WorldSurfaceIndex implements AutoCloseable {
             };
     // Accessed exclusively on the Minecraft server thread.
     private final Set<ChunkKey> inFlight = new HashSet<>();
+    private final Map<ChunkKey, Long> dirtyUntilTick = new HashMap<>();
+    private final Set<ChunkKey> refreshing = new HashSet<>();
     // Workers enqueue only immutable decoded output; no Minecraft world objects.
     private final ConcurrentLinkedQueue<Completed> completed = new ConcurrentLinkedQueue<>();
     private long tick, revision;
@@ -81,13 +83,61 @@ public final class WorldSurfaceIndex implements AutoCloseable {
             worker.setDaemon(true);
             return worker;
         };
-        readers = new ThreadPoolExecutor(3, 3, 30, TimeUnit.SECONDS,
+        readers = new ThreadPoolExecutor(4, 4, 30, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(MAX_PENDING_DISK), factory,
                 new ThreadPoolExecutor.AbortPolicy());
     }
 
     public static WorldSurfaceIndex of(ServerLevel level) {
-        return INSTANCES.computeIfAbsent(level.getServer(), server -> new WorldSurfaceIndex());
+        WorldSurfaceIndex result = INSTANCES.computeIfAbsent(level.getServer(), server -> new WorldSurfaceIndex());
+        if (result.readers.getCorePoolSize() != CartographConfig.workerThreads())
+            result.setWorkerCount(CartographConfig.workerThreads());
+        return result;
+    }
+
+    void setWorkerCount(int n) {
+        int count = Math.clamp(n, 2, 8);
+        if (count > readers.getMaximumPoolSize()) {
+            readers.setMaximumPoolSize(count);
+            readers.setCorePoolSize(count);
+        } else {
+            readers.setCorePoolSize(count);
+            readers.setMaximumPoolSize(count);
+        }
+    }
+
+    /** Called from the server thread on a real surface-affecting block event.
+     * An event often fires BEFORE mutation, so don't resample until later. */
+    void markDirty(ServerLevel level, int cx, int cz) {
+        ChunkKey key = new ChunkKey(level.dimension().location().toString(), cx, cz);
+        if (dirtyUntilTick.getOrDefault(key, 0L) > tick) return;
+        chunks.remove(key);
+        dirtyUntilTick.put(key, tick + 3);
+        // Existing on-disk cache is still valid if the event was cancelled;
+        // live-chunk sampling takes precedence, and MCA timestamps validate on restart.
+    }
+
+    /** Manual bulk refresh. A caller may poll this every tick without
+     * scheduling duplicate reads. Forced disk reads bypass derived cache. */
+    Lookup forceRefresh(ServerLevel level, int cx, int cz) {
+        ChunkKey key = new ChunkKey(level.dimension().location().toString(), cx, cz);
+        if (!refreshing.contains(key)) {
+            refreshing.add(key);
+            chunks.remove(key);
+            dirtyUntilTick.remove(key);
+            if (level.getChunkSource().getChunkNow(cx, cz) == null)
+                submitDisk(key, SurfaceSampler.request(level, cx, cz), true);
+        }
+        if (inFlight.contains(key)) return Lookup.pending();
+        if (!chunks.containsKey(key) && level.getChunkSource().getChunkNow(cx, cz) == null) {
+            // A bounded worker queue may reject the first attempt; retry
+            // using the FORCED MCA read, never fall back to the old disk cache.
+            submitDisk(key, SurfaceSampler.request(level, cx, cz), true);
+            return Lookup.pending();
+        }
+        Lookup now = inspect(level, cx, cz);
+        if (now.state() != State.PENDING) refreshing.remove(key);
+        return now;
     }
 
     /** Material changes can reveal a prepared snapshot without reading the world again. */
@@ -117,6 +167,12 @@ public final class WorldSurfaceIndex implements AutoCloseable {
         String dimension = level.dimension().location().toString();
         ChunkKey key = new ChunkKey(dimension, cx, cz);
         Cached old = chunks.get(key);
+        Long dirtyAt = dirtyUntilTick.get(key);
+        if (dirtyAt != null) {
+            if (tick < dirtyAt) return Lookup.pending();
+            dirtyUntilTick.remove(key);
+            old = null;
+        }
 
         // getChunkNow never loads or generates a chunk. Loaded chunks may change
         // before being saved and are authoritative over old on-disk samples.
@@ -133,6 +189,10 @@ public final class WorldSurfaceIndex implements AutoCloseable {
             if (sample != null) {
                 Snapshot fresh = new Snapshot(Source.LOADED, sample, ++revision);
                 chunks.put(key, new Cached(State.READY, fresh, tick));
+                // Never persist an unsaved in-memory block edit against the
+                // OLD MCA timestamp: after a crash the on-disk world might
+                // revert, and such a derived cache would fabricate terrain.
+                // Saved FULL NBT is the only source of persistent raw tiles.
                 return Lookup.ready(fresh);
             }
         }
@@ -161,6 +221,9 @@ public final class WorldSurfaceIndex implements AutoCloseable {
     }
 
     private boolean submitDisk(ChunkKey key, SurfaceSampler.SavedRequest request) {
+        return submitDisk(key, request, false);
+    }
+    private boolean submitDisk(ChunkKey key, SurfaceSampler.SavedRequest request, boolean force) {
         if (closed || inFlight.contains(key)) return false;
         inFlight.add(key);
         long submittedRevision = revision;
@@ -169,7 +232,7 @@ public final class WorldSurfaceIndex implements AutoCloseable {
                 long start = System.nanoTime();
                 SurfaceSampler.SurfaceTile tile = null;
                 try {
-                    tile = SurfaceSampler.saved(request).orElse(null);
+                    tile = (force ? SurfaceSampler.savedFresh(request) : SurfaceSampler.saved(request)).orElse(null);
                 } finally {
                     // A failure must not strand inFlight forever. Exceptions
                     // are already interpreted as unknown/non-FULL by saved().
@@ -246,6 +309,8 @@ public final class WorldSurfaceIndex implements AutoCloseable {
         readers.shutdownNow();
         completed.clear();
         inFlight.clear();
+        dirtyUntilTick.clear();
+        refreshing.clear();
         chunks.clear();
     }
 }

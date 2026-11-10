@@ -27,7 +27,7 @@ import static com.wanstu.cartograph.ClientMapSettings.*;
 public final class AtlasScreen extends Screen {
     private enum Panel { NONE, LAYERS, MARKERS, REGIONS, ATLAS, INFO }
     private enum Dialog { NONE, SETTINGS, MATERIALS, MARKER, REGION, CONFIRM }
-    private enum SettingsTab { MAP, MINI, COST }
+    private enum SettingsTab { MAP, MINI, COST, CACHE }
     private enum PixelView { PREVIOUS, ENHANCED, SPLIT }
     private enum Menu { NONE, MAP, VERTEX }
 
@@ -81,7 +81,8 @@ public final class AtlasScreen extends Screen {
     private final int[] inputs = new int[4], costs = new int[4];
     private int permanentFlags;
     private int newSheetSideBlocks = MapSheetCoverage.DEFAULT_BLOCKS;
-    private boolean ratesDirty;
+    private boolean ratesDirty, performanceDirty;
+    private int preferredWorkers = 4, preferredBudgetMs = 4;
     private Slider activeSlider;
     private String confirmation = "";
     private Runnable confirmed;
@@ -178,7 +179,10 @@ public final class AtlasScreen extends Screen {
             return;
         }
         int count = 0, x0 = leftPage(), x1 = rightPage(), z0 = topPage(), z1 = bottomPage();
-        for (int ring = 0; ring <= 14 && count < 64; ring++)
+        int maxRing = Math.min(160, Math.max(
+                Math.max(Math.abs(cx - x0), Math.abs(x1 - cx)),
+                Math.max(Math.abs(cz - z0), Math.abs(z1 - cz))));
+        for (int ring = 0; ring <= maxRing && count < 64; ring++)
             for (int z = Math.max(z0, cz - ring); z <= Math.min(z1, cz + ring); z++)
                 for (int x = Math.max(x0, cx - ring); x <= Math.min(x1, cx + ring); x++) {
                     if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) != ring || !CartographClient.covered(x, z)) continue;
@@ -479,6 +483,11 @@ public final class AtlasScreen extends Screen {
             for (int j = 0; j < 4; j++) { inputs[j] = r.input(j); costs[j] = r.cost(j); }
             permanentFlags = r.permanentFlags();
             newSheetSideBlocks = r.pageSideBlocks(); ratesDirty = false;
+            MapNetwork.PerformanceSettings performance = CartographClient.performance();
+            preferredWorkers = performance.workers();
+            preferredBudgetMs = performance.budgetMs();
+            performanceDirty = false;
+            CartographClient.refreshControl(4);
             dialog = Dialog.SETTINGS;
             return;
         }
@@ -522,9 +531,11 @@ public final class AtlasScreen extends Screen {
             hint = "地图册绑定" + CartographClient.dimensionName(c.anchorDimension());
         else if (c != null && !CartographClient.covered(pageX(viewX), pageX(viewZ)))
             hint = "超出地图册范围 · 按 Home 定位";
+        else if (CartographClient.refreshProgress().state() == 1)
+            hint = "后台刷新已测绘区块 · " + CartographClient.refreshProgress().done()
+                    + " / " + CartographClient.refreshProgress().total();
         else if (CartographClient.awaitingPage())
-            hint = "地图读取中 · 已缓存 " + CartographClient.cachedCount()
-                    + " 页 · 待处理 " + CartographClient.queuedCount() + " 页";
+            hint = "正在补齐当前视野 · 已缓存 " + CartographClient.cachedCount() + " 瓦片";
         else if (!CartographClient.state().inkEnabled()) hint = "在地图册材料槽投入墨囊即可揭开地图";
         else hint = status.isBlank() ? "左键详情 · 右键操作 · 拖动平移 · 滚轮缩放 · Home定位" : status;
         int tw = Math.min(w() - 62, Math.max(font.width(main), font.width(hint)) + 20);
@@ -749,7 +760,9 @@ public final class AtlasScreen extends Screen {
 
     private int modalW() { return Math.min(486, w() - 24); }
     private int modalH() { return switch (dialog) {
-        case SETTINGS -> settingsTab == SettingsTab.COST ? 381 : settingsTab == SettingsTab.MAP ? 366 : 276;
+        case SETTINGS -> switch (settingsTab) {
+            case MAP -> 366; case MINI -> 276; case COST -> 381; case CACHE -> 353;
+        };
         case MATERIALS -> 366;
         case MARKER -> 291;
         case REGION -> 235;
@@ -793,11 +806,15 @@ public final class AtlasScreen extends Screen {
 
     private void settings(GuiGraphics g, int x, int y, int w, int h) {
         int inner = w - 28, left = x + 14, third = (inner - 10) / 3;
-        String[] tabs = {"大地图 / 风格", "小地图设置", "耗材与倍率"};
+        String[] tabs = {"大地图", "小地图", "耗材倍率", "缓存与性能"};
+        int tabWidth = (inner - 15) / 4;
         for (int i = 0; i < tabs.length; i++) {
             SettingsTab t = SettingsTab.values()[i];
-            button(g, left + i * (third + 5), y + 46, third, 23, tabs[i], settingsTab == t,
-                    () -> settingsTab = t);
+            button(g, left + i * (tabWidth + 5), y + 46, tabWidth, 23, tabs[i], settingsTab == t,
+                    () -> {
+                        settingsTab = t;
+                        if (t == SettingsTab.CACHE) CartographClient.refreshControl(4);
+                    });
         }
         if (settingsTab == SettingsTab.MAP) {
             g.drawString(font, "地图风格", left, y + 81, GOLD);
@@ -849,7 +866,7 @@ public final class AtlasScreen extends Screen {
             button(g, left, y + 216, inner, 23, "进入游戏画面调整位置与大小", true,
                     () -> minecraft.setScreen(new HudAdjustScreen(this)));
             button(g, left, y + h - 30, 79, 21, "恢复默认设置", false, cfg::resetHud);
-        } else {
+        } else if (settingsTab == SettingsTab.COST) {
             if (!ratesDirty) {
                 MapNetwork.MaterialRates rates = CartographClient.settings().rates();
                 for (int i = 0; i < 4; i++) { inputs[i] = rates.input(i); costs[i] = rates.cost(i); }
@@ -870,6 +887,49 @@ public final class AtlasScreen extends Screen {
                         (permanentFlags & 1 << i) != 0,
                         editable ? () -> { permanentFlags ^= 1 << slot; ratesDirty = true; } : null);
             }
+        } else {
+            boolean editable = CartographClient.performance().editable();
+            g.drawString(font, "后台磁盘解析线程数", left, y + 83, GOLD, false);
+            int[] threads = {2, 4, 8};
+            for (int i = 0; i < threads.length; i++) {
+                int value = threads[i], bx = left + i * (third + 5);
+                button(g, bx, y + 98, third, 23, value + " 线程",
+                        preferredWorkers == value,
+                        editable ? () -> { preferredWorkers = value; performanceDirty = true; } : null);
+            }
+            g.drawString(font, "游戏主线程扫描预算（不包括后台线程）", left, y + 135, GOLD, false);
+            int[] budgets = {2, 4, 8};
+            String[] names = {"低占用", "均衡", "快速"};
+            for (int i = 0; i < budgets.length; i++) {
+                int budget = budgets[i], bx = left + i * (third + 5);
+                button(g, bx, y + 150, third, 23, names[i] + " " + budget + "ms",
+                        preferredBudgetMs == budget,
+                        editable ? () -> { preferredBudgetMs = budget; performanceDirty = true; } : null);
+            }
+            MapNetwork.RefreshProgress progress = CartographClient.refreshProgress();
+            String stateLabel = switch (progress.state()) {
+                case 1 -> "正在刷新"; case 2 -> "已暂停";
+                case 3 -> "已完成"; case 4 -> "已取消"; default -> "未开始";
+            };
+            g.drawString(font, "刷新已测绘区域（无需墨水、纸值或重新解锁）", left, y + 193, GOLD, false);
+            g.drawString(font, shorten("任务：" + stateLabel + " · 已完成 " + progress.done()
+                            + " / " + progress.total() + " 区块", inner),
+                    left, y + 212, CREAM, false);
+            int fill = progress.total() == 0 ? 0 :
+                    (int) Math.round((inner - 6) * progress.done() / (double) progress.total());
+            rounded(g, left, y + 229, inner, 8, 3, CONTROL);
+            rounded(g, left, y + 229, fill, 8, 3, GOLD);
+            button(g, left, y + 245, inner, 23, "刷新加载全部已测绘地图", false,
+                    () -> CartographClient.refreshControl(0));
+            int half = (inner - 8) / 2;
+            boolean running = progress.state() == 1, paused = progress.state() == 2;
+            button(g, left, y + 273, half, 23, running ? "暂停刷新" : "继续刷新", false,
+                    running || paused ? () -> CartographClient.refreshControl(running ? 1 : 2) : null);
+            button(g, left + half + 8, y + 273, half, 23, "取消任务", false,
+                    running || paused ? () -> CartographClient.refreshControl(3) : null);
+            g.drawString(font, shorten("失败 / 缺失 " + progress.failed()
+                            + " · 显示旧缓存，后台并行更新实际世界", inner),
+                    left, y + 304, MUTED, false);
         }
         button(g, x + w - 85, y + h - 30, 71, 21, "完成", true, this::closeDialog);
     }
@@ -1131,6 +1191,8 @@ public final class AtlasScreen extends Screen {
                 CartographClient.sendSettings(new MapNetwork.MaterialRates(costs[0], costs[1], costs[2], costs[3],
                         inputs[0], inputs[1], inputs[2], inputs[3], permanentFlags, newSheetSideBlocks));
             }
+            if (performanceDirty && CartographClient.performance().editable())
+                CartographClient.sendPerformance(preferredWorkers, preferredBudgetMs);
             cfg.save();
         }
         if (dialog == Dialog.REGION) discardDraft();

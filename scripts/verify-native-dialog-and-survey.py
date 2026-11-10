@@ -36,7 +36,8 @@ for token in (
     'Map tile still awaiting saved chunk:',
 ):
     assert token in server, 'Missing survey-progress contract: '+token
-assert 'if (page.complete()) inFlight = null;' in client
+assert 'if (page.complete()) {' in client and 'IN_FLIGHT.remove(currentRequest)' in client
+assert 'MAX_PARALLEL_PAGES = 4' in client
 assert 'if (changedHeights && page.complete()' in client
 assert 'case 6 -> "空地图投入成功' in actions
 print('PASS modal EditBox Z order, feedback, color/marker save, map controls, progressive tile updates')

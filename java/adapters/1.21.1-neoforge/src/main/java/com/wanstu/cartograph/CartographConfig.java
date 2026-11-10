@@ -16,6 +16,10 @@ public final class CartographConfig {
     private static final ModConfigSpec.IntValue PAGE_SIDE =
             BUILDER.defineInRange("coverage.blocks_per_blank_map", MapSheetCoverage.DEFAULT_BLOCKS,
                     MapSheetCoverage.MIN_BLOCKS, MapSheetCoverage.MAX_BLOCKS);
+    private static final ModConfigSpec.IntValue WORKERS =
+            BUILDER.defineInRange("performance.disk_reader_threads", 4, 2, 8);
+    private static final ModConfigSpec.IntValue BUDGET =
+            BUILDER.defineInRange("performance.server_budget_ms", 4, 2, 8);
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     private static ModConfigSpec.DoubleValue[] multipliers(String group, double fallback) {
@@ -28,6 +32,13 @@ public final class CartographConfig {
         ModConfigSpec.BooleanValue[] out = new ModConfigSpec.BooleanValue[RESOURCES.length];
         for (int i = 0; i < out.length; i++) out[i] = BUILDER.define("permanent." + RESOURCES[i], false);
         return out;
+    }
+    static int workerThreads() { return WORKERS.get(); }
+    static int mainThreadBudgetMs() { return BUDGET.get(); }
+    static void setPerformance(int workers, int budget) {
+        WORKERS.set(Math.clamp(workers, 2, 8));
+        BUDGET.set(Math.clamp(budget, 2, 8));
+        SPEC.save();
     }
     static int pageSideBlocks() {
         int configured = PAGE_SIDE.get();

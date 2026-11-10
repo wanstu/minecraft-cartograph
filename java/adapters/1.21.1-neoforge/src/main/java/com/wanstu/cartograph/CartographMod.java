@@ -13,6 +13,8 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.level.BlockEvent;
+import net.minecraft.server.level.ServerLevel;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -45,10 +47,39 @@ public final class CartographMod {
         modBus.addListener(MapNetwork::register);
         NeoForge.EVENT_BUS.addListener(WorldSurfaceIndex::tick);
         NeoForge.EVENT_BUS.addListener(WorldSurfaceIndex::serverStopped);
+        NeoForge.EVENT_BUS.addListener(this::blockBroken);
+        NeoForge.EVENT_BUS.addListener(this::blockPlaced);
+        NeoForge.EVENT_BUS.addListener(this::fluidChanged);
+        NeoForge.EVENT_BUS.addListener(this::neighborChanged);
         NeoForge.EVENT_BUS.addListener(AtlasMapServer::tick);
+        NeoForge.EVENT_BUS.addListener(MapRefreshJobs::tick);
+        NeoForge.EVENT_BUS.addListener(MapRefreshJobs::stopped);
+        NeoForge.EVENT_BUS.addListener(AtlasMapServer::stopped);
         NeoForge.EVENT_BUS.addListener(AtlasExports::tick);
 
         container.registerConfig(ModConfig.Type.SERVER, CartographConfig.SPEC);
+    }
+
+    private static void dirtySurface(net.minecraft.world.level.LevelAccessor world,
+                                     net.minecraft.core.BlockPos pos) {
+        if (!(world instanceof ServerLevel level)) return;
+        WorldSurfaceIndex.of(level).markDirty(level, pos.getX() >> 4, pos.getZ() >> 4);
+        AtlasMapServer.markSurfaceChanged(level, pos.getX() >> 4, pos.getZ() >> 4);
+    }
+    private void blockBroken(BlockEvent.BreakEvent event) {
+        if (!event.isCanceled()) dirtySurface(event.getLevel(), event.getPos());
+    }
+    private void blockPlaced(BlockEvent.EntityPlaceEvent event) {
+        if (!event.isCanceled()) dirtySurface(event.getLevel(), event.getPos());
+    }
+    private void fluidChanged(BlockEvent.FluidPlaceBlockEvent event) {
+        if (!event.isCanceled()) dirtySurface(event.getLevel(), event.getPos());
+    }
+
+    /** Neighbor notifications also cover setBlock-driven terrain edits from
+     * other mods and natural changes. Dirty samples are coalesced per chunk. */
+    private void neighborChanged(BlockEvent.NeighborNotifyEvent event) {
+        if (!event.isCanceled()) dirtySurface(event.getLevel(), event.getPos());
     }
 
     private void creativeTab(BuildCreativeModeTabContentsEvent event) {

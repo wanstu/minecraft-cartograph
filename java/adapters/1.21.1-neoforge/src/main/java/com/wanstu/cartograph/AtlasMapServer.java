@@ -23,8 +23,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Up to six sampled chunks per server tick, with a 2.5 ms time budget.
- * Does not load or generate any chunks. A viewer may keep one pending page;
+ * Bounded incremental multi-page service: up to four independent pages
+ * per player can advance concurrently, under a shared main-thread budget.
+ * Does not load or generate any chunks;
  * requests cannot flood a server with scans, and only covered pages are
  * eligible for a response.
  */
@@ -34,8 +35,13 @@ public final class AtlasMapServer {
     // of minimum waiting for each map at ordinary map zoom.
     private static final int MAX_WORK_PER_TICK = 16;
     private static final long MAX_SURVEY_NANOS_PER_TICK = 4_000_000L;
-    private static final Map<UUID, Pending> PENDING = new HashMap<>();
-    private static final ArrayDeque<UUID> ORDER = new ArrayDeque<>();
+    private static final int MAX_PAGES_PER_VIEWER = 4;
+    private record PageKey(String dimension, int x, int z) {}
+    private static final Map<UUID, Map<PageKey, Pending>> PENDING = new HashMap<>();
+    private static final ArrayDeque<Pending> ORDER = new ArrayDeque<>();
+    // Several block-change events within one tick are coalesced per page.
+    private record Changed(String dimension, int pageX, int pageZ) {}
+    private static final Map<Changed, Integer> CHANGED = new HashMap<>();
     private static final Map<UUID, Long> LAST_DIAGNOSTIC = new HashMap<>();
     private static int ticks;
 
@@ -86,6 +92,7 @@ public final class AtlasMapServer {
         AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
         AtlasWorldData.Entry entry = data.access(stack);
         PacketDistributor.sendToPlayer(player, AtlasActions.settings(player));
+        PacketDistributor.sendToPlayer(player, AtlasActions.performance(player));
         String dim = player.serverLevel().dimension().location().toString();
         if (!entry.anchored()) {
             var origin = AtlasPage.atBlock(dim, player.getBlockX(), player.getBlockZ());
@@ -105,51 +112,94 @@ public final class AtlasMapServer {
                     List.of(), List.of()));
             return;
         }
-        Pending old = PENDING.get(player.getUUID());
-        if (old != null) {
-            // Never reset an incomplete page when a new request arrives; doing
-            // so can starve scans indefinitely on busy/unresponsive clients.
-            if (!old.dimension.equals(dim) || !old.atlasId.equals(entry.state().id())
-                    || old.pageX != request.pageX() || old.pageZ != request.pageZ()) {
-                player.displayClientMessage(
-                        Component.literal("绘图师：上一页正在测绘，请稍候"), true);
-            }
-            return;
-        }
-        Pending next = new Pending(entry.state().id(),
+        Map<PageKey, Pending> slots =
+                PENDING.computeIfAbsent(player.getUUID(), ignore -> new HashMap<>());
+        PageKey page = new PageKey(dim, request.pageX(), request.pageZ());
+        if (slots.containsKey(page)) return;
+        if (slots.size() >= MAX_PAGES_PER_VIEWER) return;
+        Pending next = new Pending(player.getUUID(), entry.state().id(),
                 request.pageX(), request.pageZ(), dim, request.cachedOnly());
-        PENDING.put(player.getUUID(), next);
-        ORDER.addLast(player.getUUID());
+        slots.put(page, next);
+        ORDER.addLast(next);
+    }
+
+    static void markSurfaceChanged(net.minecraft.server.level.ServerLevel level, int cx, int cz) {
+        CHANGED.put(new Changed(level.dimension().location().toString(),
+                Math.floorDiv(cx, 8), Math.floorDiv(cz, 8)), ticks + 4);
+    }
+
+    /** Changed block events only invalidate pixels: the survey/ink ledger is not touched. */
+    private static void sendChangedPages(MinecraftServer server) {
+        Iterator<Map.Entry<Changed, Integer>> it = CHANGED.entrySet().iterator();
+        int sent = 0;
+        while (it.hasNext() && sent < 32) {
+            var e = it.next();
+            if (ticks < e.getValue()) continue;
+            Changed changed = e.getKey();
+            it.remove();
+            for (ServerPlayer viewer : server.getPlayerList().getPlayers()) {
+                if (!viewer.serverLevel().dimension().location().toString().equals(changed.dimension())) continue;
+                ItemStack atlas = findAtlas(viewer);
+                if (atlas.isEmpty()) continue;
+                AtlasWorldData.Entry entry = AtlasWorldData.get(viewer.serverLevel()).access(atlas);
+                if (entry.isCovered(changed.dimension(), changed.pageX(), changed.pageZ()))
+                    PacketDistributor.sendToPlayer(viewer,
+                            new MapNetwork.InvalidatePage(entry.state().id(), changed.dimension(),
+                                    changed.pageX(), changed.pageZ()));
+            }
+            sent++;
+        }
+    }
+
+    private static void finish(Pending task) {
+        Map<PageKey, Pending> perViewer = PENDING.get(task.viewer);
+        if (perViewer != null) {
+            perViewer.remove(new PageKey(task.dimension, task.pageX, task.pageZ));
+            if (perViewer.isEmpty()) PENDING.remove(task.viewer);
+        }
+    }
+
+    public static void stopped(net.neoforged.neoforge.event.server.ServerStoppedEvent event) {
+        PENDING.clear();
+        ORDER.clear();
+        CHANGED.clear();
+        LAST_DIAGNOSTIC.clear();
+        ticks = 0;
     }
 
     public static void tick(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
-        if (++ticks % 600 == 0)
+        ticks++;
+        sendChangedPages(server);
+        if (ticks % 600 == 0)
             LAST_DIAGNOSTIC.keySet().removeIf(id -> server.getPlayerList().getPlayer(id) == null);
         // A handful of completed snapshots per tick makes initial 512x512
         // sheets practical, while a wall-clock budget protects game TPS.
         // Never hold region FileChannels on the main thread.
         long tickStart = System.nanoTime();
         for (int step = 0; step < MAX_WORK_PER_TICK && !ORDER.isEmpty(); step++) {
-            if (step >= 2 && System.nanoTime() - tickStart >= MAX_SURVEY_NANOS_PER_TICK) break;
-            UUID viewer = ORDER.removeFirst();
-            Pending task = PENDING.get(viewer);
-            if (task == null) continue;
+            if (step >= 2 && System.nanoTime() - tickStart >=
+                    CartographConfig.mainThreadBudgetMs() * 1_000_000L) break;
+            Pending task = ORDER.removeFirst();
+            UUID viewer = task.viewer;
+            Map<PageKey, Pending> existing = PENDING.get(viewer);
+            if (existing == null || existing.get(
+                    new PageKey(task.dimension, task.pageX, task.pageZ)) != task) continue;
             ServerPlayer player = server.getPlayerList().getPlayer(viewer);
             if (player == null || !player.serverLevel().dimension()
                     .location().toString().equals(task.dimension)) {
-                PENDING.remove(viewer);
+                finish(task);
                 continue;
             }
             ItemStack atlas = findAtlas(player, task.atlasId);
             if (atlas.isEmpty()) {
-                PENDING.remove(viewer);
+                finish(task);
                 continue;
             }
             AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
             AtlasWorldData.Entry entry = data.access(atlas);
             if (!entry.isCovered(task.dimension, task.pageX, task.pageZ)) {
-                PENDING.remove(viewer);
+                finish(task);
                 continue;
             }
 
@@ -180,7 +230,7 @@ public final class AtlasMapServer {
                             viewer, task.pageX, task.pageZ, task.next,
                             indexer.pendingChunks(), indexer.diskQueueSize(), indexer.completedScans());
                 }
-                ORDER.addLast(viewer);
+                ORDER.addLast(task);
                 continue;
             }
             task.next++;
@@ -251,12 +301,13 @@ public final class AtlasMapServer {
                         LAST_DIAGNOSTIC.put(viewer, now);
                     }
                 }
-                PENDING.remove(viewer);
-            } else ORDER.addLast(viewer);
+                finish(task);
+            } else ORDER.addLast(task);
         }
     }
 
     private static final class Pending {
+        final UUID viewer;
         final String atlasId;
         final int pageX, pageZ;
         final String dimension;
@@ -269,7 +320,8 @@ public final class AtlasMapServer {
         int startedAtTick = ticks, lastDiagnosticTick = ticks;
         long surveyedChunks, coloredChunks;
         final boolean cachedOnly;
-        Pending(String atlasId, int pageX, int pageZ, String dimension, boolean cachedOnly) {
+        Pending(UUID viewer, String atlasId, int pageX, int pageZ, String dimension, boolean cachedOnly) {
+            this.viewer = viewer;
             this.atlasId = atlasId; this.pageX = pageX; this.pageZ = pageZ; this.dimension = dimension;
             this.cachedOnly = cachedOnly;
             Arrays.fill(heights, TerrainRelief.UNKNOWN_HEIGHT);

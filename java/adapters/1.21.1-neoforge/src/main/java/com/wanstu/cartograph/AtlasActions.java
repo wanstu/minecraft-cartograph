@@ -150,6 +150,23 @@ public final class AtlasActions {
         return new MapNetwork.CostSettings(CartographConfig.rates(), mayConfigure(player));
     }
 
+    public static MapNetwork.PerformanceSettings performance(ServerPlayer player) {
+        return new MapNetwork.PerformanceSettings(
+                CartographConfig.workerThreads(), CartographConfig.mainThreadBudgetMs(), mayConfigure(player));
+    }
+    public static void updatePerformance(ServerPlayer player, MapNetwork.SetPerformance req) {
+        if (!mayConfigure(player)) {
+            reply(player, false, "没有权限修改后台线程和性能设置"); return;
+        }
+        if (req.workers() < 2 || req.workers() > 8 || req.budgetMs() < 2 || req.budgetMs() > 8) {
+            reply(player, false, "线程数和主线程预算超出安全范围"); return;
+        }
+        CartographConfig.setPerformance(req.workers(), req.budgetMs());
+        WorldSurfaceIndex.of(player.serverLevel()).setWorkerCount(req.workers());
+        PacketDistributor.sendToPlayer(player, performance(player));
+        reply(player, true, "后台地图扫描设置已保存");
+    }
+
     public static void updateCosts(ServerPlayer player, MapNetwork.SetCostSettings request) {
         if (!mayConfigure(player)) { reply(player, false, "没有权限修改服务器设置"); return; }
         if (!allowed(player, OTHER_ACTIONS)) { reply(player, false, "操作过快，请稍后再试"); return; }

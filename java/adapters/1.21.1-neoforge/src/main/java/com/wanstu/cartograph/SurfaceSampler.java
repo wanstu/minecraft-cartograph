@@ -92,7 +92,20 @@ public final class SurfaceSampler {
      * conversion use captured immutable parameters; never touch ServerLevel.
      */
     public static Optional<SurfaceTile> saved(SavedRequest request) {
+        return readFromDisk(request, false);
+    }
+
+    /** Explicit full refresh bypasses derived caches, never ignores saved chunks. */
+    public static Optional<SurfaceTile> savedFresh(SavedRequest request) {
+        return readFromDisk(request, true);
+    }
+
+    private static Optional<SurfaceTile> readFromDisk(SavedRequest request, boolean force) {
+        SurfaceTile existing = force ? null : SurfaceDiskStore.read(request);
+        if (existing != null) return Optional.of(existing);
         try {
+            int beforeStamp = McaChunkReader.chunkTimestamp(
+                    request.regionDir(), request.chunkX(), request.chunkZ());
             Optional<byte[]> raw = McaChunkReader.readNbt(
                     request.regionDir(), request.chunkX(), request.chunkZ());
             if (raw.isEmpty()) return Optional.empty();
@@ -103,8 +116,12 @@ public final class SurfaceSampler {
                     return Optional.empty();
                 if (nbt.getInt("xPos") != request.chunkX()
                         || nbt.getInt("zPos") != request.chunkZ()) return Optional.empty();
-                return Optional.ofNullable(sampleSaved(
-                        request.minBuildHeight(), request.worldHeight(), nbt));
+                SurfaceTile tile = sampleSaved(
+                        request.minBuildHeight(), request.worldHeight(), nbt);
+                if (McaChunkReader.chunkTimestamp(request.regionDir(),
+                        request.chunkX(), request.chunkZ()) != beforeStamp) return Optional.empty();
+                if (tile != null) SurfaceDiskStore.write(request, tile);
+                return Optional.ofNullable(tile);
             }
         } catch (Exception malformedOrUnsupportedChunk) {
             // Unsupported/partial save is NOT generated terrain; never predict.

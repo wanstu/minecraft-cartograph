@@ -20,6 +20,56 @@ import java.util.List;
 public final class MapNetwork {
     private MapNetwork() {}
 
+    /** Notification of a world edit; client keeps old pixels until refreshed. */
+    /** Admin-adjustable I/O workers and bounded main-thread scan budget. */
+    public record PerformanceSettings(int workers, int budgetMs, boolean editable)
+            implements CustomPacketPayload {
+        public static final Type<PerformanceSettings> TYPE = new Type<>(id("performance_settings"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, PerformanceSettings> CODEC = StreamCodec.of(
+                (buf, v) -> {
+                    buf.writeVarInt(v.workers); buf.writeVarInt(v.budgetMs); buf.writeBoolean(v.editable);
+                }, buf -> new PerformanceSettings(buf.readVarInt(), buf.readVarInt(), buf.readBoolean()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+    public record SetPerformance(int workers, int budgetMs) implements CustomPacketPayload {
+        public static final Type<SetPerformance> TYPE = new Type<>(id("set_performance"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, SetPerformance> CODEC = StreamCodec.of(
+                (buf, v) -> { buf.writeVarInt(v.workers); buf.writeVarInt(v.budgetMs); },
+                buf -> new SetPerformance(buf.readVarInt(), buf.readVarInt()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+    /** op 0=start, 1=pause, 2=resume, 3=cancel, 4=query current status. */
+    public record RefreshControl(String atlasId, int op) implements CustomPacketPayload {
+        public static final Type<RefreshControl> TYPE = new Type<>(id("refresh_control"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, RefreshControl> CODEC = StreamCodec.of(
+                (buf, v) -> { buf.writeUtf(v.atlasId, 64); buf.writeVarInt(v.op); },
+                buf -> new RefreshControl(buf.readUtf(64), buf.readVarInt()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+    /** Stable job progress: total is frozen at start, never the dynamic tile queue. */
+    public record RefreshProgress(int state, int done, int total, int failed) implements CustomPacketPayload {
+        public static final Type<RefreshProgress> TYPE = new Type<>(id("refresh_progress"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, RefreshProgress> CODEC = StreamCodec.of(
+                (buf, v) -> {
+                    buf.writeVarInt(v.state); buf.writeVarInt(v.done);
+                    buf.writeVarInt(v.total); buf.writeVarInt(v.failed);
+                }, buf -> new RefreshProgress(buf.readVarInt(), buf.readVarInt(),
+                        buf.readVarInt(), buf.readVarInt()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    public record InvalidatePage(String atlasId, String dimension, int pageX, int pageZ)
+            implements CustomPacketPayload {
+        public static final Type<InvalidatePage> TYPE = new Type<>(id("invalidate_page"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, InvalidatePage> CODEC = StreamCodec.of(
+                (buf, v) -> {
+                    buf.writeUtf(v.atlasId, 64); buf.writeUtf(v.dimension, 128);
+                    buf.writeInt(v.pageX); buf.writeInt(v.pageZ);
+                }, buf -> new InvalidatePage(buf.readUtf(64), buf.readUtf(128),
+                        buf.readInt(), buf.readInt()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     public record Request(String atlasId, int pageX, int pageZ, boolean cachedOnly) implements CustomPacketPayload {
         public static final Type<Request> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "request_page"));
@@ -334,7 +384,7 @@ public final class MapNetwork {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("12");
+        var registrar = event.registrar("14");
         registrar.playToServer(RequestAnnotations.TYPE, RequestAnnotations.CODEC, (req, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.listAnnotations(player, req.atlasId());
@@ -346,6 +396,28 @@ public final class MapNetwork {
         registrar.playToClient(Annotations.TYPE, Annotations.CODEC, (annotations, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.acceptAnnotations(annotations);
+                }));
+        registrar.playToClient(InvalidatePage.TYPE, InvalidatePage.CODEC, (item, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.invalidatePage(item);
+                }));
+        registrar.playToServer(SetPerformance.TYPE, SetPerformance.CODEC, (req, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (ctx.player() instanceof ServerPlayer player)
+                        AtlasActions.updatePerformance(player, req);
+                }));
+        registrar.playToClient(PerformanceSettings.TYPE, PerformanceSettings.CODEC, (v, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.acceptPerformance(v);
+                }));
+        registrar.playToServer(RefreshControl.TYPE, RefreshControl.CODEC, (req, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (ctx.player() instanceof ServerPlayer player)
+                        MapRefreshJobs.control(player, req);
+                }));
+        registrar.playToClient(RefreshProgress.TYPE, RefreshProgress.CODEC, (v, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.acceptRefreshProgress(v);
                 }));
         registrar.playToServer(Request.TYPE, Request.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {

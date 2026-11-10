@@ -55,6 +55,12 @@ public final class AtlasWorldData extends SavedData {
         }
         public String anchorDimension() { return anchorDimension; }
         public int surveyedCount() { return ledger.surveyedCount(); }
+        public java.util.Set<SurveyLedger.ChunkKey> surveyedKeys(String dimension) {
+            java.util.Set<SurveyLedger.ChunkKey> keys = new java.util.HashSet<>();
+            for (SurveyLedger.ChunkKey k : ledger.snapshot().surveyed())
+                if (k.dimension().equals(dimension)) keys.add(k);
+            return java.util.Set.copyOf(keys);
+        }
         public int coloredCount() { return ledger.colorizedCount(); }
         public boolean isColored(SurveyLedger.ChunkKey key) {
             return ledger.isColored(key);

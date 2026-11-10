@@ -25,6 +25,30 @@ public final class McaChunkReader {
     private static final int MAX_COMPRESSED_BYTES = 2 * 1024 * 1024;
     private McaChunkReader() {}
 
+    /** Last saved chunk revision from the MCA header (4 bytes per chunk).
+     * The region file may change without this particular chunk changing. */
+    public static int chunkTimestamp(Path regionDir, int chunkX, int chunkZ) throws IOException {
+        int rx = Math.floorDiv(chunkX, 32), rz = Math.floorDiv(chunkZ, 32);
+        int lx = Math.floorMod(chunkX, 32), lz = Math.floorMod(chunkZ, 32);
+        Path region = regionDir.resolve("r." + rx + "." + rz + ".mca");
+        if (!Files.isRegularFile(region)) return 0;
+        try (FileChannel ch = FileChannel.open(region, StandardOpenOption.READ)) {
+            if (ch.size() < SECTOR * 2L) return 0;
+            long index = (long) (lz * 32 + lx) * 4;
+            ByteBuffer header = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
+            if (ch.read(header, index) != 4) return 0;
+            header.flip();
+            int location = header.getInt();
+            // No allocated region sector: old surface tiles must not resurrect
+            // chunks that were removed from the world file.
+            if ((location >>> 8) < 2 || (location & 255) == 0) return 0;
+            ByteBuffer stamp = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
+            if (ch.read(stamp, SECTOR + index) != 4) return 0;
+            stamp.flip();
+            return stamp.getInt();
+        }
+    }
+
     public static Optional<byte[]> readNbt(Path regionDir, int chunkX, int chunkZ) throws IOException {
         int rx = Math.floorDiv(chunkX, 32), rz = Math.floorDiv(chunkZ, 32);
         int lx = Math.floorMod(chunkX, 32), lz = Math.floorMod(chunkZ, 32);

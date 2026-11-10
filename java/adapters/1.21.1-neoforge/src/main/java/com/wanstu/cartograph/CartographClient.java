@@ -36,19 +36,26 @@ public final class CartographClient {
     // 64 chunks per tile every 10 seconds just because the GUI is visible.
     // Enough native 128x128 tiles to cover the 1920x1080 map at ordinary
     // zoom without evicting tiles that are still visible on the screen.
-    private static final int CACHE_LIMIT = 192;
+    private static final int CACHE_LIMIT = 1400;
+    private static final int GPU_TEXTURE_LIMIT = 140;
+    private static final int MAX_PARALLEL_PAGES = 4;
     private static final int SURFACE_RECHECK_TICKS = 12000; // 10 min for fully drawn tiles
     private static final LinkedHashMap<CacheKey, Entry> PAGES = new LinkedHashMap<>(32, 0.75f, true);
     private static final LinkedHashMap<CacheKey, Boolean> QUEUED = new LinkedHashMap<>();
     private static final Set<CacheKey> REDRAW = new LinkedHashSet<>();
-    private static CacheKey inFlight;
+    private static final LinkedHashMap<CacheKey, Integer> IN_FLIGHT = new LinkedHashMap<>();
+    private static final Set<CacheKey> STALE = new LinkedHashSet<>();
     private static ItemStack previousAtlas = ItemStack.EMPTY;
     private static String lastDimension = "", lastAtlasId = "";
     private static MapNetwork.Page coverage;
     private static List<NamedRegion> regions = List.of();
     private static List<AtlasMarker> markers = List.of();
     private static MapNetwork.CostSettings settings = new MapNetwork.CostSettings(MapNetwork.MaterialRates.DEFAULT, false);
-    private static int ticks, sentAt, textureRevision;
+    private static MapNetwork.PerformanceSettings performance =
+            new MapNetwork.PerformanceSettings(4, 4, false);
+    private static MapNetwork.RefreshProgress refresh =
+            new MapNetwork.RefreshProgress(0, 0, 0, 0);
+    private static int ticks, textureRevision;
 
     private record CacheKey(String atlasId, String dimension, int px, int pz) {}
     private record Entry(MapNetwork.Page page, DynamicTexture texture, ResourceLocation id, float[] light, int updated) {}
@@ -79,6 +86,12 @@ public final class CartographClient {
     }
 
     public static boolean hasAtlas() { return !currentAtlas().isEmpty(); }
+    /** Suppress the floating minimap while the player visibly holds the atlas. */
+    static boolean holdingAtlas() {
+        var player = Minecraft.getInstance().player;
+        return player != null && (player.getMainHandItem().is(CartographMod.ATLAS.get())
+                || player.getOffhandItem().is(CartographMod.ATLAS.get()));
+    }
 
     public static void open() {
         Minecraft mc = Minecraft.getInstance();
@@ -100,15 +113,37 @@ public final class CartographClient {
     }
 
     private static CacheKey key(int x, int z) { return new CacheKey(atlasId(), dimension(), x, z); }
+    private static String worldNamespace() {
+        Minecraft mc = Minecraft.getInstance();
+        String key;
+        if (mc.getSingleplayerServer() != null)
+            key = "local:" + mc.getSingleplayerServer()
+                    .getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .toAbsolutePath().normalize();
+        else if (mc.getCurrentServer() != null)
+            key = "remote:" + mc.getCurrentServer().ip;
+        else
+            key = "unknown:" + (mc.level == null ? "" : mc.level.dimension().location());
+        return ClientPageStore.namespace(key);
+    }
+    private static ClientPageStore.Key diskKey(CacheKey k) {
+        return new ClientPageStore.Key(worldNamespace(), k.atlasId(), k.dimension(), k.px(), k.pz());
+    }
 
     public static MapNetwork.Page page(int x, int z) {
         Entry e = PAGES.get(key(x, z)); return e == null ? null : e.page();
     }
     static ResourceLocation texture(int x, int z) {
-        Entry e = PAGES.get(key(x, z)); return e == null ? null : e.id();
+        CacheKey k = key(x, z);
+        Entry e = PAGES.get(k);
+        if (e != null && e.id() == null && drawable(e.page())) REDRAW.add(k);
+        return e == null ? null : e.id();
     }
     static NativeImage image(int x, int z) {
-        Entry e = PAGES.get(key(x, z)); return e == null || e.texture() == null ? null : e.texture().getPixels();
+        CacheKey k = key(x, z);
+        Entry e = PAGES.get(k);
+        if (e != null && e.texture() == null && drawable(e.page())) REDRAW.add(k);
+        return e == null || e.texture() == null ? null : e.texture().getPixels();
     }
     static int revision() { return textureRevision; }
 
@@ -132,8 +167,8 @@ public final class CartographClient {
     }
 
     static int pageCount() { MapNetwork.Page c = coverage(); return c == null ? state().pages() : c.totalPages(); }
-    static boolean awaitingPage() { return inFlight != null || !QUEUED.isEmpty(); }
-    static int queuedCount() { return QUEUED.size() + (inFlight == null ? 0 : 1); }
+    static boolean awaitingPage() { return !IN_FLIGHT.isEmpty() || !QUEUED.isEmpty(); }
+    static int queuedCount() { return QUEUED.size() + IN_FLIGHT.size(); }
     static int cachedCount() { return PAGES.size(); }
     /** Keep the in-flight server task but discard obsolete HUD/viewport queue
      * after a manual pan or zoom, so newly visible tiles jump to the front. */
@@ -147,13 +182,18 @@ public final class CartographClient {
         if (Math.abs((long) x) > 234375 || Math.abs((long) z) > 234375 || !hasAtlas() || !covered(x, z)) return false;
         CacheKey key = key(x, z);
         Entry entry = PAGES.get(key);
+        if (entry == null && !force && !key.atlasId().isBlank()) {
+            // First display the previous server-confirmed page from local disk.
+            // The actual server refresh happens after the cached pixels appear.
+            ClientPageStore.request(Minecraft.getInstance().gameDirectory.toPath(), diskKey(key));
+        }
         if (!force && entry != null) {
             // Fully drawn map tiles need no continual re-reading. Partially
             // drawn tiles can gain world chunks and are rechecked sooner.
             int refreshAfter = entry.page().painted() >= 64 ? SURFACE_RECHECK_TICKS : 600;
             if (ticks - entry.updated() < refreshAfter) return false;
         }
-        if (key.equals(inFlight) && !cachedOnly) return false;
+        if (IN_FLIGHT.containsKey(key)) return false;
         if (QUEUED.size() >= CACHE_LIMIT && !QUEUED.containsKey(key)) return false;
         boolean first = !QUEUED.containsKey(key);
         QUEUED.merge(key, cachedOnly, (before, after) -> before && after);
@@ -161,6 +201,24 @@ public final class CartographClient {
     }
 
     static MapNetwork.CostSettings settings() { return settings; }
+    static MapNetwork.PerformanceSettings performance() { return performance; }
+    static MapNetwork.RefreshProgress refreshProgress() { return refresh; }
+    static void acceptPerformance(MapNetwork.PerformanceSettings value) {
+        if (value.workers() >= 2 && value.workers() <= 8
+                && value.budgetMs() >= 2 && value.budgetMs() <= 8) performance = value;
+    }
+    static void acceptRefreshProgress(MapNetwork.RefreshProgress value) {
+        if (value.state() < 0 || value.state() > 4 || value.done() < 0
+                || value.total() < 0 || value.done() > value.total()
+                || value.failed() < 0 || value.failed() > value.done()) return;
+        refresh = value;
+    }
+    static void sendPerformance(int workers, int budget) {
+        PacketDistributor.sendToServer(new MapNetwork.SetPerformance(workers, budget));
+    }
+    static void refreshControl(int action) {
+        PacketDistributor.sendToServer(new MapNetwork.RefreshControl(atlasId(), action));
+    }
     public static void acceptSettings(MapNetwork.CostSettings value) { if (value.rates().valid()) settings = value; }
     static void sendSettings(MapNetwork.MaterialRates rates) {
         PacketDistributor.sendToServer(new MapNetwork.SetCostSettings(rates));
@@ -192,7 +250,7 @@ public final class CartographClient {
     private static void tick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) {
-            if (!PAGES.isEmpty() || coverage != null || inFlight != null || !QUEUED.isEmpty()) clear();
+            if (!PAGES.isEmpty() || coverage != null || !IN_FLIGHT.isEmpty() || !QUEUED.isEmpty()) clear();
             return;
         }
         String dim = dimension(), id = atlasId();
@@ -202,7 +260,7 @@ public final class CartographClient {
         }
         while (OPEN.consumeClick()) if (hasAtlas()) open();
         ticks++;
-        if (hasAtlas() && ClientMapSettings.get().hud(ClientMapSettings.ENABLED)
+        if (hasAtlas() && (ClientMapSettings.get().hud(ClientMapSettings.ENABLED) || holdingAtlas())
                 && (mc.screen == null || mc.screen instanceof HudAdjustScreen) && ticks % 10 == 1) {
             int radius = (int) Math.ceil(120 * Math.sqrt(2) / ClientMapSettings.get().hudZoom);
             int bx = mc.player.getBlockX(), bz = mc.player.getBlockZ();
@@ -210,18 +268,30 @@ public final class CartographClient {
             for (int z = Math.floorDiv(bz - radius, 128); z <= Math.floorDiv(bz + radius, 128); z++)
                 for (int x = Math.floorDiv(bx - radius, 128); x <= Math.floorDiv(bx + radius, 128); x++) queue(x, z, false);
         }
-        // Large saved worlds can need time to read a complete native page.
-        // Do not retry another page while the server still owns this request.
-        if (inFlight != null && ticks - sentAt >= 800) {
-            // The server may have aborted after a disconnect/error; requeue
-            // the timed-out tile once, ahead of newly discovered pages.
-            CacheKey timedOut = inFlight;
-            inFlight = null;
-            QUEUED.remove(timedOut);
-            LinkedHashMap<CacheKey, Boolean> reordered = new LinkedHashMap<>();
-            reordered.put(timedOut, false);
-            reordered.putAll(QUEUED);
-            QUEUED.clear(); QUEUED.putAll(reordered);
+        for (int i = 0; i < 16; i++) {
+            ClientPageStore.Loaded cached = ClientPageStore.poll();
+            if (cached == null) break;
+            CacheKey k = new CacheKey(cached.key().atlas(), cached.key().dimension(),
+                    cached.key().x(), cached.key().z());
+            if (cached.page() != null && diskKey(k).world().equals(cached.key().world())
+                    && k.atlasId().equals(atlasId()) && k.dimension().equals(dimension())
+                    && !PAGES.containsKey(k) && covered(k.px(), k.pz())) {
+                // CPU pixels are immediately available. GPU upload follows the
+                // 2-tiles/tick budget without blocking world rendering.
+                PAGES.put(k, new Entry(cached.page(), null, null, null,
+                        ticks - SURFACE_RECHECK_TICKS));
+                REDRAW.add(k);
+                QUEUED.remove(k);
+                textureRevision++;
+            }
+        }
+        Iterator<java.util.Map.Entry<CacheKey, Integer>> active = IN_FLIGHT.entrySet().iterator();
+        while (active.hasNext()) {
+            var request = active.next();
+            if (ticks - request.getValue() < 800) continue;
+            CacheKey expired = request.getKey();
+            active.remove();
+            QUEUED.put(expired, false); // Retry crashed/aborted request.
         }
         Iterator<CacheKey> redraw = REDRAW.iterator();
         int budget = 2;
@@ -235,16 +305,41 @@ public final class CartographClient {
             PAGES.put(k, new Entry(old.page(), texture, location, light, old.updated()));
             release(old); textureRevision++;
         }
-        if (ticks % 4 == 1 && inFlight == null && !QUEUED.isEmpty()) {
-            var it = QUEUED.entrySet().iterator();
-            var job = it.next();
-            CacheKey k = job.getKey();
-            boolean cached = job.getValue();
-            it.remove();
-            if (k.atlasId().equals(atlasId()) && k.dimension().equals(dimension()) && covered(k.px(), k.pz())) {
-                inFlight = k; sentAt = ticks;
-                PacketDistributor.sendToServer(new MapNetwork.Request(k.atlasId(), k.px(), k.pz(), cached));
+        if (ticks % 2 == 1) {
+            while (IN_FLIGHT.size() < MAX_PARALLEL_PAGES && !QUEUED.isEmpty()) {
+                var it = QUEUED.entrySet().iterator();
+                var job = it.next();
+                CacheKey k = job.getKey();
+                boolean cached = job.getValue();
+                it.remove();
+                if (k.atlasId().equals(atlasId()) && k.dimension().equals(dimension()) && covered(k.px(), k.pz())) {
+                    IN_FLIGHT.put(k, ticks);
+                    PacketDistributor.sendToServer(new MapNetwork.Request(k.atlasId(), k.px(), k.pz(), cached));
+                }
             }
+        }
+        trimGpuCache(mc);
+    }
+
+    /** Preserve CPU map data when panning, and cap expensive GPU textures.
+     * Returning to a previously visited area reconstructs texture locally,
+     * without network packets or rescanning any saved chunks. */
+    private static void trimGpuCache(Minecraft mc) {
+        int loadedTextures = 0;
+        for (Entry e : PAGES.values()) if (e.texture() != null) loadedTextures++;
+        if (loadedTextures <= GPU_TEXTURE_LIMIT) return;
+        List<CacheKey> toRelease = new ArrayList<>();
+        for (var e : PAGES.entrySet()) {
+            if (loadedTextures <= GPU_TEXTURE_LIMIT) break;
+            if (e.getValue().texture() == null) continue;
+            if (REDRAW.contains(e.getKey())) continue;
+            toRelease.add(e.getKey()); loadedTextures--;
+        }
+        for (CacheKey k : toRelease) {
+            Entry e = PAGES.get(k);
+            if (e == null || e.texture() == null) continue;
+            PAGES.put(k, new Entry(e.page(), null, null, e.light(), e.updated()));
+            release(e);
         }
     }
 
@@ -299,6 +394,20 @@ public final class CartographClient {
         else if (mc.player != null) mc.player.displayClientMessage(Component.literal(result.message()), true);
     }
 
+    /** World changes invalidate only one native 128x128 tile.
+     * Keep the old texture visible while the server refreshes it. */
+    public static void invalidatePage(MapNetwork.InvalidatePage invalidation) {
+        if (!hasAtlas() || !invalidation.atlasId().equals(atlasId())
+                || !invalidation.dimension().equals(dimension())) return;
+        CacheKey key = new CacheKey(invalidation.atlasId(), invalidation.dimension(),
+                invalidation.pageX(), invalidation.pageZ());
+        STALE.add(key);
+        if (!IN_FLIGHT.containsKey(key)) {
+            QUEUED.remove(key);
+            QUEUED.put(key, false);
+        }
+    }
+
     public static void acceptPage(MapNetwork.Page page) {
         Minecraft mc = Minecraft.getInstance();
         String requested = atlasId(), dim = dimension();
@@ -311,9 +420,12 @@ public final class CartographClient {
             lastAtlasId = page.atlasId();
             lastDimension = dim;
         }
-        if (inFlight != null && page.pageX() == inFlight.px() && page.pageZ() == inFlight.pz()) {
-            if (page.complete()) inFlight = null;
-            else sentAt = ticks;
+        CacheKey currentRequest = new CacheKey(page.atlasId(), dim, page.pageX(), page.pageZ());
+        if (IN_FLIGHT.containsKey(currentRequest)) {
+            if (page.complete()) {
+                IN_FLIGHT.remove(currentRequest);
+                if (STALE.remove(currentRequest)) QUEUED.put(currentRequest, false);
+            } else IN_FLIGHT.put(currentRequest, ticks);
         }
         coverage = page;
         QUEUED.keySet().removeIf(k -> !covered(k.px(), k.pz()));
@@ -349,6 +461,9 @@ public final class CartographClient {
                 if (removed.page().heights().length != 0) redrawNeighbors(oldest);
             }
         }
+        if (page.complete() && page.inRange() && page.painted() > 0
+                && !page.cachedOnly() && !page.atlasId().isBlank())
+            ClientPageStore.save(mc.gameDirectory.toPath(), diskKey(k), page);
         if (mc.screen instanceof AtlasScreen screen) {
             if (first) screen.coverageReady();
             else if (previousPageCount != page.totalPages()) screen.coverageChanged();
@@ -357,16 +472,21 @@ public final class CartographClient {
 
     public static void clear() {
         for (Entry e : PAGES.values()) release(e);
-        PAGES.clear(); QUEUED.clear(); REDRAW.clear(); inFlight = null;
+        PAGES.clear(); QUEUED.clear(); REDRAW.clear(); IN_FLIGHT.clear(); STALE.clear();
         coverage = null; regions = List.of(); markers = List.of(); previousAtlas = ItemStack.EMPTY;
         lastAtlasId = ""; lastDimension = ""; textureRevision++;
         settings = new MapNetwork.CostSettings(MapNetwork.MaterialRates.DEFAULT, false);
+        performance = new MapNetwork.PerformanceSettings(4, 4, false);
+        refresh = new MapNetwork.RefreshProgress(0, 0, 0, 0);
         AtlasHud.clear();
+        ClientPageStore.reset();
     }
 
     private static void hud(RenderGuiEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.screen == null && !mc.options.hideGui && hasAtlas() && ClientMapSettings.get().hud(ClientMapSettings.ENABLED))
+        if (mc.screen != null || mc.options.hideGui || !hasAtlas()) return;
+        if (holdingAtlas()) AtlasHud.drawHeld(event.getGuiGraphics());
+        else if (ClientMapSettings.get().hud(ClientMapSettings.ENABLED))
             AtlasHud.draw(event.getGuiGraphics(), false);
     }
 }

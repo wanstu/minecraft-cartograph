@@ -39,10 +39,30 @@ final class AtlasHud {
     }
 
     static void draw(GuiGraphics g, boolean editing) {
+        drawWithin(g, editing, layout(g.guiWidth(), g.guiHeight()));
+    }
+
+    /** Antique-atlas held form: a map page in a parchment-bound folio, sized
+     * to the first-person book rather than duplicating the floating minimap.
+     * The book item itself is still drawn by vanilla in the player's hand. */
+    static void drawHeld(GuiGraphics g) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+        int size = Math.clamp((int) Math.min(g.guiWidth() * .32, g.guiHeight() * .56), 75, 168);
+        int x = Math.max(10, g.guiWidth() - size - 25);
+        int y = Math.max(8, g.guiHeight() - size - 35);
+        // First-person folio: weathered binding, paper leaf and spine marks.
+        AtlasChrome.rounded(g, x - 13, y - 13, size + 26, size + 27, 7, 0xff3b2a20);
+        AtlasChrome.rounded(g, x - 9, y - 11, size + 20, size + 22, 6, 0xffa58154);
+        AtlasChrome.rounded(g, x - 5, y - 7, size + 12, size + 14, 4, 0xffe9d9b3);
+        g.fill(x - 8, y - 3, x - 5, y + size + 3, 0xff795531);
+        drawWithin(g, false, new Layout(x, y, size, 0, 0));
+    }
+
+    private static void drawWithin(GuiGraphics g, boolean editing, Layout area) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         ClientMapSettings cfg = ClientMapSettings.get();
-        Layout area = layout(g.guiWidth(), g.guiHeight());
         int rotation = cfg.hud(ClientMapSettings.NORTH_UP) ? 0 : Math.round((mc.player.getYRot() + 180) / 2) * 2;
         boolean reduced = area.size() * mc.getWindow().getGuiScale() * cfg.hudZoom < 240.0;
         Frame next = new Frame(mc.player.getBlockX(), mc.player.getBlockZ(), rotation, cfg.hudZoom, cfg.round,
