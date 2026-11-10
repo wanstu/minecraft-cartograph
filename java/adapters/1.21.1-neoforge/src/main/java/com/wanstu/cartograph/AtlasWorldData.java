@@ -221,7 +221,8 @@ public final class AtlasWorldData extends SavedData {
             AtlasState s = saved.state;
             saved.state = new AtlasState(s.id(), item.pages(), s.inkUnits(), s.pigmentUnits(), s.glowUnits(),
                     s.redDyes(), s.yellowDyes(), s.blueDyes(),
-                    s.inkEnabled(), s.colorEnabled(), s.glowEnabled(), s.compassInstalled());
+                    s.inkEnabled(), s.colorEnabled(), s.glowEnabled(), s.compassInstalled(),
+                    s.paperUnits(), s.paperEnabled());
             setDirty();
         }
         if (!saved.state.equals(atlas.get(CartographMod.ATLAS_STATE.get()))) {

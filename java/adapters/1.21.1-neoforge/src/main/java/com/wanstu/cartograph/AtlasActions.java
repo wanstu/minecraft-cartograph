@@ -17,7 +17,7 @@ import java.util.UUID;
  * the bound dimension, purchased page and actually surveyed chunk.
  */
 public final class AtlasActions {
-    private static final int OTHER_ACTIONS = 6;
+    private static final int OTHER_ACTIONS = 7;
     private static final Map<UUID, long[]> LAST_ACTION = new HashMap<>();
     private AtlasActions() {}
 
@@ -53,18 +53,20 @@ public final class AtlasActions {
         if (current.pages() >= AtlasState.MAX_PAGES) {
             reply(player, false, "地图册已达到最大页数"); return;
         }
-        ItemStack map = findIngredient(player, Items.MAP);
-        if (map.isEmpty() && !player.getAbilities().instabuild) {
-            reply(player, false, "背包中没有原版空地图，无法扩充地图册"); return;
+        AtlasState next = current;
+        if (!player.getAbilities().instabuild && !CartographConfig.permanent(3)) {
+            next = current.payPaper(CartographConfig.cost(3));
+            if (next == null) { reply(player, false, "地图纸值不足，请先在材料槽投入空地图"); return; }
+        } else if (!player.getAbilities().instabuild && !current.paperEnabled()) {
+            reply(player, false, "请先投入一张原版空地图以解锁永久地图纸"); return;
         }
-        if (!player.getAbilities().instabuild) map.shrink(1);
-        AtlasState expanded = current.extendOnePage();
+        AtlasState expanded = next.extendOnePage();
         data.update(entry, expanded, atlas);
-        reply(player, true, "已装订 1 张空地图 · 当前 " + expanded.pages() + " 页");
+        reply(player, true, "已扩充地图范围 · 当前 " + expanded.pages() + " 页");
     }
 
     public static void refill(ServerPlayer player, MapNetwork.Refill req) {
-        if (req.material() < 0 || req.material() > 5) {
+        if (req.material() < 0 || req.material() > 6) {
             reply(player, false, "未知耗材类型");
             return;
         }
@@ -86,7 +88,8 @@ public final class AtlasActions {
 
         if ((slot == 0 && state.inkEnabled() && CartographConfig.permanent(0))
                 || (slot == 1 && state.glowEnabled() && CartographConfig.permanent(2))
-                || (slot >= 2 && slot <= 4 && state.colorEnabled() && CartographConfig.permanent(1))) {
+                || (slot >= 2 && slot <= 4 && state.colorEnabled() && CartographConfig.permanent(1))
+                || (slot == 6 && state.paperEnabled() && CartographConfig.permanent(3))) {
             reply(player, false, "该材料已永久解锁"); return;
         }
         Item material = switch (slot) {
@@ -96,6 +99,7 @@ public final class AtlasActions {
             case 3 -> Items.YELLOW_DYE;
             case 4 -> Items.BLUE_DYE;
             case 5 -> Items.COMPASS;
+            case 6 -> Items.MAP;
             default -> Items.AIR;
         };
         ItemStack ingredient = findIngredient(player, material);
@@ -110,6 +114,7 @@ public final class AtlasActions {
             case 3 -> state.addDye(AtlasState.Primary.YELLOW, CartographConfig.refillUnits(1));
             case 4 -> state.addDye(AtlasState.Primary.BLUE, CartographConfig.refillUnits(1));
             case 5 -> state.withCompass(true);
+            case 6 -> state.fillPaperUnits(CartographConfig.refillUnits(3));
             default -> state;
         };
         if (next.equals(state)) { reply(player, false, "地图册资源已满或状态未变化"); return; }
@@ -209,7 +214,7 @@ public final class AtlasActions {
 
         int pageX = Math.floorDiv(req.x(), 128), pageZ = Math.floorDiv(req.z(), 128);
         if (!entry.isCovered(dimension, pageX, pageZ)) {
-            reply(player, false, "该位置未购买地图页；工作台用空地图扩充"); return;
+            reply(player, false, "该位置尚未覆盖；请在地图册面板使用地图纸值扩充"); return;
         }
 
         if (req.delete()) {

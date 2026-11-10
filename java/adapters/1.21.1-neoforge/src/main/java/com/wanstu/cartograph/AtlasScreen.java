@@ -33,16 +33,16 @@ public final class AtlasScreen extends Screen {
     private static final String[] TOOLS = {"图层", "标点", "区域", "地图册", "设置", "信息", "返回"};
     private static final String[] LAYERS = {"道路", "铁路", "地表结构", "地图标点", "区域名称", "区域边界", "等高线"};
     private static final String[] HUD_FLAGS = {"启用小地图", "显示东南西北", "锁定北方", "显示坐标", "显示区域名称", "显示地图图标"};
-    private static final String[] RESOURCES = {"测绘墨水", "彩色颜料", "发光墨水"};
-    private static final String[] PERMANENT = {"永久测绘墨水", "永久彩色", "永久发光墨水"};
+    private static final String[] RESOURCES = {"测绘墨水", "彩色颜料", "发光墨水", "地图纸值"};
+    private static final String[] PERMANENT = {"永久测绘墨水", "永久彩色", "永久发光墨水", "永久地图纸"};
     private static final String[] ICON_NAMES = {"住处", "旗帜", "矿区", "地标", "港口", "其他", "城镇", "农田",
             "营地", "危险", "传送门", "宝藏", "矿洞", "桥梁", "山峰", "交易点"};
     private static final String[] GLYPHS = {"⌂", "⚑", "◆", "✦", "⚓", "●", "▣", "✿",
             "▲", "!", "◈", "★", "▼", "═", "△", "$"};
     private static final int[] COLORS = {0xf7f2df, 0xe99357, 0xeeca53, 0x70b67b, 0x72a7d1, 0xcf89c0};
     private static final int[] REGION_COLORS = {0x629ab4, 0xab855e, 0x6d9a70, 0xc3af73, 0x81adb1, 0xa0ae7d, 0xb99fc7};
-    private static final Item[] MATERIALS = {Items.INK_SAC, Items.GLOW_INK_SAC, Items.RED_DYE, Items.YELLOW_DYE, Items.BLUE_DYE, Items.COMPASS};
-    private static final String[] MATERIAL_NAMES = {"墨囊", "发光墨囊", "红色染料", "黄色染料", "蓝色染料", "指南针"};
+    private static final Item[] MATERIALS = {Items.INK_SAC, Items.GLOW_INK_SAC, Items.RED_DYE, Items.YELLOW_DYE, Items.BLUE_DYE, Items.COMPASS, Items.MAP};
+    private static final String[] MATERIAL_NAMES = {"墨囊", "发光墨囊", "红色染料", "黄色染料", "蓝色染料", "指南针", "空地图"};
     private static final int WORLD_LIMIT = 30_000_000;
     private static final int BACKGROUND = 0xffd1d3bc;
 
@@ -71,7 +71,7 @@ public final class AtlasScreen extends Screen {
     private boolean adjustVertices;
     private int grabbedVertex = -1, menuVertex = -1, clickedEdge = -1;
     private long edgeClickNanos;
-    private final int[] inputs = new int[3], costs = new int[3];
+    private final int[] inputs = new int[4], costs = new int[4];
     private int permanentFlags;
     private boolean ratesDirty;
     private Slider activeSlider;
@@ -396,7 +396,7 @@ public final class AtlasScreen extends Screen {
             panel = Panel.NONE;
             settingsTab = SettingsTab.MAP;
             MapNetwork.MaterialRates r = CartographClient.settings().rates();
-            for (int j = 0; j < 3; j++) { inputs[j] = r.input(j); costs[j] = r.cost(j); }
+            for (int j = 0; j < 4; j++) { inputs[j] = r.input(j); costs[j] = r.cost(j); }
             permanentFlags = r.permanentFlags(); ratesDirty = false;
             dialog = Dialog.SETTINGS;
             return;
@@ -476,13 +476,8 @@ public final class AtlasScreen extends Screen {
                 AtlasState state = CartographClient.state();
                 MapNetwork.Page c = CartographClient.coverage();
                 int count = CartographClient.pageCount() * 64;
-                int emptyMaps = 0;
-                for (ItemStack stack : minecraft.player.getInventory().items)
-                    if (stack.is(Items.MAP)) emptyMaps += stack.getCount();
-                if (minecraft.player.getOffhandItem().is(Items.MAP))
-                    emptyMaps += minecraft.player.getOffhandItem().getCount();
                 textRow(g, left, row, inner, "地图页", CartographClient.pageCount() + " 页");
-                textRow(g, left, row + 18, inner, "背包空地图", emptyMaps + " 张");
+                textRow(g, left, row + 18, inner, RESOURCES[3], balance(state.paperUnits(), 3, state.paperEnabled()));
                 textRow(g, left, row + 36, inner, RESOURCES[0], balance(state.inkUnits(), 0, state.inkEnabled()));
                 textRow(g, left, row + 54, inner, RESOURCES[1], balance(state.pigmentUnits(), 1, state.colorEnabled()));
                 textRow(g, left, row + 72, inner, RESOURCES[2], balance(state.glowUnits(), 2, state.glowEnabled()));
@@ -490,10 +485,13 @@ public final class AtlasScreen extends Screen {
                 progress(g, left, row + 110, inner, "测绘覆盖", c == null ? 0 : c.totalSurveyed(), count, 0xff93ad8b);
                 progress(g, left, row + 136, inner, "彩色覆盖", c == null ? 0 : c.totalColored(), count, 0xffb1a6d2);
                 button(g, left, row + 161, inner, 21, "打开材料槽", true, () -> dialog = Dialog.MATERIALS);
-                boolean canExpand = emptyMaps > 0 || minecraft.player.getAbilities().instabuild;
-                button(g, left, row + 187, inner, 22, canExpand ? "＋ 装订 1 张空地图" : "背包中没有空地图",
+                boolean canExpand = minecraft.player.getAbilities().instabuild ||
+                        state.paperEnabled() && (CartographClient.settings().rates().permanent(3)
+                                || state.paperUnits() >= CartographClient.settings().rates().cost(3));
+                button(g, left, row + 187, inner, 22,
+                        canExpand ? "＋ 使用纸值扩充一页" : "地图纸值不足 · 请先投入空地图",
                         canExpand, canExpand ? CartographClient::sendAddPage : null);
-                g.drawString(font, shorten("每张空地图扩展 128×128 方块 · 工作台也可装订", inner),
+                g.drawString(font, shorten("每次增加 128×128 方块覆盖；纸值在材料槽补充", inner),
                         left, row + 216, MUTED);
             }
             case MARKERS -> {
@@ -676,8 +674,8 @@ public final class AtlasScreen extends Screen {
 
     private int modalW() { return Math.min(486, w() - 24); }
     private int modalH() { return switch (dialog) {
-        case SETTINGS -> settingsTab == SettingsTab.COST ? 306 : 276;
-        case MATERIALS -> 284;
+        case SETTINGS -> settingsTab == SettingsTab.COST ? 381 : 276;
+        case MATERIALS -> 346;
         case MARKER -> 291;
         case REGION -> 235;
         case CONFIRM -> 110;
@@ -763,11 +761,11 @@ public final class AtlasScreen extends Screen {
         } else {
             if (!ratesDirty) {
                 MapNetwork.MaterialRates rates = CartographClient.settings().rates();
-                for (int i = 0; i < 3; i++) { inputs[i] = rates.input(i); costs[i] = rates.cost(i); }
+                for (int i = 0; i < 4; i++) { inputs[i] = rates.input(i); costs[i] = rates.cost(i); }
                 permanentFlags = rates.permanentFlags();
             }
             boolean editable = CartographClient.settings().editable();
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 4; i++) {
                 int row = y + 77 + i * 65, slot = i;
                 rounded(g, left, row, inner, 60, 5, INSET);
                 g.drawString(font, RESOURCES[i], left + 8, row + 7, GOLD);
@@ -831,8 +829,12 @@ public final class AtlasScreen extends Screen {
             slot(g, left + i * (third + 7), y + 125, third, i + 2,
                     permanent ? "永久解锁" : dye[i] > 0 ? "已投入" : "消耗 1 个", permanent || dye[i] > 0);
         }
-        g.drawString(font, "非消耗品", left, y + 175, GOLD);
-        slot(g, left, y + 190, inner, 5, state.compassInstalled() ? "已装入 · 点击取出" : "点击装入", false);
+        g.drawString(font, "地图纸 · 投入空地图", left, y + 175, GOLD);
+        boolean paperPermanent = state.paperEnabled() && rates.permanent(3);
+        slot(g, left, y + 190, inner, 6,
+                paperPermanent ? "已永久启用" : refillHint(rates, 3), paperPermanent);
+        g.drawString(font, "非消耗品", left, y + 237, GOLD);
+        slot(g, left, y + 252, inner, 5, state.compassInstalled() ? "已装入 · 点击取出" : "点击装入", false);
         button(g, x + w - 85, y + h - 31, 71, 22, "完成", true, this::closeDialog);
     }
 
@@ -987,8 +989,8 @@ public final class AtlasScreen extends Screen {
     private void closeDialog() {
         if (dialog == Dialog.SETTINGS) {
             if (ratesDirty && CartographClient.settings().editable()) {
-                CartographClient.sendSettings(new MapNetwork.MaterialRates(costs[0], costs[1], costs[2],
-                        inputs[0], inputs[1], inputs[2], permanentFlags));
+                CartographClient.sendSettings(new MapNetwork.MaterialRates(costs[0], costs[1], costs[2], costs[3],
+                        inputs[0], inputs[1], inputs[2], inputs[3], permanentFlags));
             }
             cfg.save();
         }

@@ -183,25 +183,31 @@ public final class MapNetwork {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    public record MaterialRates(int inkCost, int pigmentCost, int glowCost,
-                                int inkInput, int pigmentInput, int glowInput, int permanentFlags) {
-        public static final MaterialRates DEFAULT = new MaterialRates(1, 1, 1, 40, 40, 40, 0);
-        public int cost(int slot) { return switch (slot) { case 0 -> inkCost; case 1 -> pigmentCost; default -> glowCost; }; }
-        public int input(int slot) { return switch (slot) { case 0 -> inkInput; case 1 -> pigmentInput; default -> glowInput; }; }
+    public record MaterialRates(int inkCost, int pigmentCost, int glowCost, int paperCost,
+                                int inkInput, int pigmentInput, int glowInput, int paperInput,
+                                int permanentFlags) {
+        public static final MaterialRates DEFAULT = new MaterialRates(1, 1, 1, 10, 40, 40, 40, 10, 0);
+        public int cost(int slot) {
+            return switch (slot) { case 0 -> inkCost; case 1 -> pigmentCost; case 2 -> glowCost; case 3 -> paperCost; default -> throw new IllegalArgumentException("slot"); };
+        }
+        public int input(int slot) {
+            return switch (slot) { case 0 -> inkInput; case 1 -> pigmentInput; case 2 -> glowInput; case 3 -> paperInput; default -> throw new IllegalArgumentException("slot"); };
+        }
         public boolean permanent(int slot) { return (permanentFlags & (1 << slot)) != 0; }
         public boolean valid() {
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 4; i++)
                 if (cost(i) < 1 || cost(i) > 100 || input(i) < 1 || input(i) > 100) return false;
-            return (permanentFlags & ~7) == 0;
+            return (permanentFlags & ~15) == 0;
         }
         void encode(RegistryFriendlyByteBuf b) {
-            b.writeByte(inkCost); b.writeByte(pigmentCost); b.writeByte(glowCost);
-            b.writeByte(inkInput); b.writeByte(pigmentInput); b.writeByte(glowInput);
+            b.writeByte(inkCost); b.writeByte(pigmentCost); b.writeByte(glowCost); b.writeByte(paperCost);
+            b.writeByte(inkInput); b.writeByte(pigmentInput); b.writeByte(glowInput); b.writeByte(paperInput);
             b.writeByte(permanentFlags);
         }
         static MaterialRates decode(RegistryFriendlyByteBuf b) {
-            return new MaterialRates(b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(),
-                    b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte());
+            return new MaterialRates(b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(),
+                    b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(),
+                    b.readUnsignedByte());
         }
     }
 
@@ -316,7 +322,7 @@ public final class MapNetwork {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("9");
+        var registrar = event.registrar("10");
         registrar.playToServer(RequestAnnotations.TYPE, RequestAnnotations.CODEC, (req, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.listAnnotations(player, req.atlasId());

@@ -21,7 +21,9 @@ public record AtlasState(
         boolean inkEnabled,
         boolean colorEnabled,
         boolean glowEnabled,
-        boolean compassInstalled
+        boolean compassInstalled,
+        int paperUnits,
+        boolean paperEnabled
 ) {
     public static final int MAX_PAGES = 65536;
     public static final int MAX_UNITS = 100_000_000;
@@ -37,7 +39,9 @@ public record AtlasState(
             Codec.BOOL.fieldOf("ink_enabled").forGetter(AtlasState::inkEnabled),
             Codec.BOOL.fieldOf("color_enabled").forGetter(AtlasState::colorEnabled),
             Codec.BOOL.fieldOf("glow_enabled").forGetter(AtlasState::glowEnabled),
-            Codec.BOOL.fieldOf("compass_installed").forGetter(AtlasState::compassInstalled)
+            Codec.BOOL.fieldOf("compass_installed").forGetter(AtlasState::compassInstalled),
+            Codec.INT.optionalFieldOf("paper_units", 0).forGetter(AtlasState::paperUnits),
+            Codec.BOOL.optionalFieldOf("paper_enabled", false).forGetter(AtlasState::paperEnabled)
     ).apply(i, AtlasState::new));
 
     public AtlasState {
@@ -46,39 +50,53 @@ public record AtlasState(
         inkUnits = Math.clamp(inkUnits, 0, MAX_UNITS);
         pigmentUnits = Math.clamp(pigmentUnits, 0, MAX_UNITS);
         glowUnits = Math.clamp(glowUnits, 0, MAX_UNITS);
+        paperUnits = Math.clamp(paperUnits, 0, MAX_UNITS);
         redDyes = Math.clamp(redDyes, 0, 64);
         yellowDyes = Math.clamp(yellowDyes, 0, 64);
         blueDyes = Math.clamp(blueDyes, 0, 64);
     }
 
     public static AtlasState blank() {
-        return new AtlasState("", 1, 0, 0, 0, 0, 0, 0, false, false, false, false);
+        return new AtlasState("", 1, 0, 0, 0, 0, 0, 0, false, false, false, false, 0, false);
     }
 
     public AtlasState identified() {
         if (!id.isBlank()) return this;
         return new AtlasState(UUID.randomUUID().toString(), pages, inkUnits, pigmentUnits, glowUnits,
-                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled);
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled, paperUnits, paperEnabled);
     }
 
     public AtlasState extendOnePage() {
         if (pages >= MAX_PAGES) return this;
         return new AtlasState(id, pages + 1, inkUnits, pigmentUnits, glowUnits,
-                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled);
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled, paperUnits, paperEnabled);
     }
 
     private static int addUnits(int old, int units) {
         return (int) Math.min(MAX_UNITS, (long) old + Math.max(0L, (long) units));
     }
 
+    public AtlasState fillPaperUnits(int units) {
+        return new AtlasState(id, pages, inkUnits, pigmentUnits, glowUnits,
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled,
+                addUnits(paperUnits, units), true);
+    }
+
+    public AtlasState payPaper(int costUnits) {
+        if (!paperEnabled || costUnits < 1 || paperUnits < costUnits) return null;
+        return new AtlasState(id, pages, inkUnits, pigmentUnits, glowUnits,
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled,
+                paperUnits - costUnits, paperEnabled);
+    }
+
     public AtlasState fillInkUnits(int units) {
         return new AtlasState(id, pages, addUnits(inkUnits, units), pigmentUnits, glowUnits,
-                redDyes, yellowDyes, blueDyes, true, colorEnabled, glowEnabled, compassInstalled);
+                redDyes, yellowDyes, blueDyes, true, colorEnabled, glowEnabled, compassInstalled, paperUnits, paperEnabled);
     }
 
     public AtlasState fillGlowUnits(int units) {
         return new AtlasState(id, pages, inkUnits, pigmentUnits, addUnits(glowUnits, units),
-                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, true, compassInstalled);
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, true, compassInstalled, paperUnits, paperEnabled);
     }
 
     public enum Primary { RED, YELLOW, BLUE }
@@ -93,29 +111,29 @@ public record AtlasState(
         int b = blueDyes + (primary == Primary.BLUE ? 1 : 0);
         int sets = Math.min(r, Math.min(y, b));
         return new AtlasState(id, pages, inkUnits, addUnits(pigmentUnits, sets * Math.max(0, unitsPerSet)), glowUnits,
-                r - sets, y - sets, b - sets, inkEnabled, colorEnabled || sets > 0, glowEnabled, compassInstalled);
+                r - sets, y - sets, b - sets, inkEnabled, colorEnabled || sets > 0, glowEnabled, compassInstalled, paperUnits, paperEnabled);
     }
 
     public AtlasState withCompass(boolean installed) {
         return new AtlasState(id, pages, inkUnits, pigmentUnits, glowUnits,
-                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, installed);
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, installed, paperUnits, paperEnabled);
     }
 
     public AtlasState payInk(int costUnits) {
         if (!inkEnabled || costUnits < 0 || inkUnits < costUnits) return null;
         return new AtlasState(id, pages, inkUnits - costUnits, pigmentUnits, glowUnits,
-                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled);
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled, paperUnits, paperEnabled);
     }
 
     public AtlasState payPigment(int costUnits) {
         if (!colorEnabled || costUnits < 0 || pigmentUnits < costUnits) return null;
         return new AtlasState(id, pages, inkUnits, pigmentUnits - costUnits, glowUnits,
-                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled);
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled, paperUnits, paperEnabled);
     }
 
     public AtlasState payGlow(int costUnits) {
         if (!glowEnabled || costUnits < 0 || glowUnits < costUnits) return null;
         return new AtlasState(id, pages, inkUnits, pigmentUnits, glowUnits - costUnits,
-                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled);
+                redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled, paperUnits, paperEnabled);
     }
 }

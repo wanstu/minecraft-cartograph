@@ -31,14 +31,6 @@ public final class AtlasExports {
 
     private AtlasExports() {}
 
-    private static ItemStack blankMap(ServerPlayer player) {
-        for (ItemStack stack : player.getInventory().items) {
-            if (stack.is(Items.MAP)) return stack;
-        }
-        if (player.getOffhandItem().is(Items.MAP)) return player.getOffhandItem();
-        return ItemStack.EMPTY;
-    }
-
     public static void export(ServerPlayer player, MapNetwork.ExportMap request) {
         ServerLevel level = player.serverLevel();
         long tick = level.getGameTime();
@@ -68,8 +60,9 @@ public final class AtlasExports {
             AtlasActions.reply(player, false, "这张地图页还未购买");
             return;
         }
-        if (blankMap(player).isEmpty() && !player.getAbilities().instabuild) {
-            AtlasActions.reply(player, false, "缺少原版空地图：拓印需要消耗 1 张");
+        if (!player.getAbilities().instabuild && (!entry.state().paperEnabled()
+                || !CartographConfig.permanent(3) && entry.state().paperUnits() < CartographConfig.cost(3))) {
+            AtlasActions.reply(player, false, "地图纸值不足，请先在材料槽投入空地图");
             return;
         }
         Job job = new Job(entry.state().id(), dim, request.pageX(), request.pageZ());
@@ -153,12 +146,27 @@ public final class AtlasExports {
             AtlasActions.reply(player, false, "该地图页没有可拓印的已测绘区块");
             return;
         }
-        ItemStack blank = blankMap(player);
-        if (blank.isEmpty() && !player.getAbilities().instabuild) {
-            AtlasActions.reply(player, false, "拓印已准备好，但背包中缺少空地图");
+        ServerLevel level = player.serverLevel();
+        ItemStack atlas = AtlasMapServer.findAtlas(player, job.atlasId);
+        if (atlas.isEmpty()) {
+            AtlasActions.reply(player, false, "地图册已移出背包，拓印未扣除纸值");
             return;
         }
-        ServerLevel level = player.serverLevel();
+        AtlasWorldData worldData = AtlasWorldData.get(level);
+        AtlasWorldData.Entry entry = worldData.access(atlas);
+        if (!entry.isCovered(job.dimension, job.pageX, job.pageZ)) {
+            AtlasActions.reply(player, false, "地图册范围已改变，拓印未扣除纸值");
+            return;
+        }
+        AtlasState after = entry.state();
+        if (!player.getAbilities().instabuild) {
+            if (!CartographConfig.permanent(3)) after = after.payPaper(CartographConfig.cost(3));
+            else if (!after.paperEnabled()) after = null;
+            if (after == null) {
+                AtlasActions.reply(player, false, "地图纸值不足，拓印未完成");
+                return;
+            }
+        }
         int originX = job.pageX * 128, originZ = job.pageZ * 128;
         MapItemSavedData data = MapItemSavedData.createFresh(
                 originX + 64.0, originZ + 64.0, (byte) 0,
@@ -169,9 +177,12 @@ public final class AtlasExports {
         data.setDirty();
         ItemStack output = new ItemStack(Items.FILLED_MAP);
         output.set(DataComponents.MAP_ID, mapId);
-        if (!player.getAbilities().instabuild) blank.shrink(1);
+        if (after != entry.state()) worldData.update(entry, after, atlas);
         if (!player.getInventory().add(output)) player.drop(output, false);
-        AtlasActions.reply(player, true, "地图拓印完成；消耗 1 张原版空地图");
+        String paperStatus = player.getAbilities().instabuild ? "创造模式无需消耗纸值"
+                : CartographConfig.permanent(3) ? "永久地图纸无需消耗"
+                : "已消耗 " + String.format(java.util.Locale.ROOT, "%.1f", CartographConfig.cost(3) / 10.0) + " 地图纸值";
+        AtlasActions.reply(player, true, "地图拓印完成；" + paperStatus);
     }
 
     private static final class Job {
