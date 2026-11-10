@@ -1,6 +1,7 @@
 package com.wanstu.cartograph;
 
 import com.wanstu.cartograph.core.AtlasPage;
+import com.wanstu.cartograph.core.MapSheetCoverage;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -39,7 +40,7 @@ public final class MapNetwork {
                        int glowUnits, boolean compass, boolean inRange,
                        boolean complete, boolean cachedOnly, int scanned, int generated, int painted,
                        String anchorDimension, int anchorX, int anchorZ, int totalPages,
-                       int totalSurveyed, int totalColored,
+                       int sheetSideBlocks, int totalSurveyed, int totalColored,
                        List<AtlasMarker> markers, List<SurfaceStructure> structures) implements CustomPacketPayload {
         public static final int PIXELS = AtlasPage.SIDE_BLOCKS * AtlasPage.SIDE_BLOCKS;
 
@@ -74,6 +75,7 @@ public final class MapNetwork {
                     buf.writeUtf(value.anchorDimension, 128);
                     buf.writeInt(value.anchorX); buf.writeInt(value.anchorZ);
                     buf.writeVarInt(value.totalPages);
+                    buf.writeVarInt(value.sheetSideBlocks);
                     buf.writeVarInt(value.totalSurveyed);
                     buf.writeVarInt(value.totalColored);
                     if (value.markers.size() > 128) throw new IllegalArgumentException("Too many markers");
@@ -106,12 +108,15 @@ public final class MapNetwork {
                     int painted = buf.readVarInt();
                     String anchorDimension = buf.readUtf(128);
                     int anchorX = buf.readInt(), anchorZ = buf.readInt();
-                    int totalPages = buf.readVarInt();
+                    int totalPages = buf.readVarInt(), sheetSideBlocks = buf.readVarInt();
                     int totalSurveyed = buf.readVarInt(), totalColored = buf.readVarInt();
                     if (scanned < 0 || scanned > 64 || generated < 0 || generated > 64
                             || painted < 0 || painted > 64 || totalPages < 1 || totalPages > AtlasState.MAX_PAGES
-                            || totalSurveyed < 0 || totalSurveyed > totalPages * 64
-                            || totalColored < 0 || totalColored > totalPages * 64)
+                            || !MapSheetCoverage.valid(sheetSideBlocks)
+                            || totalSurveyed < 0
+                            || totalSurveyed > (long) totalPages * MapSheetCoverage.areaChunksPerSheet(sheetSideBlocks)
+                            || totalColored < 0
+                            || totalColored > (long) totalPages * MapSheetCoverage.areaChunksPerSheet(sheetSideBlocks))
                         throw new IllegalArgumentException("Invalid survey progress");
                     int count = buf.readVarInt();
                     if (count < 0 || count > 128) throw new IllegalArgumentException("Invalid waypoint count");
@@ -126,7 +131,7 @@ public final class MapNetwork {
                     }
                     return new Page(atlasId, dim, pageX, pageZ, pixels, features, heights, waterDepths, surveyed, colored,
                             ink, pigment, glow, compass, inRange, complete, cachedOnly, scanned, generated,
-                            painted, anchorDimension, anchorX, anchorZ, totalPages, totalSurveyed, totalColored,
+                            painted, anchorDimension, anchorX, anchorZ, totalPages, sheetSideBlocks, totalSurveyed, totalColored,
                             List.copyOf(markers), List.copyOf(structures));
                 });
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -185,8 +190,9 @@ public final class MapNetwork {
 
     public record MaterialRates(int inkCost, int pigmentCost, int glowCost, int paperCost,
                                 int inkInput, int pigmentInput, int glowInput, int paperInput,
-                                int permanentFlags) {
-        public static final MaterialRates DEFAULT = new MaterialRates(1, 1, 1, 10, 40, 40, 40, 10, 0);
+                                int permanentFlags, int pageSideBlocks) {
+        public static final MaterialRates DEFAULT = new MaterialRates(1, 1, 1, 10, 40, 40, 40, 10,
+                0, MapSheetCoverage.DEFAULT_BLOCKS);
         public int cost(int slot) {
             return switch (slot) { case 0 -> inkCost; case 1 -> pigmentCost; case 2 -> glowCost; case 3 -> paperCost; default -> throw new IllegalArgumentException("slot"); };
         }
@@ -197,17 +203,18 @@ public final class MapNetwork {
         public boolean valid() {
             for (int i = 0; i < 4; i++)
                 if (cost(i) < 1 || cost(i) > 100 || input(i) < 1 || input(i) > 100) return false;
-            return (permanentFlags & ~15) == 0;
+            return (permanentFlags & ~15) == 0 && MapSheetCoverage.valid(pageSideBlocks);
         }
         void encode(RegistryFriendlyByteBuf b) {
             b.writeByte(inkCost); b.writeByte(pigmentCost); b.writeByte(glowCost); b.writeByte(paperCost);
             b.writeByte(inkInput); b.writeByte(pigmentInput); b.writeByte(glowInput); b.writeByte(paperInput);
             b.writeByte(permanentFlags);
+            b.writeVarInt(pageSideBlocks);
         }
         static MaterialRates decode(RegistryFriendlyByteBuf b) {
             return new MaterialRates(b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(),
                     b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(),
-                    b.readUnsignedByte());
+                    b.readUnsignedByte(), b.readVarInt());
         }
     }
 
@@ -312,17 +319,22 @@ public final class MapNetwork {
     }
 
     /** A server-confirmed operation result, never a speculative client toast. */
-    public record Feedback(boolean ok, String message) implements CustomPacketPayload {
+    /** Survey changes need cached tile authorization to refresh; paper/compass do not. */
+    public record Feedback(boolean ok, String message, boolean surveyChanged) implements CustomPacketPayload {
         public static final Type<Feedback> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "feedback"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Feedback> CODEC = StreamCodec.of(
-                (buf, value) -> { buf.writeBoolean(value.ok); buf.writeUtf(value.message, 160); },
-                buf -> new Feedback(buf.readBoolean(), buf.readUtf(160)));
+                (buf, value) -> {
+                    buf.writeBoolean(value.ok);
+                    buf.writeUtf(value.message, 160);
+                    buf.writeBoolean(value.surveyChanged);
+                },
+                buf -> new Feedback(buf.readBoolean(), buf.readUtf(160), buf.readBoolean()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("10");
+        var registrar = event.registrar("12");
         registrar.playToServer(RequestAnnotations.TYPE, RequestAnnotations.CODEC, (req, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.listAnnotations(player, req.atlasId());

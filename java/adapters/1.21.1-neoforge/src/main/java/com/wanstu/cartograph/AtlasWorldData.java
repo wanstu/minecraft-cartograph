@@ -1,7 +1,7 @@
 package com.wanstu.cartograph;
 
 import com.wanstu.cartograph.core.SurveyLedger;
-import com.wanstu.cartograph.core.SpiralCoverage;
+import com.wanstu.cartograph.core.MapSheetCoverage;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -33,6 +33,8 @@ public final class AtlasWorldData extends SavedData {
         private AtlasState state;
         private String anchorDimension = "";
         private int anchorX, anchorZ;
+        // Locked to each atlas when created; legacy records gain the generous default.
+        private int sheetSideBlocks = CartographConfig.pageSideBlocks();
         private final Map<String, AtlasMarker> markers = new HashMap<>();
         private final Map<String, NamedRegion> namedRegions = new HashMap<>();
         private SurveyLedger ledger = new SurveyLedger();
@@ -43,12 +45,13 @@ public final class AtlasWorldData extends SavedData {
         public boolean anchored() { return !anchorDimension.isEmpty(); }
         public int anchorX() { return anchorX; }
         public int anchorZ() { return anchorZ; }
+        public int sheetSideBlocks() { return sheetSideBlocks; }
         public void setAnchor(String dim, int x, int z) {
             if (!anchored()) { anchorDimension = dim; anchorX = x; anchorZ = z; }
         }
         public boolean isCovered(String dim, int pageX, int pageZ) {
-            return dim.equals(anchorDimension) && SpiralCoverage.covers(anchorX, anchorZ,
-                    pageX, pageZ, state.pages());
+            return dim.equals(anchorDimension) && MapSheetCoverage.covers(anchorX, anchorZ,
+                    pageX, pageZ, state.pages(), sheetSideBlocks);
         }
         public String anchorDimension() { return anchorDimension; }
         public int surveyedCount() { return ledger.surveyedCount(); }
@@ -134,6 +137,7 @@ public final class AtlasWorldData extends SavedData {
             out.put("state", AtlasState.CODEC.encodeStart(NbtOps.INSTANCE, state).getOrThrow());
             out.putString("anchor_dim", anchorDimension);
             out.putInt("anchor_x", anchorX); out.putInt("anchor_z", anchorZ);
+            out.putInt("sheet_side_blocks", sheetSideBlocks);
             SurveyLedger.Snapshot masks = ledger.snapshot();
             out.put("survey_mask", saveMask(masks.surveyed()));
             out.put("color_mask", saveMask(masks.colorized()));
@@ -152,6 +156,10 @@ public final class AtlasWorldData extends SavedData {
             Entry entry = new Entry(state);
             entry.anchorDimension = tag.getString("anchor_dim");
             entry.anchorX = tag.getInt("anchor_x"); entry.anchorZ = tag.getInt("anchor_z");
+            // Existing single-tile atlas pages become 512x512 sheets at no resource cost.
+            int storedSide = tag.getInt("sheet_side_blocks");
+            entry.sheetSideBlocks = MapSheetCoverage.valid(storedSide)
+                    ? storedSide : MapSheetCoverage.DEFAULT_BLOCKS;
             Set<SurveyLedger.ChunkKey> paid = new HashSet<>(), color = new HashSet<>();
             if (tag.contains("survey_mask", Tag.TAG_LIST)) {
                 loadMask(tag.getList("survey_mask", Tag.TAG_COMPOUND), paid);

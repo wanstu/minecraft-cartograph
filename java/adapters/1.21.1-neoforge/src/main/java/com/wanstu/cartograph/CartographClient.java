@@ -2,7 +2,7 @@ package com.wanstu.cartograph;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import com.wanstu.cartograph.core.AtlasPage;
-import com.wanstu.cartograph.core.SpiralCoverage;
+import com.wanstu.cartograph.core.MapSheetCoverage;
 import com.wanstu.cartograph.core.TerrainRelief;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -32,7 +32,10 @@ import java.util.Set;
 public final class CartographClient {
     public static final KeyMapping OPEN =
             new KeyMapping("key.cartograph.open", GLFW.GLFW_KEY_M, "key.categories.cartograph");
-    private static final int CACHE_LIMIT = 64;
+    // Map tiles remain in RAM across opening/closing the atlas. Do not re-scan
+    // 64 chunks per tile every 10 seconds just because the GUI is visible.
+    private static final int CACHE_LIMIT = 96;
+    private static final int SURFACE_RECHECK_TICKS = 3600; // 3 minutes
     private static final LinkedHashMap<CacheKey, Entry> PAGES = new LinkedHashMap<>(32, 0.75f, true);
     private static final LinkedHashMap<CacheKey, Boolean> QUEUED = new LinkedHashMap<>();
     private static final Set<CacheKey> REDRAW = new LinkedHashSet<>();
@@ -115,7 +118,8 @@ public final class CartographClient {
     public static boolean covered(int x, int z) {
         MapNetwork.Page c = coverage();
         return c == null || c.anchorDimension().equals(dimension())
-                && SpiralCoverage.covers(c.anchorX(), c.anchorZ(), x, z, c.totalPages());
+                && MapSheetCoverage.covers(c.anchorX(), c.anchorZ(), x, z,
+                        c.totalPages(), c.sheetSideBlocks());
     }
 
     static boolean surveyed(int x, int z) {
@@ -128,16 +132,20 @@ public final class CartographClient {
     static int pageCount() { MapNetwork.Page c = coverage(); return c == null ? state().pages() : c.totalPages(); }
     static boolean awaitingPage() { return inFlight != null || !QUEUED.isEmpty(); }
 
-    public static void queue(int x, int z, boolean force) { queue(x, z, force, false); }
+    public static boolean queue(int x, int z, boolean force) { return queue(x, z, force, false); }
 
-    static void queue(int x, int z, boolean force, boolean cachedOnly) {
-        if (Math.abs((long) x) > 234375 || Math.abs((long) z) > 234375 || !hasAtlas() || !covered(x, z)) return;
+    /** Return whether a NEW tile request was queued, so visible missing tiles
+     * beyond the first 64 already cached pages are not starved. */
+    static boolean queue(int x, int z, boolean force, boolean cachedOnly) {
+        if (Math.abs((long) x) > 234375 || Math.abs((long) z) > 234375 || !hasAtlas() || !covered(x, z)) return false;
         CacheKey key = key(x, z);
         Entry entry = PAGES.get(key);
-        if (!force && entry != null && ticks - entry.updated() < 200) return;
-        if (key.equals(inFlight) && !cachedOnly) return;
-        if (QUEUED.size() >= CACHE_LIMIT && !QUEUED.containsKey(key)) return;
+        if (!force && entry != null && ticks - entry.updated() < SURFACE_RECHECK_TICKS) return false;
+        if (key.equals(inFlight) && !cachedOnly) return false;
+        if (QUEUED.size() >= CACHE_LIMIT && !QUEUED.containsKey(key)) return false;
+        boolean first = !QUEUED.containsKey(key);
         QUEUED.merge(key, cachedOnly, (before, after) -> before && after);
+        return first;
     }
 
     static MapNetwork.CostSettings settings() { return settings; }
@@ -262,7 +270,8 @@ public final class CartographClient {
 
     public static void acceptFeedback(MapNetwork.Feedback result) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.screen instanceof AtlasScreen screen) screen.feedback(result.ok(), result.message());
+        if (mc.screen instanceof AtlasScreen screen)
+            screen.feedback(result.ok(), result.message(), result.surveyChanged());
         else if (mc.player != null) mc.player.displayClientMessage(Component.literal(result.message()), true);
     }
 

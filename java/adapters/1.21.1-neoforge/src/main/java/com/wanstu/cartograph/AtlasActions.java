@@ -22,7 +22,11 @@ public final class AtlasActions {
     private AtlasActions() {}
 
     public static void reply(ServerPlayer player, boolean ok, String message) {
-        PacketDistributor.sendToPlayer(player, new MapNetwork.Feedback(ok, message));
+        reply(player, ok, message, false);
+    }
+
+    public static void reply(ServerPlayer player, boolean ok, String message, boolean surveyChanged) {
+        PacketDistributor.sendToPlayer(player, new MapNetwork.Feedback(ok, message, surveyChanged));
     }
 
     private static boolean allowed(ServerPlayer player, int action) {
@@ -121,7 +125,7 @@ public final class AtlasActions {
         if (!player.getAbilities().instabuild) ingredient.shrink(1);
         data.update(entry, next, atlas);
         reply(player, true, slot == 5 ? "指南针已装入，玩家位置显示开启" :
-                "已投入材料，地图册资源已更新");
+                "已投入材料，地图册资源已更新", slot == 0 || slot >= 2 && slot <= 4);
     }
 
     public static boolean mayConfigure(ServerPlayer player) {

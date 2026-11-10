@@ -23,14 +23,15 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Two sampled chunks per server tick across all viewers. Does not load or
- * generate any chunks. A viewer may keep only one pending page at a time;
+ * Up to six sampled chunks per server tick, with a 2.5 ms time budget.
+ * Does not load or generate any chunks. A viewer may keep one pending page;
  * requests cannot flood a server with scans, and only covered pages are
  * eligible for a response.
  */
 public final class AtlasMapServer {
     private static final Logger LOG = LoggerFactory.getLogger("cartograph.survey");
-    private static final int MAX_WORK_PER_TICK = 2;
+    private static final int MAX_WORK_PER_TICK = 6;
+    private static final long MAX_SURVEY_NANOS_PER_TICK = 2_500_000L;
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final ArrayDeque<UUID> ORDER = new ArrayDeque<>();
     private static final Map<UUID, Long> LAST_DIAGNOSTIC = new HashMap<>();
@@ -97,6 +98,7 @@ public final class AtlasMapServer {
                     entry.state().glowUnits(), entry.state().compassInstalled(),
                     false, true, request.cachedOnly(), 0, 0, 0,
                     entry.anchorDimension(), entry.anchorX(), entry.anchorZ(), entry.state().pages(),
+                    entry.sheetSideBlocks(),
                     entry.surveyedCount(), entry.coloredCount(),
                     List.of(), List.of()));
             return;
@@ -122,10 +124,12 @@ public final class AtlasMapServer {
         MinecraftServer server = event.getServer();
         if (++ticks % 600 == 0)
             LAST_DIAGNOSTIC.keySet().removeIf(id -> server.getPlayerList().getPlayer(id) == null);
-        // One slot per chunk, not one per player. The previous implementation
-        // scanned only ONE chunk per tick for a sole viewer despite budget=2.
-        // Rotate viewers fairly and avoid holding any FileChannel between ticks.
+        // A handful of completed snapshots per tick makes initial 512x512
+        // sheets practical, while a wall-clock budget protects game TPS.
+        // Never hold region FileChannels on the main thread.
+        long tickStart = System.nanoTime();
         for (int step = 0; step < MAX_WORK_PER_TICK && !ORDER.isEmpty(); step++) {
+            if (step >= 2 && System.nanoTime() - tickStart >= MAX_SURVEY_NANOS_PER_TICK) break;
             UUID viewer = ORDER.removeFirst();
             Pending task = PENDING.get(viewer);
             if (task == null) continue;
@@ -199,7 +203,10 @@ public final class AtlasMapServer {
             }
 
             boolean done = task.next >= 64;
-            if (task.next == 8 || task.next == 32 || done) {
+            // A partial snapshot forces GPU re-uploads and re-shades all
+            // adjacent tiles every time (8/32/64). Send one complete tile,
+            // keeping world sampling incremental and bounded on the server.
+            if (done) {
                 PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
                         task.atlasId, task.dimension, task.pageX, task.pageZ,
                         task.pixels.clone(), task.features.clone(),
@@ -209,7 +216,7 @@ public final class AtlasMapServer {
                         entry.state().glowUnits(), entry.state().compassInstalled(),
                         true, done, task.cachedOnly, task.next, task.generated, task.painted,
                         entry.anchorDimension(), entry.anchorX(), entry.anchorZ(), entry.state().pages(),
-                    entry.surveyedCount(), entry.coloredCount(),
+                        entry.sheetSideBlocks(), entry.surveyedCount(), entry.coloredCount(),
                         entry.markersOnPage(task.dimension, task.pageX, task.pageZ),
                         List.copyOf(task.structures)));
             }

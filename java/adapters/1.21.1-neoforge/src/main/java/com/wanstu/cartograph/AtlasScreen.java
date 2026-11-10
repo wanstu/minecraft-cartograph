@@ -3,6 +3,7 @@ package com.wanstu.cartograph;
 import com.wanstu.cartograph.ClientMapSettings.Style;
 import com.wanstu.cartograph.NamedRegion.Point;
 import com.wanstu.cartograph.core.TerrainRelief;
+import com.wanstu.cartograph.core.MapSheetCoverage;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -73,6 +74,7 @@ public final class AtlasScreen extends Screen {
     private long edgeClickNanos;
     private final int[] inputs = new int[4], costs = new int[4];
     private int permanentFlags;
+    private int newSheetSideBlocks = MapSheetCoverage.DEFAULT_BLOCKS;
     private boolean ratesDirty;
     private Slider activeSlider;
     private String confirmation = "";
@@ -95,8 +97,14 @@ public final class AtlasScreen extends Screen {
 
     @Override protected void init() {
         // Keep the native Minecraft typeface readable; cap by viewport to avoid clipping.
-        ui = (float) Math.min(2.2 / minecraft.getWindow().getGuiScale(),
-                Math.min(width / 400.0, height / 390.0));
+        // Snap to an integer PHYSICAL pixel scale, not an integer GUI scale.
+        // GUI scale 3 + a 900px-high screen needs ui=2/3 to fit the
+        // 381-unit settings modal: that still renders glyphs at exactly 2px.
+        double minecraftScale = minecraft.getWindow().getGuiScale();
+        int physicalW = (int) Math.round(width * minecraftScale);
+        int physicalH = (int) Math.round(height * minecraftScale);
+        int physicalTextScale = Math.clamp(Math.min(physicalW / 400, physicalH / 390), 1, 3);
+        ui = (float) (physicalTextScale / minecraftScale);
         zoom = zoomPixels / minecraft.getWindow().getGuiScale();
         if (!initialized) {
             initialized = true;
@@ -117,7 +125,7 @@ public final class AtlasScreen extends Screen {
         if (!manuallyMoved && c.anchorDimension().equals(CartographClient.dimension())) {
             if (c.totalPages() == 1) {
                 zoomPixels = Math.clamp(Math.min(width, height) * minecraft.getWindow().getGuiScale()
-                        * .66 / 128.0, 2.35, 6.0);
+                        * .66 / c.sheetSideBlocks(), .20, 6.0);
                 zoom = zoomPixels / minecraft.getWindow().getGuiScale();
                 goAnchor();
             } else if (!CartographClient.covered(pageX(viewX), pageX(viewZ))) goAnchor();
@@ -129,7 +137,8 @@ public final class AtlasScreen extends Screen {
     private void goAnchor() {
         MapNetwork.Page c = CartographClient.coverage();
         if (c == null || !c.anchorDimension().equals(CartographClient.dimension())) return;
-        focus(c.anchorX() * 128.0 + 64, c.anchorZ() * 128.0 + 64);
+        focus(MapSheetCoverage.centerBlock(c.anchorX(), c.sheetSideBlocks()),
+                MapSheetCoverage.centerBlock(c.anchorZ(), c.sheetSideBlocks()));
         status = "已定位到地图册起始页";
     }
 
@@ -163,18 +172,27 @@ public final class AtlasScreen extends Screen {
             for (int z = Math.max(z0, cz - ring); z <= Math.min(z1, cz + ring); z++)
                 for (int x = Math.max(x0, cx - ring); x <= Math.min(x1, cx + ring); x++) {
                     if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) != ring || !CartographClient.covered(x, z)) continue;
-                    CartographClient.queue(x, z, force, cachedOnly);
-                    if (++count >= 64) return;
+                    if (CartographClient.queue(x, z, force, cachedOnly) && ++count >= 64) return;
                 }
     }
 
     @Override public void tick() {
-        if (++ticks % 200 == 0 && !CartographClient.awaitingPage()) reload(false, false);
+        // Periodic discovery of updated saved chunks, throttled separately by
+        // the page cache's long surface recheck interval.
+        if (++ticks % 600 == 0 && !CartographClient.awaitingPage()) reload(false, false);
     }
 
-    public void feedback(boolean ok, String text) {
+    public void feedback(boolean ok, String text, boolean surveyChanged) {
         toast(text, !ok);
-        if (ok) reload(true, true);
+        if (!ok) return;
+        // Paper refill, naming and compass changes do not invalidate map imagery.
+        // Just reload metadata at the central tile. Survey/color changes require
+        // refreshing visible tiles, but keep their old GPU textures until replaced.
+        if (surveyChanged) reload(true, false);
+        else {
+            CartographClient.queue(pageX(viewX), pageX(viewZ), true, false);
+            reload(false, false);
+        }
     }
 
     private void toast(String value, boolean error) {
@@ -189,8 +207,8 @@ public final class AtlasScreen extends Screen {
         g.pose().pushPose();
         g.pose().scale(ui, ui, 1);
         try {
-            statusBox(g, mx, my);
             if (dialog == Dialog.NONE) {
+                statusBox(g, mx, my);
                 toolbar(g);
                 // The old/new/split comparison bar was a developer preview control,
                 // absent from the approved atlas prototype; do not render it in game.
@@ -198,13 +216,21 @@ public final class AtlasScreen extends Screen {
                 if (selection != null) renderSelection(g);
                 if (draft != null) drawGuide(g);
                 if (menu != Menu.NONE) renderMenu(g);
-            } else renderDialog(g);
-            if (!message.isEmpty() && ticks <= messageUntil) {
+            } else {
+                // Drain deferred map draws before a modal gets a new Z layer.
+                g.flush();
+                g.pose().pushPose();
+                g.pose().translate(0, 0, 300);
+                renderDialog(g);
+                g.pose().popPose();
+            }
+            if (dialog == Dialog.NONE && !message.isEmpty() && ticks <= messageUntil) {
                 int width = Math.min(w() - 22, font.width(message) + 26);
                 rounded(g, (w() - width) / 2, h() - 43, width, 24, 7, badMessage ? 0xf56b4335 : PANEL);
                 g.drawCenteredString(font, shorten(message, width - 12), w() / 2, h() - 35, CREAM);
             }
             super.render(g, mouseX, mouseY, partial);
+            g.flush();
         } finally { g.pose().popPose(); }
     }
 
@@ -215,13 +241,15 @@ public final class AtlasScreen extends Screen {
             mapTiles(g, Style.ORIGINAL, 0, divider);
             mapTiles(g, Style.PIXEL, divider, width);
         } else mapTiles(g, cfg.style == Style.PIXEL && pixelView == PixelView.PREVIOUS ? Style.ORIGINAL : cfg.style, 0, width);
-        drawMapLabels(g);
-        if (selection != null) {
+        // Under a modal, glyphs and player labels must not render on top of
+        // the dimmer: skip the map annotation pass entirely.
+        if (dialog == Dialog.NONE) drawMapLabels(g);
+        if (dialog == Dialog.NONE && selection != null) {
             int sx = (int) screenX(selection.x()), sy = (int) screenZ(selection.z());
             g.renderOutline(sx - 5, sy - 5, 11, 11, GOLD);
             g.fill(sx - 1, sy - 1, sx + 2, sy + 2, CREAM);
         }
-        if (draft != null) {
+        if (dialog == Dialog.NONE && draft != null) {
             drawBoundary(g, draft, true, 0xffedd095);
             for (Point point : draft)
                 rounded(g, (int) screenX(point.x()) - 3, (int) screenZ(point.z()) - 3, 7, 7, 3, GOLD);
@@ -397,7 +425,8 @@ public final class AtlasScreen extends Screen {
             settingsTab = SettingsTab.MAP;
             MapNetwork.MaterialRates r = CartographClient.settings().rates();
             for (int j = 0; j < 4; j++) { inputs[j] = r.input(j); costs[j] = r.cost(j); }
-            permanentFlags = r.permanentFlags(); ratesDirty = false;
+            permanentFlags = r.permanentFlags();
+            newSheetSideBlocks = r.pageSideBlocks(); ratesDirty = false;
             dialog = Dialog.SETTINGS;
             return;
         }
@@ -475,7 +504,8 @@ public final class AtlasScreen extends Screen {
             case ATLAS -> {
                 AtlasState state = CartographClient.state();
                 MapNetwork.Page c = CartographClient.coverage();
-                int count = CartographClient.pageCount() * 64;
+                int sheetSide = c == null ? MapSheetCoverage.DEFAULT_BLOCKS : c.sheetSideBlocks();
+                int count = CartographClient.pageCount() * MapSheetCoverage.areaChunksPerSheet(sheetSide);
                 textRow(g, left, row, inner, "地图页", CartographClient.pageCount() + " 页");
                 textRow(g, left, row + 18, inner, RESOURCES[3], balance(state.paperUnits(), 3, state.paperEnabled()));
                 textRow(g, left, row + 36, inner, RESOURCES[0], balance(state.inkUnits(), 0, state.inkEnabled()));
@@ -491,7 +521,7 @@ public final class AtlasScreen extends Screen {
                 button(g, left, row + 187, inner, 22,
                         canExpand ? "＋ 使用纸值扩充一页" : "地图纸值不足 · 请先投入空地图",
                         canExpand, canExpand ? CartographClient::sendAddPage : null);
-                g.drawString(font, shorten("每次增加 128×128 方块覆盖；纸值在材料槽补充", inner),
+                g.drawString(font, shorten("每页 +" + sheetSide + "×" + sheetSide + " 方块；材料槽补纸值", inner),
                         left, row + 216, MUTED);
             }
             case MARKERS -> {
@@ -674,7 +704,7 @@ public final class AtlasScreen extends Screen {
 
     private int modalW() { return Math.min(486, w() - 24); }
     private int modalH() { return switch (dialog) {
-        case SETTINGS -> settingsTab == SettingsTab.COST ? 381 : 276;
+        case SETTINGS -> settingsTab == SettingsTab.COST ? 381 : settingsTab == SettingsTab.MAP ? 366 : 276;
         case MATERIALS -> 346;
         case MARKER -> 291;
         case REGION -> 235;
@@ -742,6 +772,21 @@ public final class AtlasScreen extends Screen {
             boolean pixel = cfg.style == Style.PIXEL;
             check(g, left, y + 222, inner, pixel ? "方块高差阴影（自动）" : "显示等高线",
                     pixel || cfg.layer(CONTOURS), pixel ? null : () -> cfg.toggleLayer(CONTOURS));
+            boolean editable = CartographClient.settings().editable();
+            g.drawString(font, "单次扩页覆盖范围（默认 512×512）", left, y + 256, GOLD);
+            int[] sides = {128, 256, 512, 1024, 2048};
+            int cell = (inner - 4 * 5) / sides.length;
+            for (int i = 0; i < sides.length; i++) {
+                int size = sides[i], bx = left + i * (cell + 5);
+                button(g, bx, y + 274, cell, 23, size + "²",
+                        newSheetSideBlocks == size,
+                        editable ? () -> { newSheetSideBlocks = size; ratesDirty = true; } : null);
+            }
+            MapNetwork.Page activePage = CartographClient.coverage();
+            int activeSide = activePage == null ? MapSheetCoverage.DEFAULT_BLOCKS : activePage.sheetSideBlocks();
+            g.drawString(font, shorten("当前地图册：" + activeSide + "×" + activeSide
+                            + " · 已有地图册范围保持不变", inner),
+                    left, y + 312, MUTED);
         } else if (settingsTab == SettingsTab.MINI) {
             int half = (inner - 7) / 2;
             for (int i = 0; i < HUD_FLAGS.length; i++) {
@@ -763,6 +808,7 @@ public final class AtlasScreen extends Screen {
                 MapNetwork.MaterialRates rates = CartographClient.settings().rates();
                 for (int i = 0; i < 4; i++) { inputs[i] = rates.input(i); costs[i] = rates.cost(i); }
                 permanentFlags = rates.permanentFlags();
+            newSheetSideBlocks = rates.pageSideBlocks();
             }
             boolean editable = CartographClient.settings().editable();
             for (int i = 0; i < 4; i++) {
@@ -990,7 +1036,7 @@ public final class AtlasScreen extends Screen {
         if (dialog == Dialog.SETTINGS) {
             if (ratesDirty && CartographClient.settings().editable()) {
                 CartographClient.sendSettings(new MapNetwork.MaterialRates(costs[0], costs[1], costs[2], costs[3],
-                        inputs[0], inputs[1], inputs[2], inputs[3], permanentFlags));
+                        inputs[0], inputs[1], inputs[2], inputs[3], permanentFlags, newSheetSideBlocks));
             }
             cfg.save();
         }

@@ -30,6 +30,36 @@ public final class CoreSelfTest {
         yes(!SpiralCoverage.covers(0, 0, Integer.MAX_VALUE, Integer.MAX_VALUE, 512),
                 "huge request must not overflow atlas coverage");
 
+        // One default paper sheet buys a 512x512 block square (16 native 128x128 tiles)
+        // around the opening page, including negative X and northern Z.
+        yes(MapSheetCoverage.DEFAULT_BLOCKS == 512, "generous default paper sheet");
+        yes(MapSheetCoverage.areaChunksPerSheet(512) == 1024,
+                "512 square stores 1024 chunk-sized first-survey units");
+        int ax = -78, az = 48;
+        int count = 0;
+        for (int dz = -6; dz <= 6; dz++) for (int dx = -6; dx <= 6; dx++) {
+            if (MapSheetCoverage.covers(ax, az, ax + dx, az + dz, 1, 512)) count++;
+        }
+        yes(count == 16, "single 512x512 sheet covers sixteen map tiles");
+        yes(MapSheetCoverage.covers(ax, az, ax, az - 1, 1, 512),
+                "player north of atlas origin stays within initial sheet");
+        yes(!MapSheetCoverage.covers(ax, az, ax, az - 3, 1, 512),
+                "beyond initial sheet is not granted");
+        for (int blocks : new int[]{128,256,512,1024,2048}) {
+            int scale = blocks / 128;
+            for (int sheetIndex = 0; sheetIndex < 50; sheetIndex++) {
+                var offset = SpiralCoverage.offsetFor(sheetIndex);
+                int tx = ax + offset.x() * scale;
+                int tz = az + offset.z() * scale;
+                yes(MapSheetCoverage.covers(ax, az, tx, tz, sheetIndex + 1, blocks),
+                        "sheet spiral covers its own tile after purchase");
+                yes(!MapSheetCoverage.covers(ax, az, tx, tz, sheetIndex, blocks),
+                        "sheet spiral never grants next tile early");
+            }
+        }
+        yes(!MapSheetCoverage.covers(ax, az, 234375, -234375, 1, 512),
+                "remote request remains outside authorized sheet");
+
         SurveyLedger ledger = new SurveyLedger();
         var c = new SurveyLedger.ChunkKey("minecraft:overworld", 3, -5);
         var waiting = ledger.survey(c, false, true, true, true, 10, 10, 10, 10, false, false);
