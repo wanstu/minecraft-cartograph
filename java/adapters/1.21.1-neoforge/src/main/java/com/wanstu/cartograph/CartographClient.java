@@ -64,6 +64,7 @@ public final class CartographClient {
         bus.addListener((RegisterKeyMappingsEvent event) -> event.register(OPEN));
         NeoForge.EVENT_BUS.addListener(CartographClient::tick);
         NeoForge.EVENT_BUS.addListener(CartographClient::hud);
+        NeoForge.EVENT_BUS.addListener(CartographClient::hideAtlasDuringHudEditing);
     }
 
     public static ItemStack currentAtlas() {
@@ -401,8 +402,14 @@ public final class CartographClient {
                 || !invalidation.dimension().equals(dimension())) return;
         CacheKey key = new CacheKey(invalidation.atlasId(), invalidation.dimension(),
                 invalidation.pageX(), invalidation.pageZ());
-        STALE.add(key);
-        if (!IN_FLIGHT.containsKey(key)) {
+        if (IN_FLIGHT.containsKey(key)) {
+            // A second world edit raced an already-running request. Request
+            // once MORE only in this case, after its old snapshot completes.
+            STALE.add(key);
+        } else {
+            // The next request already includes this edit: do not schedule
+            // a redundant second full 64-chunk scan.
+            STALE.remove(key);
             QUEUED.remove(key);
             QUEUED.put(key, false);
         }
@@ -433,8 +440,16 @@ public final class CartographClient {
         CacheKey k = new CacheKey(page.atlasId(), dim, page.pageX(), page.pageZ());
         Entry previous = PAGES.get(k);
         MapNetwork.Page old = previous == null ? null : previous.page();
-        if (old == null || (!page.cachedOnly() || (page.surveyedChunks() & old.surveyedChunks()) == old.surveyedChunks())
-                && (page.complete() || !old.complete() || !drawable(old))) {
+        // IMPORTANT: a refresh's 8/32-chunk milestones contain blank pixels
+        // for every unscanned chunk. Never replace an already complete tile
+        // with a partial snapshot: doing so creates moving square holes.
+        // Partial pages remain useful for the FIRST discovery of a new area.
+        boolean mayReplace = old == null
+                || (page.complete()
+                    && (!page.cachedOnly() || (page.surveyedChunks() & old.surveyedChunks()) == old.surveyedChunks()))
+                || (!old.complete() && !page.cachedOnly() && page.scanned() >= old.scanned())
+                || (!drawable(old) && page.scanned() >= old.scanned());
+        if (mayReplace) {
             boolean changedHeights = old == null || !Arrays.equals(old.heights(), page.heights());
             boolean changed = changedHeights || old == null || page.coloredChunks() != old.coloredChunks()
                     || !Arrays.equals(old.pixels(), page.pixels()) || !Arrays.equals(old.features(), page.features())
@@ -480,6 +495,17 @@ public final class CartographClient {
         refresh = new MapNetwork.RefreshProgress(0, 0, 0, 0);
         AtlasHud.clear();
         ClientPageStore.reset();
+    }
+
+    private static void hideAtlasDuringHudEditing(
+            net.neoforged.neoforge.client.event.RenderHandEvent event) {
+        Minecraft mc = Minecraft.getInstance();
+        // Hide only the oversized in-world book while configuring the float.
+        // The live map preview uses AtlasHud.draw() with the SAME settings
+        // and pixel dimensions as normal gameplay.
+        if (mc.screen instanceof HudAdjustScreen
+                && event.getItemStack().is(CartographMod.ATLAS.get()))
+            event.setCanceled(true);
     }
 
     private static void hud(RenderGuiEvent.Post event) {

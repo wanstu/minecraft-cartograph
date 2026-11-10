@@ -33,7 +33,7 @@ public final class AtlasScreen extends Screen {
 
     private static final String[] TOOLS = {"图层", "标点", "区域", "地图册", "设置", "信息", "返回"};
     private static final String[] LAYERS = {"道路", "铁路", "地表结构", "地图标点", "区域名称", "区域边界", "等高线"};
-    private static final String[] HUD_FLAGS = {"启用小地图", "显示东南西北", "锁定北方", "显示坐标", "显示区域名称", "显示地图图标"};
+    private static final String[] HUD_FLAGS = {"启用悬浮小地图", "显示东南西北", "锁定北方", "显示坐标", "显示区域名称", "显示地图图标"};
     private static final String[] RESOURCES = {"测绘墨水", "彩色颜料", "发光墨水", "地图纸值"};
     private static final String[] PERMANENT = {"永久测绘墨水", "永久彩色", "永久发光墨水", "永久地图纸"};
     private static final String[] ICON_NAMES = {"住处", "旗帜", "矿区", "地标", "港口", "其他", "城镇", "农田",
@@ -761,7 +761,7 @@ public final class AtlasScreen extends Screen {
     private int modalW() { return Math.min(486, w() - 24); }
     private int modalH() { return switch (dialog) {
         case SETTINGS -> switch (settingsTab) {
-            case MAP -> 366; case MINI -> 276; case COST -> 381; case CACHE -> 353;
+            case MAP -> 366; case MINI -> 310; case COST -> 381; case CACHE -> 353;
         };
         case MATERIALS -> 366;
         case MARKER -> 291;
@@ -863,9 +863,11 @@ public final class AtlasScreen extends Screen {
             g.drawString(font, "缩放 " + String.format(Locale.ROOT, "%.1f×", cfg.hudZoom), left, y + 195, CREAM);
             slider(g, left + 92, y + 189, inner - 95, (cfg.hudZoom - .5) / 3.5,
                     n -> cfg.hudZoom = Math.round((.5 + n * 3.5) * 10) / 10.0);
-            button(g, left, y + 216, inner, 23, "进入游戏画面调整位置与大小", true,
+            button(g, left, y + 216, inner, 23, "预览并调整悬浮小地图位置与大小", true,
                     () -> minecraft.setScreen(new HudAdjustScreen(this)));
-            button(g, left, y + h - 30, 79, 21, "恢复默认设置", false, cfg::resetHud);
+            g.drawString(font, shorten("手持地图册时自动收起小地图；手持页独立显示", inner),
+                    left, y + 250, MUTED, false);
+            button(g, left, y + h - 30, 79, 21, "恢复紧凑默认", false, cfg::resetHud);
         } else if (settingsTab == SettingsTab.COST) {
             if (!ratesDirty) {
                 MapNetwork.MaterialRates rates = CartographClient.settings().rates();

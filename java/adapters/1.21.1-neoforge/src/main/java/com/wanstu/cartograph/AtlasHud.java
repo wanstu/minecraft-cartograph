@@ -10,7 +10,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 final class AtlasHud {
-    private static final int RASTER = 160, MARGIN = 14;
+    private static final int RASTER = 160, MARGIN = 7;
     private static final double DIAGONAL = Math.sqrt(2.0);
     private static DynamicTexture texture;
     private static ResourceLocation textureId;
@@ -27,46 +27,50 @@ final class AtlasHud {
 
     private AtlasHud() {}
 
+    static int margin() { return MARGIN; }
+
     static Layout layout(int width, int height) {
         Minecraft mc = Minecraft.getInstance();
         ClientMapSettings cfg = ClientMapSettings.get();
         int limit = Math.max(24, Math.min(width, height) - MARGIN * 2 - 10);
         int size = Math.min(limit, Math.max(28, (int) Math.round(cfg.hudSize / mc.getWindow().getGuiScale())));
         int travelX = Math.max(0, width - size - 2 * MARGIN);
-        int travelY = Math.max(0, height - size - 2 * MARGIN - 12);
+        // The coordinate label is inside the map now: no phantom 12px footer.
+        int travelY = Math.max(0, height - size - 2 * MARGIN);
         return new Layout(MARGIN + (int) Math.round(cfg.hudX * travelX),
                 MARGIN + (int) Math.round(cfg.hudY * travelY), size, travelX, travelY);
     }
 
     static void draw(GuiGraphics g, boolean editing) {
-        drawWithin(g, editing, layout(g.guiWidth(), g.guiHeight()));
+        drawWithin(g, editing, false, layout(g.guiWidth(), g.guiHeight()));
     }
 
-    /** Antique-atlas held form: a map page in a parchment-bound folio, sized
-     * to the first-person book rather than duplicating the floating minimap.
-     * The book item itself is still drawn by vanilla in the player's hand. */
+    /** Compact, parchment-bound first-person atlas, not a second full-sized
+     * minimap. The book item mesh has its own smaller hand transform. */
     static void drawHeld(GuiGraphics g) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
-        int size = Math.clamp((int) Math.min(g.guiWidth() * .32, g.guiHeight() * .56), 75, 168);
-        int x = Math.max(10, g.guiWidth() - size - 25);
-        int y = Math.max(8, g.guiHeight() - size - 35);
-        // First-person folio: weathered binding, paper leaf and spine marks.
-        AtlasChrome.rounded(g, x - 13, y - 13, size + 26, size + 27, 7, 0xff3b2a20);
-        AtlasChrome.rounded(g, x - 9, y - 11, size + 20, size + 22, 6, 0xffa58154);
-        AtlasChrome.rounded(g, x - 5, y - 7, size + 12, size + 14, 4, 0xffe9d9b3);
-        g.fill(x - 8, y - 3, x - 5, y + size + 3, 0xff795531);
-        drawWithin(g, false, new Layout(x, y, size, 0, 0));
+        int uiScale = (int) Math.max(1, mc.getWindow().getGuiScale());
+        // Physical-screen budget: <= 160 px including the binding at normal
+        // scales. Old code used 168 *GUI* pixels (hundreds physical pixels).
+        int size = Math.clamp((int) Math.round(120.0 / uiScale), 36, 70);
+        int x = Math.max(8, g.guiWidth() - size - 13);
+        int y = Math.max(8, g.guiHeight() - size - 16);
+        AtlasChrome.rounded(g, x - 4, y - 4, size + 8, size + 8, 3, 0xff4a3326);
+        AtlasChrome.rounded(g, x - 2, y - 2, size + 4, size + 4, 2, 0xffd8bd84);
+        drawWithin(g, false, true, new Layout(x, y, size, 0, 0));
     }
 
-    private static void drawWithin(GuiGraphics g, boolean editing, Layout area) {
+    private static void drawWithin(GuiGraphics g, boolean editing, boolean held, Layout area) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         ClientMapSettings cfg = ClientMapSettings.get();
         int rotation = cfg.hud(ClientMapSettings.NORTH_UP) ? 0 : Math.round((mc.player.getYRot() + 180) / 2) * 2;
         boolean reduced = area.size() * mc.getWindow().getGuiScale() * cfg.hudZoom < 240.0;
-        Frame next = new Frame(mc.player.getBlockX(), mc.player.getBlockZ(), rotation, cfg.hudZoom, cfg.round,
-                reduced, cfg.style, CartographClient.revision());
+        Frame next = new Frame(mc.player.getBlockX(), mc.player.getBlockZ(), rotation,
+                held ? 1.2 : cfg.hudZoom, held ? false : cfg.round,
+                reduced, held ? ClientMapSettings.Style.ILLUSTRATED : cfg.style,
+                CartographClient.revision());
         if (!next.equals(previous) && (texture == null || lastFrameTick != mc.level.getGameTime() || editing)) {
             update(next);
             lastFrameTick = mc.level.getGameTime();
@@ -77,7 +81,7 @@ final class AtlasHud {
         Frame drawn = previous;
         double angle = Math.toRadians(drawn.rotation()), scale = area.size() * drawn.zoom() / 240.0;
         if (cfg.hud(ClientMapSettings.ICONS)) drawIcons(g, mc, cfg, area, drawn, angle, scale);
-        if (cfg.hud(ClientMapSettings.REGION_NAMES) && cfg.layer(ClientMapSettings.REGIONS)) {
+        if (!held && cfg.hud(ClientMapSettings.REGION_NAMES) && cfg.layer(ClientMapSettings.REGIONS)) {
             for (NamedRegion region : CartographClient.regions()) {
                 NamedRegion.Point point = region.labelPosition();
                 int[] at = project(area, drawn, angle, scale, point.x(), point.z(), 12);
@@ -89,18 +93,30 @@ final class AtlasHud {
             double facing = Math.toRadians(mc.player.getYRot() + 180) - angle;
             AtlasChrome.arrow(g, area.x() + area.size() * .5, area.y() + area.size() * .5, facing, .76);
         }
-        if (cfg.hud(ClientMapSettings.CARDINALS)) drawCardinals(g, mc, area, angle);
-        if (cfg.hud(ClientMapSettings.COORDS)) {
-            String pos = "X " + mc.player.getBlockX() + " · Z " + mc.player.getBlockZ();
-            int half = mc.font.width(pos) / 2 + 6, middle = area.x() + area.size() / 2;
-            AtlasChrome.rounded(g, middle - half, area.y() + area.size() + 3, half * 2, 15, 4, AtlasChrome.PANEL);
-            g.drawCenteredString(mc.font, pos, middle, area.y() + area.size() + 7, AtlasChrome.CREAM);
+        if (!held && cfg.hud(ClientMapSettings.CARDINALS)) drawCardinals(g, mc, area, angle);
+        if (!held && cfg.hud(ClientMapSettings.COORDS)) {
+            // Even very small map sizes must never sprout a text bar larger
+            // than the map itself. Use two compact rows and keep them bounded.
+            int allowed = Math.max(18, area.size() - 8);
+            String sx = "X" + mc.player.getBlockX(), sz = "Z" + mc.player.getBlockZ();
+            if (mc.font.width(sx) > allowed) sx = Integer.toString(mc.player.getBlockX());
+            if (mc.font.width(sz) > allowed) sz = Integer.toString(mc.player.getBlockZ());
+            g.enableScissor(area.x() + 1, area.y(), area.x() + area.size() - 1,
+                    area.y() + area.size());
+            AtlasChrome.rounded(g, area.x() + 1, area.y() + area.size() - 22,
+                    Math.min(area.size() - 2, Math.max(mc.font.width(sx), mc.font.width(sz)) + 5),
+                    21, 3, AtlasChrome.PANEL);
+            g.drawString(mc.font, sx, area.x() + 3, area.y() + area.size() - 20,
+                    AtlasChrome.CREAM, false);
+            g.drawString(mc.font, sz, area.x() + 3, area.y() + area.size() - 11,
+                    AtlasChrome.CREAM, false);
+            g.disableScissor();
         }
         if (editing) {
             int x = area.x() + area.size(), y = area.y() + area.size();
-            AtlasChrome.rounded(g, x - 12, y - 12, 20, 20, 4, AtlasChrome.GOLD);
-            AtlasChrome.line(g, x - 8, y + 4, x + 4, y - 8, AtlasChrome.INSET, 1);
-            AtlasChrome.line(g, x - 3, y + 4, x + 4, y - 3, AtlasChrome.INSET, 1);
+            AtlasChrome.rounded(g, x - 9, y - 9, 14, 14, 3, AtlasChrome.GOLD);
+            AtlasChrome.line(g, x - 6, y + 2, x + 2, y - 6, AtlasChrome.INSET, 1);
+            AtlasChrome.line(g, x - 2, y + 2, x + 2, y - 2, AtlasChrome.INSET, 1);
         }
     }
 

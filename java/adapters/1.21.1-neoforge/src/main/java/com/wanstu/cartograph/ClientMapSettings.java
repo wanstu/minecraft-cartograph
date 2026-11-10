@@ -21,10 +21,11 @@ final class ClientMapSettings {
 
     Style style = Style.PIXEL;
     int layers = 31 | 1 << CONTOURS;
-    int hudFlags = 63;
+    // Compact default: map + landmarks + compass arrow; extra overlays opt-in.
+    int hudFlags = (1 << ENABLED) | (1 << ICONS);
     boolean round = true;
     double hudX = .96, hudY = .06, hudZoom = 1.5;
-    int hudSize = 184;
+    int hudSize = 130;
 
     static ClientMapSettings get() {
         if (instance == null) instance = load();
@@ -43,9 +44,9 @@ final class ClientMapSettings {
     void toggleHud(int index) { hudFlags ^= 1 << index; save(); }
 
     void resetHud() {
-        hudFlags = 63;
+        hudFlags = (1 << ENABLED) | (1 << ICONS);
         round = true;
-        hudSize = 184;
+        hudSize = 130;
         hudX = .96; hudY = .06; hudZoom = 1.5;
         save();
     }
