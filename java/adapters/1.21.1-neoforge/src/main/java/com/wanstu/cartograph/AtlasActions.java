@@ -108,7 +108,13 @@ public final class AtlasActions {
         };
         ItemStack ingredient = findIngredient(player, material);
         if (ingredient.isEmpty() && !player.getAbilities().instabuild) {
-            reply(player, false, "背包里没有所选材料；请先放入对应墨囊或染料");
+            String missing = switch (slot) {
+                case 0 -> "墨囊"; case 1 -> "发光墨囊";
+                case 2 -> "红色染料"; case 3 -> "黄色染料";
+                case 4 -> "蓝色染料"; case 5 -> "指南针";
+                case 6 -> "原版空地图"; default -> "材料";
+            };
+            reply(player, false, "背包里没有" + missing + "，未消耗任何材料");
             return;
         }
         AtlasState next = switch (slot) {
@@ -124,8 +130,15 @@ public final class AtlasActions {
         if (next.equals(state)) { reply(player, false, "地图册资源已满或状态未变化"); return; }
         if (!player.getAbilities().instabuild) ingredient.shrink(1);
         data.update(entry, next, atlas);
-        reply(player, true, slot == 5 ? "指南针已装入，玩家位置显示开启" :
-                "已投入材料，地图册资源已更新", slot == 0 || slot >= 2 && slot <= 4);
+        String completed = switch (slot) {
+            case 0 -> "墨囊投入成功 · 测绘墨水 " + next.inkUnits() / 10.0;
+            case 1 -> "发光墨囊投入成功 · 发光墨水 " + next.glowUnits() / 10.0;
+            case 2, 3, 4 -> "染料投入成功 · 彩色颜料 " + next.pigmentUnits() / 10.0;
+            case 5 -> "指南针已装入，玩家位置显示开启";
+            case 6 -> "空地图投入成功 · 地图纸值 " + next.paperUnits() / 10.0;
+            default -> "地图册资源更新成功";
+        };
+        reply(player, true, completed, slot == 0 || slot >= 2 && slot <= 4);
     }
 
     public static boolean mayConfigure(ServerPlayer player) {

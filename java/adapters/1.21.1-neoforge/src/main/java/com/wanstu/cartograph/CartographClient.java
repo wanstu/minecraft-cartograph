@@ -337,7 +337,11 @@ public final class CartographClient {
                 if (previous != null) textureRevision++;
             }
             PAGES.put(k, new Entry(page, texture, id, changedHeights || previous == null ? null : previous.light(), ticks));
-            if (changedHeights && (page.heights().length != 0 || old != null && old.heights().length != 0)) redrawNeighbors(k);
+            // Avoid recomputing adjacent GPU textures at every partial
+            // milestone: wait for the completed height field.
+            if (changedHeights && page.complete() &&
+                    (page.heights().length != 0 || old != null && old.heights().length != 0))
+                redrawNeighbors(k);
             while (PAGES.size() > CACHE_LIMIT) {
                 CacheKey oldest = PAGES.keySet().iterator().next();
                 Entry removed = PAGES.remove(oldest);

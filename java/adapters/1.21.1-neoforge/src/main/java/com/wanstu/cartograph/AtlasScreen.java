@@ -64,6 +64,10 @@ public final class AtlasScreen extends Screen {
     private String message = "", status = "";
     private int messageUntil;
     private boolean badMessage;
+    private String materialNotice = "";
+    private boolean materialNoticeError;
+    private boolean annotationPending, materialPending;
+    private int requestStartedAtTick;
     private Selection selection;
     private EditBox name, coordinateX, coordinateZ, hexColor, note;
     private AtlasMarker editingMarker;
@@ -185,12 +189,36 @@ public final class AtlasScreen extends Screen {
     @Override public void tick() {
         // Discovery is NOT a 30-second "cooldown": when the viewport has
         // missing tiles and the queue empties, refill it within half a second.
-        if (++ticks % 10 == 0 && CartographClient.queuedCount() < 48)
+        ticks++;
+        if (materialPending && ticks - requestStartedAtTick >= 200) {
+            materialPending = false;
+            materialNoticeError = true;
+            materialNotice = "服务端 10 秒未响应 · 本次操作尚未确认";
+            toast(materialNotice, true);
+        }
+        if (annotationPending && ticks - requestStartedAtTick >= 200) {
+            annotationPending = false;
+            toast("保存请求超时，未确认成功；内容仍在，可以重试", true);
+        }
+        if (ticks % 10 == 0 && CartographClient.queuedCount() < 48)
             reload(false, false);
     }
 
     public void feedback(boolean ok, String text, boolean surveyChanged) {
         toast(text, !ok);
+        if (dialog == Dialog.MATERIALS) {
+            materialPending = false;
+            materialNotice = text;
+            materialNoticeError = !ok;
+        }
+        if (annotationPending && (dialog == Dialog.MARKER || dialog == Dialog.REGION)) {
+            annotationPending = false;
+            if (ok && (text.contains("标点") || text.contains("区域"))) {
+                // Keep editing fields on server rejection: never discard user
+                // input just because a request was sent, not acknowledged.
+                closeDialog();
+            }
+        }
         if (!ok) return;
         // Paper refill, naming and compass changes do not invalidate map imagery.
         // Just reload metadata at the central tile. Survey/color changes require
@@ -229,6 +257,11 @@ public final class AtlasScreen extends Screen {
                 g.pose().pushPose();
                 g.pose().translate(0, 0, 300);
                 renderDialog(g);
+                // Minecraft EditBox widgets belong to the dialog too. Rendering
+                // them after popping the elevated pose puts them UNDER its solid
+                // background, making names/notes/hex colors invisible.
+                super.render(g, mouseX, mouseY, partial);
+                g.flush();
                 g.pose().popPose();
             }
             if (!message.isEmpty() && ticks <= messageUntil) {
@@ -248,7 +281,7 @@ public final class AtlasScreen extends Screen {
                 g.flush();
                 g.pose().popPose();
             }
-            super.render(g, mouseX, mouseY, partial);
+            // Outside a modal there are no text widgets; render only once.
             g.flush();
         } finally { g.pose().popPose(); }
     }
@@ -502,7 +535,7 @@ public final class AtlasScreen extends Screen {
 
     private void renderPanel(GuiGraphics g) {
         int width = Math.min(228, w() - 28), x = w() - width - 14, y = 62;
-        int height = Math.min(h() - y - 60, panel == Panel.ATLAS ? 257 : panel == Panel.INFO ? 184 : 276);
+        int height = Math.min(h() - y - 60, panel == Panel.ATLAS ? 231 : panel == Panel.INFO ? 184 : 276);
         card(g, x, y, width, height, 8);
         String title = switch (panel) {
             case LAYERS -> "地图图层"; case MARKERS -> "我的标点"; case REGIONS -> "区域命名";
@@ -534,15 +567,7 @@ public final class AtlasScreen extends Screen {
                 textRow(g, left, row + 90, inner, "指南针", state.compassInstalled() ? "已装入" : "未装入");
                 progress(g, left, row + 110, inner, "测绘覆盖", c == null ? 0 : c.totalSurveyed(), count, 0xff93ad8b);
                 progress(g, left, row + 136, inner, "彩色覆盖", c == null ? 0 : c.totalColored(), count, 0xffb1a6d2);
-                button(g, left, row + 161, inner, 21, "打开材料槽", true, () -> dialog = Dialog.MATERIALS);
-                boolean canExpand = minecraft.player.getAbilities().instabuild ||
-                        state.paperEnabled() && (CartographClient.settings().rates().permanent(3)
-                                || state.paperUnits() >= CartographClient.settings().rates().cost(3));
-                button(g, left, row + 187, inner, 22,
-                        canExpand ? "＋ 使用纸值扩充一页" : "地图纸值不足 · 请先投入空地图",
-                        canExpand, canExpand ? CartographClient::sendAddPage : null);
-                g.drawString(font, shorten("每页 +" + sheetSide + "×" + sheetSide + " 方块 · 纸值在材料槽补充", inner),
-                        left, row + 213, MUTED, false);
+                button(g, left, row + 166, inner, 21, "打开材料槽", true, this::openMaterials);
             }
             case MARKERS -> {
                 button(g, left, row, inner, 24, "＋ 新增标点", true, () -> openMarker(null, world(viewX), world(viewZ)));
@@ -725,7 +750,7 @@ public final class AtlasScreen extends Screen {
     private int modalW() { return Math.min(486, w() - 24); }
     private int modalH() { return switch (dialog) {
         case SETTINGS -> settingsTab == SettingsTab.COST ? 381 : settingsTab == SettingsTab.MAP ? 366 : 276;
-        case MATERIALS -> 346;
+        case MATERIALS -> 366;
         case MARKER -> 291;
         case REGION -> 235;
         case CONFIRM -> 110;
@@ -878,6 +903,20 @@ public final class AtlasScreen extends Screen {
         }));
     }
 
+    private void openMaterials() {
+        materialNotice = "选择材料进行投入，服务器确认后显示结果";
+        materialNoticeError = false;
+        dialog = Dialog.MATERIALS;
+    }
+
+    private void requestRefill(int material) {
+        materialNotice = "正在提交" + MATERIAL_NAMES[material] + "，请查看确认结果…";
+        materialNoticeError = false;
+        materialPending = true;
+        requestStartedAtTick = ticks;
+        CartographClient.sendRefill(material);
+    }
+
     private void materials(GuiGraphics g, int x, int y, int w, int h) {
         int left = x + 14, inner = w - 28;
         AtlasState state = CartographClient.state();
@@ -902,6 +941,23 @@ public final class AtlasScreen extends Screen {
                 paperPermanent ? "已永久启用" : refillHint(rates, 3), paperPermanent);
         g.drawString(font, "非消耗品", left, y + 237, GOLD);
         slot(g, left, y + 252, inner, 5, state.compassInstalled() ? "已装入 · 点击取出" : "点击装入", false);
+        if (!materialNotice.isBlank())
+            g.drawString(font, shorten(materialNotice, inner), left, y + 295,
+                    materialNoticeError ? 0xffffa789 : CREAM, false);
+        boolean canExpand = minecraft.player.getAbilities().instabuild ||
+                state.paperEnabled() && (rates.permanent(3) || state.paperUnits() >= rates.cost(3));
+        button(g, left, y + h - 31, 177, 22,
+                "使用纸值扩充地图册", false,
+                canExpand ? () -> {
+                    materialNotice = "正在扩充地图册，等待服务端确认…";
+                    materialNoticeError = false;
+                    materialPending = true;
+                    requestStartedAtTick = ticks;
+                    CartographClient.sendAddPage();
+                } : () -> {
+                    materialNotice = "地图纸值不足，先投入上面的空地图";
+                    materialNoticeError = true;
+                });
         button(g, x + w - 85, y + h - 31, 71, 22, "完成", true, this::closeDialog);
     }
 
@@ -919,10 +975,11 @@ public final class AtlasScreen extends Screen {
         g.renderItem(new ItemStack(MATERIALS[index]), x + 10, y + 11);
         g.drawString(font, shorten(MATERIAL_NAMES[index], width - 39), x + 37, y + 8, CREAM);
         g.drawString(font, shorten(detail, width - 39), x + 37, y + 23, MUTED);
-        if (!disabled) hits.add(new Hit(x, y, width, 39, () -> CartographClient.sendRefill(index)));
+        if (!disabled) hits.add(new Hit(x, y, width, 39, () -> requestRefill(index)));
     }
 
     private void openMarker(AtlasMarker marker, int x, int z) {
+        annotationPending = false;
         clearFields(); editingMarker = marker;
         markerIcon = marker == null ? 0 : marker.icon();
         markerGlow = marker != null && marker.glowing();
@@ -934,6 +991,7 @@ public final class AtlasScreen extends Screen {
     private void markerFields(String title, String xValue, String zValue, String color) {
         int x = modalX() + 14, y = modalY(), inner = modalW() - 28, half = (inner - 8) / 2;
         name = field(x, y + 58, inner, title, AtlasMarker.MAX_NAME, "标点名称");
+        setFocused(name); name.setFocused(true);
         coordinateX = field(x, y + 97, half, xValue, 9, "X");
         coordinateZ = field(x + half + 8, y + 97, half, zValue, 9, "Z");
         coordinateX.setFilter(v -> v.matches("-?[0-9]{0,8}"));
@@ -963,12 +1021,17 @@ public final class AtlasScreen extends Screen {
         for (int i = 0; i < colors.length; i++) {
             int xx = x + 16 * i, rgb = colors[i];
             rounded(g, xx, y, 14, 14, 3, 0xff000000 | rgb);
-            hits.add(new Hit(xx, y, 14, 14, () -> hexColor.setValue(hex(rgb))));
+            if (hexColor != null && hexColor.getValue().equalsIgnoreCase(hex(rgb)))
+                g.renderOutline(xx - 1, y - 1, 16, 16, GOLD);
+            hits.add(new Hit(xx, y, 14, 14, () -> {
+                if (hexColor != null) hexColor.setValue(hex(rgb));
+            }));
         }
     }
 
     private void saveMarker() {
-        String title = name.getValue().strip();
+        if (annotationPending) return;
+        String title = name == null ? "" : name.getValue().strip();
         if (title.isEmpty()) { toast("请输入标点名称", true); return; }
         try {
             int x = Integer.parseInt(coordinateX.getValue()), z = Integer.parseInt(coordinateZ.getValue());
@@ -977,11 +1040,14 @@ public final class AtlasScreen extends Screen {
             int color = parseHex(hexColor.getValue());
             CartographClient.sendMarker(new MapNetwork.EditMarker(CartographClient.atlasId(),
                     editingMarker == null ? "" : editingMarker.id(), x, z, title, markerIcon, color, markerGlow, false));
-            closeDialog();
+            annotationPending = true;
+            requestStartedAtTick = ticks;
+            toast("正在保存标点，请确认服务器结果…", false);
         } catch (NumberFormatException bad) { toast("检查 X / Z 坐标和颜色格式", true); }
     }
 
     private void openRegion(NamedRegion existing, List<Point> points) {
+        annotationPending = false;
         clearFields(); selection = null; panel = Panel.NONE; menu = Menu.NONE;
         editingRegion = existing; draft = new ArrayList<>(points); adjustVertices = true;
         regionType = existing == null ? NamedRegion.TYPES.length - 1 : existing.type();
@@ -993,6 +1059,7 @@ public final class AtlasScreen extends Screen {
     private void regionFields(String title, String description, String color) {
         int x = modalX() + 14, y = modalY(), inner = modalW() - 28;
         name = field(x, y + 58, inner, title, NamedRegion.MAX_NAME, "区域名称");
+        setFocused(name); name.setFocused(true);
         hexColor = field(x + 121, y + 133, inner - 121, color, 7, "区域颜色");
         note = field(x, y + 174, inner, description, NamedRegion.MAX_NOTE, "备注");
     }
@@ -1017,12 +1084,15 @@ public final class AtlasScreen extends Screen {
     }
 
     private void saveRegion() {
+        if (annotationPending) return;
         if (name.getValue().isBlank()) { toast("请输入区域名称", true); return; }
         try {
             CartographClient.sendRegion(new MapNetwork.EditRegion(CartographClient.atlasId(),
                     editingRegion == null ? "" : editingRegion.id(), name.getValue(), regionType,
                     parseHex(hexColor.getValue()), note.getValue(), List.copyOf(draft), false));
-            closeDialog();
+            annotationPending = true;
+            requestStartedAtTick = ticks;
+            toast("正在保存区域，请确认服务器结果…", false);
         } catch (NumberFormatException bad) { toast("颜色使用 #RRGGBB 格式", true); }
     }
 
@@ -1054,6 +1124,8 @@ public final class AtlasScreen extends Screen {
     }
 
     private void closeDialog() {
+        annotationPending = false;
+        materialPending = false;
         if (dialog == Dialog.SETTINGS) {
             if (ratesDirty && CartographClient.settings().editable()) {
                 CartographClient.sendSettings(new MapNetwork.MaterialRates(costs[0], costs[1], costs[2], costs[3],
@@ -1228,7 +1300,7 @@ public final class AtlasScreen extends Screen {
     @Override public boolean mouseScrolled(double mx, double my, double dx, double dy) {
         if (dialog != Dialog.NONE) return true;
         int panelX = w() - Math.min(228, w() - 28) - 14;
-        int panelHeight = Math.min(h() - 122, panel == Panel.ATLAS ? 257 : panel == Panel.INFO ? 150 : 276);
+        int panelHeight = Math.min(h() - 122, panel == Panel.ATLAS ? 231 : panel == Panel.INFO ? 184 : 276);
         if (panel != Panel.NONE && inside(ux(mx), ux(my), panelX, 62, w() - panelX - 14, panelHeight)) {
             if (panel == Panel.REGIONS || panel == Panel.MARKERS) {
                 int count = panel == Panel.REGIONS ? CartographClient.regions().size() : markers().size();

@@ -216,7 +216,7 @@ public final class WorldSurfaceIndex implements AutoCloseable {
             }
         }
         if (tick % 600 == 0 && (launched > 0 || dropped > 0)) {
-            LOG.debug("Surface cache: chunks={} pending={} queue={} scheduled={} done={} " +
+            LOG.info("Surface cache: chunks={} pending={} queue={} scheduled={} done={} " +
                             "hits={} rejected={} avg_read_ms={}",
                     chunks.size(), inFlight.size(), readers.getQueue().size(),
                     launched, received, cacheHits, dropped,

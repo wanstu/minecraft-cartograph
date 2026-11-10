@@ -30,8 +30,10 @@ import java.util.UUID;
  */
 public final class AtlasMapServer {
     private static final Logger LOG = LoggerFactory.getLogger("cartograph.survey");
-    private static final int MAX_WORK_PER_TICK = 6;
-    private static final long MAX_SURVEY_NANOS_PER_TICK = 2_500_000L;
+    // Keep main-thread terrain work bounded, but do not force 4-5 seconds
+    // of minimum waiting for each map at ordinary map zoom.
+    private static final int MAX_WORK_PER_TICK = 16;
+    private static final long MAX_SURVEY_NANOS_PER_TICK = 4_000_000L;
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final ArrayDeque<UUID> ORDER = new ArrayDeque<>();
     private static final Map<UUID, Long> LAST_DIAGNOSTIC = new HashMap<>();
@@ -162,14 +164,22 @@ public final class AtlasMapServer {
             // than waiting for one disk I/O completion before submitting the
             // next. Snapshot/cost debits remain sequential and main-thread.
             if (!task.cachedOnly) {
-                for (int ahead = index + 1; ahead < Math.min(64, index + 5); ahead++) {
+                for (int ahead = index + 1; ahead < Math.min(64, index + 13); ahead++) {
                     indexer.prefetchSaved(player.serverLevel(),
                             task.pageX * AtlasPage.CHUNKS_PER_SIDE + ahead % 8,
                             task.pageZ * AtlasPage.CHUNKS_PER_SIDE + ahead / 8);
                 }
             }
             if (lookup.state() == WorldSurfaceIndex.State.PENDING) {
-                // Never pay for a pending chunk or load/generate unseen land.
+                // No mysterious cooldown: if disk parsing really is slow
+                // the next log records the exact blocker and queue length.
+                if (ticks - task.startedAtTick > 200 && ticks - task.lastDiagnosticTick >= 200) {
+                    task.lastDiagnosticTick = ticks;
+                    LOG.warn("Map tile still awaiting saved chunk: player={} tile=({}, {}) "
+                                    + "scanned={}/64 disk_pending={} disk_queue={} surface_done={}",
+                            viewer, task.pageX, task.pageZ, task.next,
+                            indexer.pendingChunks(), indexer.diskQueueSize(), indexer.completedScans());
+                }
                 ORDER.addLast(viewer);
                 continue;
             }
@@ -204,10 +214,11 @@ public final class AtlasMapServer {
             }
 
             boolean done = task.next >= 64;
-            // A partial snapshot forces GPU re-uploads and re-shades all
-            // adjacent tiles every time (8/32/64). Send one complete tile,
-            // keeping world sampling incremental and bounded on the server.
-            if (done) {
+            // Display real partial terrain as soon as 8/32 chunks have
+            // finished. No guessed pixels: unscanned locations remain blank.
+            // Three snapshots per tile balance responsiveness and GPU work.
+            boolean milestone = done || task.next == 8 || task.next == 32;
+            if (milestone) {
                 PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
                         task.atlasId, task.dimension, task.pageX, task.pageZ,
                         task.pixels.clone(), task.features.clone(),
@@ -255,6 +266,7 @@ public final class AtlasMapServer {
         final byte[] waterDepths = new byte[MapNetwork.Page.PIXELS];
         final java.util.List<SurfaceStructure> structures = new java.util.ArrayList<>();
         int next, generated, painted;
+        int startedAtTick = ticks, lastDiagnosticTick = ticks;
         long surveyedChunks, coloredChunks;
         final boolean cachedOnly;
         Pending(String atlasId, int pageX, int pageZ, String dimension, boolean cachedOnly) {
