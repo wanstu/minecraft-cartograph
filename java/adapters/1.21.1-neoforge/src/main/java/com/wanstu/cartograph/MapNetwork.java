@@ -1,5 +1,6 @@
 package com.wanstu.cartograph;
 
+import com.wanstu.cartograph.core.AtlasPage;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -32,11 +33,21 @@ public final class MapNetwork {
     }
 
     public record Page(String atlasId, String dimension, int pageX, int pageZ,
-                       byte[] pixels, byte[] features, long coloredChunks, int inkUnits, int pigmentUnits,
+                       byte[] pixels, byte[] features, short[] heights, byte[] waterDepths,
+                       long coloredChunks, int inkUnits, int pigmentUnits,
                        int glowUnits, boolean compass, boolean inRange,
                        boolean complete, int scanned, int generated, int painted,
                        int anchorX, int anchorZ, int totalPages,
                        List<AtlasMarker> markers, List<SurfaceStructure> structures) implements CustomPacketPayload {
+        public static final int PIXELS = AtlasPage.SIDE_BLOCKS * AtlasPage.SIDE_BLOCKS;
+
+        public Page {
+            if (pixels.length != PIXELS || features.length != PIXELS
+                    || (heights.length != 0 && heights.length != PIXELS)
+                    || waterDepths.length != heights.length)
+                throw new IllegalArgumentException("Invalid Cartograph surface arrays");
+        }
+
         public static final Type<Page> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "page"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Page> CODEC = StreamCodec.of(
@@ -46,6 +57,9 @@ public final class MapNetwork {
                     buf.writeInt(value.pageX); buf.writeInt(value.pageZ);
                     buf.writeByteArray(value.pixels);
                     buf.writeByteArray(value.features);
+                    buf.writeVarInt(value.heights.length);
+                    for (short height : value.heights) buf.writeShort(height);
+                    buf.writeByteArray(value.waterDepths);
                     buf.writeLong(value.coloredChunks);
                     buf.writeInt(value.inkUnits); buf.writeInt(value.pigmentUnits);
                     buf.writeInt(value.glowUnits);
@@ -77,8 +91,14 @@ public final class MapNetwork {
                 buf -> {
                     String atlasId = buf.readUtf(64), dim = buf.readUtf(128);
                     int pageX = buf.readInt(), pageZ = buf.readInt();
-                    byte[] pixels = buf.readByteArray(128 * 128);
-                    byte[] features = buf.readByteArray(128 * 128);
+                    byte[] pixels = buf.readByteArray(PIXELS);
+                    byte[] features = buf.readByteArray(PIXELS);
+                    int heightCount = buf.readVarInt();
+                    if (heightCount != 0 && heightCount != PIXELS)
+                        throw new IllegalArgumentException("Invalid Cartograph height count");
+                    short[] heights = new short[heightCount];
+                    for (int i = 0; i < heightCount; i++) heights[i] = buf.readShort();
+                    byte[] waterDepths = buf.readByteArray(heightCount);
                     long colored = buf.readLong();
                     int ink = buf.readInt(), pigment = buf.readInt(), glow = buf.readInt();
                     boolean compass = buf.readBoolean(), inRange = buf.readBoolean();
@@ -106,7 +126,7 @@ public final class MapNetwork {
                     for (int i = 0; i < countStructures; i++) {
                         structures.add(new SurfaceStructure(buf.readUtf(64), buf.readInt(), buf.readInt()));
                     }
-                    return new Page(atlasId, dim, pageX, pageZ, pixels, features, colored,
+                    return new Page(atlasId, dim, pageX, pageZ, pixels, features, heights, waterDepths, colored,
                             ink, pigment, glow, compass, inRange, complete, scanned, generated,
                             painted, anchorX, anchorZ, totalPages,
                             List.copyOf(markers), List.copyOf(structures));
@@ -200,7 +220,7 @@ public final class MapNetwork {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("5");
+        var registrar = event.registrar("6");
         registrar.playToServer(Request.TYPE, Request.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasMapServer.enqueue(player, request);

@@ -1,15 +1,14 @@
 package com.wanstu.cartograph;
 
-import com.mojang.blaze3d.platform.NativeImage;
 import com.wanstu.cartograph.core.SpiralCoverage;
-import com.wanstu.cartograph.core.AtlasTone;
+import com.wanstu.cartograph.core.AtlasPage;
+import com.wanstu.cartograph.core.TerrainRelief;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.material.MapColor;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
@@ -20,6 +19,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -50,7 +50,7 @@ public final class CartographClient {
     private static MapNetwork.CostSettings settings = new MapNetwork.CostSettings(10,10,10,128,128,32,false);
 
     public record CacheKey(String atlasId, String dimension, int px, int pz) {}
-    public record Entry(MapNetwork.Page page, DynamicTexture texture, ResourceLocation textureId, int updated) {}
+    public record Entry(MapNetwork.Page page, ResourceLocation textureId, int updated) {}
 
     public CartographClient(IEventBus bus) {
         bus.addListener(CartographClient::registerKeys);
@@ -184,10 +184,10 @@ public final class CartographClient {
         while (OPEN.consumeClick()) if (hasAtlas()) open();
         ticks++;
 
-        if (held() && mc.screen == null && ticks % 200 == 1) {
+        if (held() && mc.screen == null) {
             int px = Math.floorDiv(mc.player.getBlockX(), 128);
             int pz = Math.floorDiv(mc.player.getBlockZ(), 128);
-            queue(px, pz, true);
+            queue(px, pz, false);
         }
 
         // One request in flight per player. Without this guard, opening a
@@ -202,10 +202,9 @@ public final class CartographClient {
             CacheKey key = redrawing.next();
             redrawing.remove();
             Entry old = PAGES.get(key);
-            if (old == null) continue;
-            if (old.textureId() != null)
-                mc.getTextureManager().release(old.textureId());
-            PAGES.put(key, createEntry(old.page(), old.updated()));
+            if (old == null || !drawable(old.page())) continue;
+            PAGES.put(key, createEntry(key, old.page(), old.updated()));
+            release(old);
             redrawn++;
         }
 
@@ -241,56 +240,55 @@ public final class CartographClient {
         return List.copyOf(out);
     }
 
-    private static Entry createEntry(MapNetwork.Page page, int updated) {
-        // Unknown/unpurchased pages are already covered by the paper-colored
-        // Screen background. Do not allocate 128² native pixels and a GPU texture.
-        if (!page.inRange() || page.painted() == 0)
-            return new Entry(page, null, null, updated);
-        Minecraft mc = Minecraft.getInstance();
-        int[] sourceRgb = new int[128 * 128];
-        byte[] categories = new byte[128 * 128];
-        for (int i = 0; i < sourceRgb.length; i++) {
-            int packed = Byte.toUnsignedInt(page.pixels()[i]);
-            if (packed == 0 || packed > 64) continue;
-            int rgb = MapColor.byId(packed - 1).col & 0xffffff;
-            sourceRgb[i] = rgb;
-            int x = i % 128, z = i / 128;
-            int chunk = (z / 16) * 8 + (x / 16);
-            boolean color = (page.coloredChunks() & (1L << chunk)) != 0;
-            if (color) categories[i] = 3;
-            else {
-                int r = (rgb >> 16) & 255;
-                int g = (rgb >> 8) & 255;
-                int b = rgb & 255;
-                int lightness = (r * 30 + g * 59 + b * 11) / 100;
-                categories[i] = (byte) (lightness >= 132 ? 1 : 2);
+    private static Entry createEntry(CacheKey key, MapNetwork.Page page, int updated) {
+        DynamicTexture texture = PixelPageTexture.create(page, heightWindow(key, page), drawRoads, drawRails);
+        ResourceLocation id = Minecraft.getInstance().getTextureManager().register("cartograph/page", texture);
+        return new Entry(page, id, updated);
+    }
+
+    private static short[] heightWindow(CacheKey key, MapNetwork.Page page) {
+        int side = AtlasPage.SIDE_BLOCKS, halo = TerrainRelief.HALO, stride = side + 2 * halo;
+        short[] window = new short[stride * stride];
+        Arrays.fill(window, TerrainRelief.UNKNOWN_HEIGHT);
+        for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
+            MapNetwork.Page source = page;
+            if (dx != 0 || dz != 0) {
+                Entry neighbor = PAGES.get(adjacentKey(key, dx, dz));
+                if (neighbor == null) continue;
+                source = neighbor.page();
+            }
+            if (!source.inRange() || source.heights().length != MapNetwork.Page.PIXELS) continue;
+            int originX = dx * side, originZ = dz * side;
+            int x0 = Math.max(-halo, originX), x1 = Math.min(side + halo, originX + side);
+            int z0 = Math.max(-halo, originZ), z1 = Math.min(side + halo, originZ + side);
+            for (int z = z0; z < z1; z++) {
+                int src = (z - originZ) * side + x0 - originX;
+                int dst = (z + halo) * stride + x0 + halo;
+                System.arraycopy(source.heights(), src, window, dst, x1 - x0);
             }
         }
-        // 5x5 majority using integral images (linear time). Removes random
-        // grass/leaf/block binary speckle without introducing grayscale or
-        // turning ungenerated cells into imaginary terrain.
-        byte[] filtered = AtlasTone.smooth(categories);
-        NativeImage pixels = new NativeImage(128, 128, false);
-        for (int i = 0; i < filtered.length; i++) {
-            int tone = Byte.toUnsignedInt(filtered[i]);
-            int rgb = switch (tone) {
-                case 1 -> 0xf4efdf;
-                case 2 -> 0x292724;
-                case 3 -> sourceRgb[i];
-                default -> 0xe4d5b4;
-            };
-            if (tone != 0) {
-                int feature = Byte.toUnsignedInt(page.features()[i]);
-                if (feature == 1 && drawRoads) rgb = tone == 3 ? 0xa58352 : 0x282724;
-                if (feature == 2 && drawRails) rgb = tone == 3 ? 0x353e42 : 0x111b1a;
-                if (feature == 3 && drawRails) rgb = tone == 3 ? 0x5b8790 : 0x111b1a;
-            }
-            int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
-            pixels.setPixelRGBA(i % 128, i / 128, 0xff000000 | (b << 16) | (g << 8) | r);
+        return window;
+    }
+
+    private static CacheKey adjacentKey(CacheKey key, int dx, int dz) {
+        return new CacheKey(key.atlasId(), key.dimension(), key.px() + dx, key.pz() + dz);
+    }
+
+    private static void redrawNeighbors(CacheKey key) {
+        for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dz == 0) continue;
+            CacheKey adjacent = adjacentKey(key, dx, dz);
+            if (PAGES.containsKey(adjacent)) REDRAW.add(adjacent);
         }
-        DynamicTexture texture = new DynamicTexture(pixels);
-        ResourceLocation textureId = mc.getTextureManager().register("cartograph/page", texture);
-        return new Entry(page, texture, textureId, updated);
+    }
+
+    private static boolean drawable(MapNetwork.Page page) {
+        return page.inRange() && page.painted() > 0;
+    }
+
+    private static void release(Entry entry) {
+        if (entry != null && entry.textureId() != null)
+            Minecraft.getInstance().getTextureManager().release(entry.textureId());
     }
 
     public static void acceptFeedback(MapNetwork.Feedback result) {
@@ -305,7 +303,6 @@ public final class CartographClient {
     }
 
     public static void acceptPage(MapNetwork.Page page) {
-        if (page.pixels().length != 128 * 128 || page.features().length != 128 * 128) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || !mc.level.dimension().location().toString().equals(page.dimension()))
             return;
@@ -332,26 +329,39 @@ public final class CartographClient {
             screen.refreshVisible();
         }
         CacheKey key = new CacheKey(page.atlasId(), page.dimension(), page.pageX(), page.pageZ());
-        REDRAW.remove(key);
-        Entry previous = PAGES.remove(key);
-        if (previous != null && previous.textureId() != null)
-            mc.getTextureManager().release(previous.textureId());
+        Entry previous = PAGES.get(key);
+        MapNetwork.Page old = previous == null ? null : previous.page();
+        // A refresh should not replace a complete page with its temporary partial scan.
+        if (!page.complete() && old != null && old.complete() && drawable(old)) return;
 
-        Entry fresh = createEntry(page, ticks);
-        PAGES.put(key, fresh);
+        boolean heightsChanged = old == null ? page.heights().length != 0
+                : !Arrays.equals(old.heights(), page.heights());
+        boolean rasterChanged = heightsChanged || old == null
+                || page.coloredChunks() != old.coloredChunks()
+                || !Arrays.equals(page.pixels(), old.pixels())
+                || !Arrays.equals(page.features(), old.features())
+                || !Arrays.equals(page.waterDepths(), old.waterDepths());
+        ResourceLocation existing = previous == null ? null : previous.textureId();
+        if (drawable(page)) {
+            if (rasterChanged || existing == null) REDRAW.add(key);
+        } else {
+            REDRAW.remove(key);
+            release(previous);
+            existing = null;
+        }
+        PAGES.put(key, new Entry(page, existing, ticks));
+        if (heightsChanged) redrawNeighbors(key);
         while (PAGES.size() > CACHE_LIMIT) {
             CacheKey oldest = PAGES.keySet().iterator().next();
             Entry removed = PAGES.remove(oldest);
-            if (removed.textureId() != null)
-                mc.getTextureManager().release(removed.textureId());
+            REDRAW.remove(oldest);
+            release(removed);
+            if (removed.page().heights().length != 0) redrawNeighbors(oldest);
         }
     }
 
     public static void clear() {
-        Minecraft mc = Minecraft.getInstance();
-        for (Entry e : PAGES.values()) {
-            if (e.textureId() != null) mc.getTextureManager().release(e.textureId());
-        }
+        for (Entry e : PAGES.values()) release(e);
         PAGES.clear();
         QUEUED.clear();
         REDRAW.clear();
@@ -395,7 +405,7 @@ public final class CartographClient {
         g.pose().pushPose();
         g.pose().translate(left, top, 0);
         g.pose().scale(0.75f, 0.75f, 1);
-        g.blit(t, 0, 0, 0, 0, 128, 128, 128, 128);
+        PixelPageTexture.blit(g, t, 0.75 * mc.getWindow().getGuiScale());
         g.pose().popPose();
         drawPlayer(g, left, top, 96, px, pz);
         g.drawString(mc.font, "Cartograph", left + 2, top + 99, 0xffe9d2a5, false);

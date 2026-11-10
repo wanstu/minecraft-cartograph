@@ -2,6 +2,7 @@ package com.wanstu.cartograph;
 
 import com.wanstu.cartograph.core.AtlasPage;
 import com.wanstu.cartograph.core.SurveyLedger;
+import com.wanstu.cartograph.core.TerrainRelief;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -15,6 +16,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -89,7 +91,8 @@ public final class AtlasMapServer {
         if (!entry.isCovered(dim, request.pageX(), request.pageZ())) {
             PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
                     entry.state().id(), dim, request.pageX(), request.pageZ(),
-                    new byte[128 * 128], new byte[128 * 128], 0L,
+                    new byte[MapNetwork.Page.PIXELS], new byte[MapNetwork.Page.PIXELS],
+                    new short[0], new byte[0], 0L,
                     entry.state().inkUnits(), entry.state().pigmentUnits(),
                     entry.state().glowUnits(), entry.state().compassInstalled(),
                     false, true, 0, 0, 0,
@@ -173,16 +176,15 @@ public final class AtlasMapServer {
                 if (savedColors != null && entry.paid(key)) {
                     task.painted++;
                     int x = index % 8, z = index / 8;
-                    for (int localZ = 0; localZ < 16; localZ++) {
-                        System.arraycopy(savedColors, localZ * 16, task.pixels,
-                                (z * 16 + localZ) * 128 + x * 16, 16);
-                    }
                     byte[] features = entry.getFeatures(key);
-                    if (features != null && features.length == 256) {
-                        for (int localZ = 0; localZ < 16; localZ++) {
-                            System.arraycopy(features, localZ * 16, task.features,
-                                    (z * 16 + localZ) * 128 + x * 16, 16);
-                        }
+                    for (int localZ = 0; localZ < 16; localZ++) {
+                        int source = localZ * 16;
+                        int destination = (z * 16 + localZ) * AtlasPage.SIDE_BLOCKS + x * 16;
+                        System.arraycopy(savedColors, source, task.pixels, destination, 16);
+                        System.arraycopy(tile.heights(), source, task.heights, destination, 16);
+                        System.arraycopy(tile.waterDepths(), source, task.waterDepths, destination, 16);
+                        if (features != null && features.length == 256)
+                            System.arraycopy(features, source, task.features, destination, 16);
                     }
                     for (SurfaceStructure structure : tile.structures()) {
                         if (task.structures.size() >= 64) break;
@@ -196,7 +198,9 @@ public final class AtlasMapServer {
             if (task.next == 8 || task.next == 32 || done) {
                 PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
                         task.atlasId, task.dimension, task.pageX, task.pageZ,
-                        task.pixels.clone(), task.features.clone(), task.coloredChunks,
+                        task.pixels.clone(), task.features.clone(),
+                        task.painted == 0 ? new short[0] : task.heights.clone(),
+                        task.painted == 0 ? new byte[0] : task.waterDepths.clone(), task.coloredChunks,
                         entry.state().inkUnits(), entry.state().pigmentUnits(),
                         entry.state().glowUnits(), entry.state().compassInstalled(),
                         true, done, task.next, task.generated, task.painted,
@@ -232,13 +236,16 @@ public final class AtlasMapServer {
         final String atlasId;
         final int pageX, pageZ;
         final String dimension;
-        final byte[] pixels = new byte[128 * 128];
-        final byte[] features = new byte[128 * 128];
+        final byte[] pixels = new byte[MapNetwork.Page.PIXELS];
+        final byte[] features = new byte[MapNetwork.Page.PIXELS];
+        final short[] heights = new short[MapNetwork.Page.PIXELS];
+        final byte[] waterDepths = new byte[MapNetwork.Page.PIXELS];
         final java.util.List<SurfaceStructure> structures = new java.util.ArrayList<>();
         int next, generated, painted;
         long coloredChunks;
         Pending(String atlasId, int pageX, int pageZ, String dimension) {
             this.atlasId = atlasId; this.pageX = pageX; this.pageZ = pageZ; this.dimension = dimension;
+            Arrays.fill(heights, TerrainRelief.UNKNOWN_HEIGHT);
         }
     }
 }

@@ -67,6 +67,34 @@ public final class CoreSelfTest {
         yes(smoothed[110 * 128 + 110] == 0, "never invent ungenerated terrain");
         yes(tones[20 * 128 + 20] == 2, "survey source remains immutable");
 
+        int stride = 2 * TerrainRelief.HALO + 1;
+        int center = stride * stride / 2;
+        short[] elevation = new short[stride * stride];
+        Arrays.fill(elevation, (short) -48);
+        yes(TerrainRelief.light(elevation, center, stride) == 1, "flat ground is neutral");
+        for (int z = 0; z < stride; z++) for (int x = 0; x < stride; x++)
+            elevation[z * stride + x] = (short) (x + z - 64);
+        double lit = TerrainRelief.light(elevation, center, stride);
+        yes(lit > 1, "north-west facing slope is lit");
+        for (int i = 0; i < elevation.length; i++) elevation[i] = (short) -elevation[i];
+        yes(TerrainRelief.light(elevation, center, stride) < 1, "opposite slope is in shade");
+
+        Arrays.fill(elevation, (short) 64);
+        elevation[center - 4 * (stride + 1)] = 85;
+        yes(TerrainRelief.light(elevation, center, stride) < 1, "ridge casts a shadow on level ground");
+        elevation[center - (stride + 1)] = TerrainRelief.UNKNOWN_HEIGHT;
+        yes(TerrainRelief.light(elevation, center, stride) == 1, "no shadow across unknown terrain");
+        Arrays.fill(elevation, TerrainRelief.UNKNOWN_HEIGHT);
+        elevation[center] = -12;
+        elevation[center + 2] = -10;
+        yes(TerrainRelief.light(elevation, center, stride) > 1, "known neighbor at page edge");
+        elevation[center] = TerrainRelief.UNKNOWN_HEIGHT;
+        yes(TerrainRelief.light(elevation, center, stride) == 1, "unknown center stays unshaded");
+        int gray = TerrainRelief.shade(0x75884f, lit, false);
+        yes((gray & 255) * 0x010101 == gray, "uncolored terrain is neutral gray");
+        yes(TerrainRelief.waterColor(1) != TerrainRelief.waterColor(12), "real water depth changes tone");
+        yes(TerrainRelief.waterColor(12) == TerrainRelief.waterColor(24), "deep-water tone is bounded");
+
         Path tmp = Files.createTempDirectory("cartograph-mca-test");
         try {
             Path file = tmp.resolve("r.-1.0.mca");
@@ -104,6 +132,6 @@ public final class CoreSelfTest {
             try (var files = Files.list(tmp)) { for (var file : files.toList()) Files.delete(file); }
             Files.delete(tmp);
         }
-        System.out.println("PASS Cartograph common: spiral coverage, exact-once debit, dimension isolation, MCA zlib, monochrome filter");
+        System.out.println("PASS Cartograph common: spiral coverage, exact-once debit, dimension isolation, MCA zlib, monochrome filter, terrain relief");
     }
 }

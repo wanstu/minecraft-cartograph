@@ -203,12 +203,13 @@ public final class AtlasScreen extends Screen {
                 ResourceLocation texture = CartographClient.texture(px, pz);
                 MapNetwork.Page page = CartographClient.page(px, pz);
                 if (texture == null || page == null || !page.inRange()) continue;
-                int x = toScreenX((long) px * 128);
-                int y = toScreenZ((long) pz * 128);
+                // Adjacent pages use the same fractional transform so sub-pixel zoom cannot open seams.
+                float x = (float) (screenMidX() + (px * 128.0 - viewX) * zoom);
+                float y = (float) (screenMidY() + (pz * 128.0 - viewZ) * zoom);
                 g.pose().pushPose();
                 g.pose().translate(x, y, 0);
                 g.pose().scale((float) zoom, (float) zoom, 1);
-                g.blit(texture, 0, 0, 0, 0, 128, 128, 128, 128);
+                PixelPageTexture.blit(g, texture, zoomPixels);
                 g.pose().popPose();
                 if (drawStructures || drawWaypoints) renderMarkers(g, page);
             }

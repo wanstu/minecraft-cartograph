@@ -1,5 +1,6 @@
 package com.wanstu.cartograph;
 
+import com.wanstu.cartograph.core.TerrainRelief;
 import com.wanstu.cartograph.world.McaChunkReader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -12,6 +13,7 @@ import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.util.SimpleBitStorage;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -24,10 +26,12 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.IntPredicate;
 
 /**
  * No seed, no forced chunk load. All pixels/roads/rails and structure markers
@@ -49,9 +53,11 @@ public final class SurfaceSampler {
     }
 
     /** 0 no feature, 1 natural dirt-path road, 2 vanilla railway, 3 Create railway. */
-    public record SurfaceTile(byte[] colors, byte[] features, List<SurfaceStructure> structures) {
+    public record SurfaceTile(byte[] colors, byte[] features, short[] heights,
+                              byte[] waterDepths, List<SurfaceStructure> structures) {
         public SurfaceTile {
-            if (colors == null || colors.length != 256 || features == null || features.length != 256)
+            if (colors.length != 256 || features.length != 256
+                    || heights.length != 256 || waterDepths.length != 256)
                 throw new IllegalArgumentException("Expected 16x16 genuine surface samples");
             structures = List.copyOf(structures);
         }
@@ -107,18 +113,36 @@ public final class SurfaceSampler {
     }
 
     private static SurfaceTile sampleLoaded(ServerLevel level, LevelChunk chunk, int chunkX, int chunkZ) {
-        byte[] result = new byte[256], features = new byte[256];
+        byte[] result = new byte[256], features = new byte[256], depths = new byte[256];
+        short[] heights = new short[256];
+        Arrays.fill(heights, TerrainRelief.UNKNOWN_HEIGHT);
         String[] surfaceNames = new String[256];
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        int minY = chunk.getMinBuildHeight();
         for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
             int i = x + z * 16;
-            int y = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
-            pos.set(chunkX * 16 + x, y, chunkZ * 16 + z);
-            BlockState block = chunk.getBlockState(pos);
-            String key = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
-            result[i] = sampleColor(block, chunk, pos);
-            features[i] = classifyFeature(key);
-            surfaceNames[i] = key;
+            int wx = chunkX * 16 + x, wz = chunkZ * 16 + z;
+            // ChunkAccess#getHeight already subtracts one from the heightmap's first free Y.
+            int top = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+            for (int y = top; y >= minY; y--) {
+                pos.set(wx, y, wz);
+                BlockState block = chunk.getBlockState(pos);
+                boolean water = isWater(block);
+                byte color = water ? (byte) (MapColor.WATER.id + 1) : sampleColor(block, chunk, pos);
+                if (y == top || color != 0) {
+                    String key = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
+                    if (features[i] == 0) features[i] = classifyFeature(key);
+                    if (surfaceNames[i] == null) surfaceNames[i] = key;
+                }
+                if (color == 0) continue;
+                result[i] = color;
+                heights[i] = (short) y;
+                if (water) {
+                    depths[i] = waterDepth(y, minY,
+                            below -> isWater(chunk.getBlockState(pos.set(wx, below, wz))));
+                }
+                break;
+            }
         }
         List<SurfaceStructure> markers = new ArrayList<>();
         var structureRegistry = level.registryAccess().registryOrThrow(Registries.STRUCTURE);
@@ -133,13 +157,24 @@ public final class SurfaceSampler {
                 if (markers.size() >= 4) break;
             }
         }
-        return new SurfaceTile(result, features, markers);
+        return new SurfaceTile(result, features, heights, depths, markers);
+    }
+
+    private static boolean isWater(BlockState block) {
+        return !block.blocksMotion() && block.getFluidState().is(FluidTags.WATER);
+    }
+
+    private static byte waterDepth(int surfaceY, int minY, IntPredicate waterAt) {
+        int depth = 1;
+        while (depth < TerrainRelief.MAX_WATER_DEPTH && surfaceY - depth >= minY
+                && waterAt.test(surfaceY - depth)) depth++;
+        return (byte) depth;
     }
 
     private static byte sampleColor(BlockState block, BlockGetter world, BlockPos pos) {
         try {
             MapColor color = block.getMapColor(world, pos);
-            return (byte) (color.id + 1); // zero is never-surveyed
+            return color == MapColor.NONE ? 0 : (byte) (color.id + 1);
         } catch (Exception worldDependentColor) {
             return (byte) (MapColor.STONE.id + 1);
         }
@@ -197,9 +232,7 @@ public final class SurfaceSampler {
         if (height.length != expectedLongs) return null;
         SimpleBitStorage surface = new SimpleBitStorage(bits, 256, height);
 
-        Map<Integer, BlockState[]> palettes = new HashMap<>();
-        Map<Integer, String[]> names = new HashMap<>();
-        Map<Integer, SimpleBitStorage> indices = new HashMap<>();
+        Map<Integer, SavedSection> savedSections = new HashMap<>();
         ListTag sections = nbt.getList("sections", Tag.TAG_COMPOUND);
         for (int i = 0; i < sections.size(); i++) {
             CompoundTag section = sections.getCompound(i);
@@ -217,36 +250,57 @@ public final class SurfaceSampler {
                 states[j] = BlockState.CODEC.parse(NbtOps.INSTANCE, palette)
                         .result().orElse(Blocks.STONE.defaultBlockState());
             }
-            palettes.put(sectionY, states);
-            names.put(sectionY, registryIds);
+            SimpleBitStorage indices = null;
             if (states.length > 1) {
                 int blockBits = Math.max(4, 32 - Integer.numberOfLeadingZeros(states.length - 1));
                 long[] packed = blocks.getLongArray("data");
                 int longs = (4096 + (64 / blockBits) - 1) / (64 / blockBits);
                 if (packed.length != longs) return null;
-                indices.put(sectionY, new SimpleBitStorage(blockBits, 4096, packed));
+                indices = new SimpleBitStorage(blockBits, 4096, packed);
             }
+            savedSections.put(sectionY, new SavedSection(states, registryIds, indices));
         }
 
-        byte[] result = new byte[256], features = new byte[256];
+        byte[] result = new byte[256], features = new byte[256], depths = new byte[256];
+        short[] heights = new short[256];
+        Arrays.fill(heights, TerrainRelief.UNKNOWN_HEIGHT);
         String[] topNames = new String[256];
-        int minBuild = minBuildHeight;
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         int cx = nbt.getInt("xPos"), cz = nbt.getInt("zPos");
         for (int z = 0; z < 16; z++) for (int x = 0; x < 16; x++) {
             int i = x + z * 16;
-            int y = minBuild + surface.get(i) - 1;
-            int sectionY = Math.floorDiv(y, 16);
-            BlockState[] palette = palettes.get(sectionY);
-            String[] registryIds = names.get(sectionY);
-            if (palette == null || registryIds == null) return null;
-            SimpleBitStorage storage = indices.get(sectionY);
-            int blockIndex = storage == null ? 0 : storage.get(((y & 15) << 8) | (z << 4) | x);
-            if (blockIndex < 0 || blockIndex >= palette.length) return null;
-            pos.set(cx * 16 + x, y, cz * 16 + z);
-            result[i] = sampleColor(palette[blockIndex], null, pos);
-            features[i] = classifyFeature(registryIds[blockIndex]);
-            topNames[i] = registryIds[blockIndex];
+            int offset = surface.get(i);
+            if (offset > worldHeight) return null;
+            int top = minBuildHeight + offset - 1;
+            int lx = x, lz = z;
+            for (int y = top; y >= minBuildHeight; y--) {
+                SavedSection section = savedSections.get(Math.floorDiv(y, 16));
+                if (section == null) {
+                    if (y == top) return null;
+                    y = Math.floorDiv(y, 16) * 16;
+                    continue;
+                }
+                int index = section.index(x, y, z);
+                BlockState block = section.palette()[index];
+                pos.set(cx * 16 + x, y, cz * 16 + z);
+                boolean water = isWater(block);
+                byte color = water ? (byte) (MapColor.WATER.id + 1) : sampleColor(block, null, pos);
+                if (y == top || color != 0) {
+                    String key = section.names()[index];
+                    if (features[i] == 0) features[i] = classifyFeature(key);
+                    if (topNames[i] == null) topNames[i] = key;
+                }
+                if (color == 0) continue;
+                result[i] = color;
+                heights[i] = (short) y;
+                if (water) {
+                    depths[i] = waterDepth(y, minBuildHeight, below -> {
+                        SavedSection lower = savedSections.get(Math.floorDiv(below, 16));
+                        return lower != null && isWater(lower.palette()[lower.index(lx, below, lz)]);
+                    });
+                }
+                break;
+            }
         }
 
         List<SurfaceStructure> markers = new ArrayList<>();
@@ -262,6 +316,12 @@ public final class SurfaceSampler {
                 if (markers.size() >= 4) break;
             }
         }
-        return new SurfaceTile(result, features, markers);
+        return new SurfaceTile(result, features, heights, depths, markers);
+    }
+
+    private record SavedSection(BlockState[] palette, String[] names, SimpleBitStorage indices) {
+        int index(int x, int y, int z) {
+            return indices == null ? 0 : indices.get(((y & 15) << 8) | (z << 4) | x);
+        }
     }
 }
