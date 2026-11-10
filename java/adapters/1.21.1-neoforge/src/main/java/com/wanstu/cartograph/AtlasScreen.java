@@ -45,7 +45,9 @@ public final class AtlasScreen extends Screen {
     private static final Item[] MATERIALS = {Items.INK_SAC, Items.GLOW_INK_SAC, Items.RED_DYE, Items.YELLOW_DYE, Items.BLUE_DYE, Items.COMPASS, Items.MAP};
     private static final String[] MATERIAL_NAMES = {"墨囊", "发光墨囊", "红色染料", "黄色染料", "蓝色染料", "指南针", "空地图"};
     private static final int WORLD_LIMIT = 30_000_000;
-    private static final int BACKGROUND = 0xffd1d3bc;
+    // Unmapped tiles and unrevealed terrain have a single paper color.
+    // The previous grey backdrop made 128x128 missing tiles look like clouds.
+    private static final int BACKGROUND = 0xff000000 | PixelPageTexture.PAPER;
 
     private final ClientMapSettings cfg = ClientMapSettings.get();
     private final List<Hit> hits = new ArrayList<>();
@@ -148,7 +150,11 @@ public final class AtlasScreen extends Screen {
         } else goAnchor();
     }
 
-    private void focus(double x, double z) { viewX = x; viewZ = z; reload(false, false); }
+    private void focus(double x, double z) {
+        viewX = x; viewZ = z;
+        CartographClient.prioritizeViewport();
+        reload(false, false);
+    }
     private static int pageX(double world) { return Math.floorDiv((int) Math.floor(world), 128); }
     private int worldX(double x) { return world(viewX + (x - width * .5) / zoom); }
     private int worldZ(double y) { return world(viewZ + (y - height * .5) / zoom); }
@@ -177,9 +183,10 @@ public final class AtlasScreen extends Screen {
     }
 
     @Override public void tick() {
-        // Periodic discovery of updated saved chunks, throttled separately by
-        // the page cache's long surface recheck interval.
-        if (++ticks % 600 == 0 && !CartographClient.awaitingPage()) reload(false, false);
+        // Discovery is NOT a 30-second "cooldown": when the viewport has
+        // missing tiles and the queue empties, refill it within half a second.
+        if (++ticks % 10 == 0 && CartographClient.queuedCount() < 48)
+            reload(false, false);
     }
 
     public void feedback(boolean ok, String text, boolean surveyChanged) {
@@ -196,7 +203,7 @@ public final class AtlasScreen extends Screen {
     }
 
     private void toast(String value, boolean error) {
-        message = value; messageUntil = ticks + 90; badMessage = error;
+        message = value; messageUntil = ticks + 140; badMessage = error;
         if (!error) status = value;
     }
 
@@ -224,10 +231,22 @@ public final class AtlasScreen extends Screen {
                 renderDialog(g);
                 g.pose().popPose();
             }
-            if (dialog == Dialog.NONE && !message.isEmpty() && ticks <= messageUntil) {
-                int width = Math.min(w() - 22, font.width(message) + 26);
-                rounded(g, (w() - width) / 2, h() - 43, width, 24, 7, badMessage ? 0xf56b4335 : PANEL);
-                g.drawCenteredString(font, shorten(message, width - 12), w() / 2, h() - 35, CREAM);
+            if (!message.isEmpty() && ticks <= messageUntil) {
+                int toastWidth = Math.min(w() - 22, font.width(message) + 26);
+                int toastY = dialog == Dialog.NONE ? h() - 43
+                        : Math.max(6, modalY() - 32);
+                // Draw above the modal (not behind it), never overlapping its
+                // material cells or confirmation button.
+                g.flush();
+                g.pose().pushPose();
+                g.pose().translate(0, 0, 450);
+                rounded(g, (w() - toastWidth) / 2, toastY, toastWidth, 24, 7,
+                        badMessage ? 0xff6b4335 : PANEL);
+                String displayed = shorten(message, toastWidth - 12);
+                g.drawString(font, displayed,
+                        (w() - font.width(displayed)) / 2, toastY + 8, CREAM, false);
+                g.flush();
+                g.pose().popPose();
             }
             super.render(g, mouseX, mouseY, partial);
             g.flush();
@@ -361,13 +380,13 @@ public final class AtlasScreen extends Screen {
             boolean hover = inside(mouseX, mouseY, bx, y + 4, 35, 33);
             if (selected || hover) rounded(g, bx, y + 4, 35, 33, 5, selected ? CONTROL : HOVER);
             toolGlyph(g, bx + 17, y + 14, i);
-            g.drawCenteredString(font, TOOLS[i], bx + 17, y + 24, selected ? GOLD : CREAM);
+            g.drawString(font, TOOLS[i], bx + 17 - font.width(TOOLS[i]) / 2,
+                    y + 24, selected ? GOLD : CREAM, false);
             hits.add(new Hit(bx, y + 4, 35, 33, () -> tool(item)));
         }
-        int bx = w() - 46, by = h() - 45;
-        card(g, bx, by, 31, 30, 8);
-        toolGlyph(g, bx + 15, by + 15, 7);
-        hits.add(new Hit(bx, by, 31, 30, this::recenter));
+        // No standalone lower-right target icon: it duplicates the
+        // map centering affordance, doesn't exist in the approved prototype.
+        // HOME remains a discoverable keyboard shortcut for recentering.
     }
 
     private void toolGlyph(GuiGraphics g, int x, int y, int i) {
@@ -469,11 +488,12 @@ public final class AtlasScreen extends Screen {
         if (c != null && !c.anchorDimension().equals(CartographClient.dimension()))
             hint = "地图册绑定" + CartographClient.dimensionName(c.anchorDimension());
         else if (c != null && !CartographClient.covered(pageX(viewX), pageX(viewZ)))
-            hint = "超出地图册范围 · 点击右下角定位";
-        else if (CartographClient.awaitingPage() && (c == null || !c.complete()))
-            hint = "读取已生成地表" + (c == null ? "…" : " · " + c.scanned() + "/64");
+            hint = "超出地图册范围 · 按 Home 定位";
+        else if (CartographClient.awaitingPage())
+            hint = "地图读取中 · 已缓存 " + CartographClient.cachedCount()
+                    + " 页 · 待处理 " + CartographClient.queuedCount() + " 页";
         else if (!CartographClient.state().inkEnabled()) hint = "在地图册材料槽投入墨囊即可揭开地图";
-        else hint = status.isBlank() ? "左键详情 · 右键操作 · 拖动平移 · 滚轮缩放" : status;
+        else hint = status.isBlank() ? "左键详情 · 右键操作 · 拖动平移 · 滚轮缩放 · Home定位" : status;
         int tw = Math.min(w() - 62, Math.max(font.width(main), font.width(hint)) + 20);
         card(g, 14, h() - 48, tw, 35, 7);
         g.drawString(font, shorten(main, tw - 16), 23, h() - 41, GOLD);
@@ -521,8 +541,8 @@ public final class AtlasScreen extends Screen {
                 button(g, left, row + 187, inner, 22,
                         canExpand ? "＋ 使用纸值扩充一页" : "地图纸值不足 · 请先投入空地图",
                         canExpand, canExpand ? CartographClient::sendAddPage : null);
-                g.drawString(font, shorten("每页 +" + sheetSide + "×" + sheetSide + " 方块；材料槽补纸值", inner),
-                        left, row + 216, MUTED);
+                g.drawString(font, shorten("每页 +" + sheetSide + "×" + sheetSide + " 方块 · 纸值在材料槽补充", inner),
+                        left, row + 213, MUTED, false);
             }
             case MARKERS -> {
                 button(g, left, row, inner, 24, "＋ 新增标点", true, () -> openMarker(null, world(viewX), world(viewZ)));
@@ -764,7 +784,8 @@ public final class AtlasScreen extends Screen {
                 rounded(g, bx + 1, by + 1, third - 2, 68, 5, INSET);
                 if (thumbnail != null) PixelPageTexture.thumbnail(g, thumbnail, style, bx + 5, by + 5, third - 10, 38);
                 else rounded(g, bx + 5, by + 5, third - 10, 38, 3, 0xff000000 | PixelPageTexture.PAPER);
-                g.drawCenteredString(font, shorten(style.label, third - 7), bx + third / 2, by + 52, CREAM);
+                String label = shorten(style.label, third - 7);
+                g.drawString(font, label, bx + (third - font.width(label)) / 2, by + 52, CREAM, false);
                 hits.add(new Hit(bx, by, third, 70, () -> { cfg.style = style; cfg.save(); }));
             }
             check(g, left, y + 176, inner, "显示区域名称", cfg.layer(REGIONS), () -> cfg.toggleLayer(REGIONS));
@@ -1047,8 +1068,11 @@ public final class AtlasScreen extends Screen {
     private void button(GuiGraphics g, int x, int y, int w, int h, String value, boolean active, Runnable action) {
         boolean hover = inside(mouseX, mouseY, x, y, w, h);
         rounded(g, x, y, w, h, 5, active ? GOLD : hover ? HOVER : CONTROL);
-        g.drawCenteredString(font, shorten(value, w - 6), x + w / 2, y + (h - 8) / 2,
-                active ? INSET : CREAM);
+        String label = shorten(value, w - 6);
+        // No Minecraft text shadow: on gold/selected buttons it produces
+        // a doubled, blurry "bold" effect at common GUI scales.
+        g.drawString(font, label, x + (w - font.width(label)) / 2, y + (h - 8) / 2,
+                active ? INSET : CREAM, false);
         if (action != null) hits.add(new Hit(x, y, w, h, action));
     }
 
@@ -1190,7 +1214,10 @@ public final class AtlasScreen extends Screen {
             activeSlider = null; movingSplit = false; grabbedVertex = -1;
             if (panning) {
                 panning = false;
-                if (moved) reload(false, false);
+                if (moved) {
+                    CartographClient.prioritizeViewport();
+                    reload(false, false);
+                }
                 else if (!suppressSelection && draft == null && dialog == Dialog.NONE) select(worldX(mx), worldZ(my), true);
                 return true;
             }
@@ -1217,6 +1244,7 @@ public final class AtlasScreen extends Screen {
         zoom = zoomPixels / minecraft.getWindow().getGuiScale();
         viewX = Math.clamp(x - (mx - width * .5) / zoom, -WORLD_LIMIT, WORLD_LIMIT);
         viewZ = Math.clamp(z - (my - height * .5) / zoom, -WORLD_LIMIT, WORLD_LIMIT);
+        CartographClient.prioritizeViewport();
         reload(false, false); return true;
     }
 
@@ -1227,6 +1255,9 @@ public final class AtlasScreen extends Screen {
             if (draft != null) { discardDraft(); return true; }
             if (selection != null) { selection = null; return true; }
             if (panel != Panel.NONE) { panel = Panel.NONE; return true; }
+        }
+        if (key == GLFW.GLFW_KEY_HOME && dialog == Dialog.NONE) {
+            recenter(); return true;
         }
         if (key == GLFW.GLFW_KEY_ENTER && draft != null && dialog == Dialog.NONE) { finishDraft(); return true; }
         return super.keyPressed(key, scan, modifiers);

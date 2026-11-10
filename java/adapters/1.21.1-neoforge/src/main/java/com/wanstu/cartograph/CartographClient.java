@@ -34,8 +34,10 @@ public final class CartographClient {
             new KeyMapping("key.cartograph.open", GLFW.GLFW_KEY_M, "key.categories.cartograph");
     // Map tiles remain in RAM across opening/closing the atlas. Do not re-scan
     // 64 chunks per tile every 10 seconds just because the GUI is visible.
-    private static final int CACHE_LIMIT = 96;
-    private static final int SURFACE_RECHECK_TICKS = 3600; // 3 minutes
+    // Enough native 128x128 tiles to cover the 1920x1080 map at ordinary
+    // zoom without evicting tiles that are still visible on the screen.
+    private static final int CACHE_LIMIT = 192;
+    private static final int SURFACE_RECHECK_TICKS = 12000; // 10 min for fully drawn tiles
     private static final LinkedHashMap<CacheKey, Entry> PAGES = new LinkedHashMap<>(32, 0.75f, true);
     private static final LinkedHashMap<CacheKey, Boolean> QUEUED = new LinkedHashMap<>();
     private static final Set<CacheKey> REDRAW = new LinkedHashSet<>();
@@ -131,6 +133,11 @@ public final class CartographClient {
 
     static int pageCount() { MapNetwork.Page c = coverage(); return c == null ? state().pages() : c.totalPages(); }
     static boolean awaitingPage() { return inFlight != null || !QUEUED.isEmpty(); }
+    static int queuedCount() { return QUEUED.size() + (inFlight == null ? 0 : 1); }
+    static int cachedCount() { return PAGES.size(); }
+    /** Keep the in-flight server task but discard obsolete HUD/viewport queue
+     * after a manual pan or zoom, so newly visible tiles jump to the front. */
+    static void prioritizeViewport() { QUEUED.clear(); }
 
     public static boolean queue(int x, int z, boolean force) { return queue(x, z, force, false); }
 
@@ -140,7 +147,12 @@ public final class CartographClient {
         if (Math.abs((long) x) > 234375 || Math.abs((long) z) > 234375 || !hasAtlas() || !covered(x, z)) return false;
         CacheKey key = key(x, z);
         Entry entry = PAGES.get(key);
-        if (!force && entry != null && ticks - entry.updated() < SURFACE_RECHECK_TICKS) return false;
+        if (!force && entry != null) {
+            // Fully drawn map tiles need no continual re-reading. Partially
+            // drawn tiles can gain world chunks and are rechecked sooner.
+            int refreshAfter = entry.page().painted() >= 64 ? SURFACE_RECHECK_TICKS : 600;
+            if (ticks - entry.updated() < refreshAfter) return false;
+        }
         if (key.equals(inFlight) && !cachedOnly) return false;
         if (QUEUED.size() >= CACHE_LIMIT && !QUEUED.containsKey(key)) return false;
         boolean first = !QUEUED.containsKey(key);
@@ -198,7 +210,19 @@ public final class CartographClient {
             for (int z = Math.floorDiv(bz - radius, 128); z <= Math.floorDiv(bz + radius, 128); z++)
                 for (int x = Math.floorDiv(bx - radius, 128); x <= Math.floorDiv(bx + radius, 128); x++) queue(x, z, false);
         }
-        if (inFlight != null && ticks - sentAt >= 220) inFlight = null;
+        // Large saved worlds can need time to read a complete native page.
+        // Do not retry another page while the server still owns this request.
+        if (inFlight != null && ticks - sentAt >= 800) {
+            // The server may have aborted after a disconnect/error; requeue
+            // the timed-out tile once, ahead of newly discovered pages.
+            CacheKey timedOut = inFlight;
+            inFlight = null;
+            QUEUED.remove(timedOut);
+            LinkedHashMap<CacheKey, Boolean> reordered = new LinkedHashMap<>();
+            reordered.put(timedOut, false);
+            reordered.putAll(QUEUED);
+            QUEUED.clear(); QUEUED.putAll(reordered);
+        }
         Iterator<CacheKey> redraw = REDRAW.iterator();
         int budget = 2;
         while (redraw.hasNext() && budget-- > 0) {

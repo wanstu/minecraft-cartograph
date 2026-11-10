@@ -158,19 +158,20 @@ public final class AtlasMapServer {
             WorldSurfaceIndex.Lookup lookup =
                     task.cachedOnly ? indexer.cached(player.serverLevel(), chunkX, chunkZ)
                             : indexer.inspect(player.serverLevel(), chunkX, chunkZ);
+            // Keep a few asynchronous full-chunk NBT reads pipelined rather
+            // than waiting for one disk I/O completion before submitting the
+            // next. Snapshot/cost debits remain sequential and main-thread.
+            if (!task.cachedOnly) {
+                for (int ahead = index + 1; ahead < Math.min(64, index + 5); ahead++) {
+                    indexer.prefetchSaved(player.serverLevel(),
+                            task.pageX * AtlasPage.CHUNKS_PER_SIDE + ahead % 8,
+                            task.pageZ * AtlasPage.CHUNKS_PER_SIDE + ahead / 8);
+                }
+            }
             if (lookup.state() == WorldSurfaceIndex.State.PENDING) {
-                // Never count or debit a chunk before the background disk
-                // scan completes. Polling here is constant-time, no NBT I/O.
+                // Never pay for a pending chunk or load/generate unseen land.
                 ORDER.addLast(viewer);
                 continue;
-            }
-            // Early prefetch avoids a disk-read stall for each sequential
-            // chunk, while at most one extra loaded snapshot is sampled.
-            if (!task.cachedOnly && index + 1 < 64) {
-                int ahead = index + 1;
-                indexer.inspect(player.serverLevel(),
-                        task.pageX * AtlasPage.CHUNKS_PER_SIDE + ahead % 8,
-                        task.pageZ * AtlasPage.CHUNKS_PER_SIDE + ahead / 8);
             }
             task.next++;
             var key = new SurveyLedger.ChunkKey(task.dimension, chunkX, chunkZ);

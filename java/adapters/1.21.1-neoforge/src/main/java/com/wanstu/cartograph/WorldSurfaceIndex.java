@@ -81,7 +81,7 @@ public final class WorldSurfaceIndex implements AutoCloseable {
             worker.setDaemon(true);
             return worker;
         };
-        readers = new ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS,
+        readers = new ThreadPoolExecutor(3, 3, 30, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(MAX_PENDING_DISK), factory,
                 new ThreadPoolExecutor.AbortPolicy());
     }
@@ -95,6 +95,20 @@ public final class WorldSurfaceIndex implements AutoCloseable {
         Cached cached = chunks.get(new ChunkKey(level.dimension().location().toString(), cx, cz));
         return cached != null && cached.status == State.READY
                 ? Lookup.ready(cached.snapshot) : Lookup.missing();
+    }
+
+    /** Queue only UNLOADED saved chunks for I/O ahead of the current tile.
+     * Unlike inspect(), prefetch must never sample live chunks on the main
+     * thread, which would defeat the per-tick scanning time budget. */
+    public void prefetchSaved(ServerLevel level, int cx, int cz) {
+        if (closed) return;
+        ChunkKey key = new ChunkKey(level.dimension().location().toString(), cx, cz);
+        if (inFlight.contains(key)) return;
+        Cached old = chunks.get(key);
+        if (old != null && (old.status == State.READY
+                || old.status == State.NOT_GENERATED && tick - old.tick < CACHE_TTL_ABSENT)) return;
+        if (level.getChunkSource().getChunkNow(cx, cz) != null) return;
+        submitDisk(key, SurfaceSampler.request(level, cx, cz));
     }
 
     /** Main thread read and cache only. Never run the disk I/O inline. */
