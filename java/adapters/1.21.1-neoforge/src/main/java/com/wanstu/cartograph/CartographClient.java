@@ -191,7 +191,15 @@ public final class CartographClient {
         if (!force && entry != null) {
             // Fully drawn map tiles need no continual re-reading. Partially
             // drawn tiles can gain world chunks and are rechecked sooner.
-            int refreshAfter = entry.page().painted() >= 64 ? SURFACE_RECHECK_TICKS : 600;
+            // An atlas with ZERO survey ink cannot paint anything until its
+            // owner refills it. Re-reading the same 64 source chunks every
+            // 30 seconds (or sooner after harmless world updates) wastes CPU.
+            // Real terrain edits still arrive via InvalidatePage, and refill
+            // feedback explicitly forces a new survey request.
+            boolean noPaintBudget = entry.page().complete() && entry.page().inkUnits() == 0
+                    && entry.page().painted() == 0 && entry.page().surveyedChunks() == 0;
+            int refreshAfter = entry.page().painted() >= 64 || noPaintBudget
+                    ? SURFACE_RECHECK_TICKS : 600;
             if (ticks - entry.updated() < refreshAfter) return false;
         }
         if (IN_FLIGHT.containsKey(key)) return false;
@@ -496,7 +504,7 @@ public final class CartographClient {
                 if (removed.page().heights().length != 0) redrawNeighbors(oldest);
             }
         }
-        if (page.complete() && page.inRange() && page.painted() > 0
+        if (page.complete() && page.inRange()
                 && !page.cachedOnly() && !page.atlasId().isBlank())
             ClientPageStore.save(mc.gameDirectory.toPath(), diskKey(k), page);
         if (mc.screen instanceof AtlasScreen screen) {

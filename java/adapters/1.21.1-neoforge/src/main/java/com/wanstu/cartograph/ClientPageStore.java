@@ -66,7 +66,10 @@ final class ClientPageStore {
     static Loaded poll() { return received.poll(); }
 
     static void save(Path gameRoot, Key key, MapNetwork.Page page) {
-        if (!page.complete() || page.painted() < 1) return;
+        // Persist negative/blank scan results too. An explored world with no
+        // ink is a valid completed observation, not a cache miss to rediscover
+        // every launch. The server remains authoritative for all credits.
+        if (!page.complete() || !page.inRange()) return;
         long token = writeId.incrementAndGet();
         latestWrite.put(key, token);
         IO.execute(() -> {

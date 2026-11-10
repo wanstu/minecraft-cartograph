@@ -60,7 +60,7 @@ public final class AtlasScreen extends Screen {
     private double pressX, pressY, dragX, dragZ;
     private float ui = 1;
     private boolean initialized, manuallyMoved, panning, moved, movingSplit, suppressSelection;
-    private int ticks, scroll, mouseX, mouseY, contextX, contextY, contextWorldX, contextWorldZ;
+    private int ticks, scroll, settingsScroll, mouseX, mouseY, contextX, contextY, contextWorldX, contextWorldZ;
     private String message = "", status = "";
     private int messageUntil;
     private boolean badMessage;
@@ -102,16 +102,25 @@ public final class AtlasScreen extends Screen {
     private int h() { return (int) Math.ceil(height / ui); }
     private double ux(double x) { return x / ui; }
 
-    @Override protected void init() {
-        // Keep the native Minecraft typeface readable; cap by viewport to avoid clipping.
-        // Snap to an integer PHYSICAL pixel scale, not an integer GUI scale.
-        // GUI scale 3 + a 900px-high screen needs ui=2/3 to fit the
-        // 381-unit settings modal: that still renders glyphs at exactly 2px.
+    /** The map toolbar and status bar should be readable even on 720p screens.
+     * A large, multi-control modal has different constraints: it is allowed
+     * to use a smaller integer pixel scale to keep ALL controls on screen.
+     * Both modes use integer physical pixels, avoiding fractional-font blur.
+     */
+    private void updateUiScale() {
         double minecraftScale = minecraft.getWindow().getGuiScale();
         int physicalW = (int) Math.round(width * minecraftScale);
         int physicalH = (int) Math.round(height * minecraftScale);
-        int physicalTextScale = Math.clamp(Math.min(physicalW / 400, physicalH / 390), 1, 3);
+        int logicalMinWidth = dialog == Dialog.NONE ? 540 : 520;
+        int logicalMinHeight = dialog == Dialog.NONE ? 300
+                : dialog == Dialog.SETTINGS ? 306 : modalH() + 36;
+        int physicalTextScale = Math.clamp(Math.min(
+                physicalW / logicalMinWidth, physicalH / logicalMinHeight), 1, 3);
         ui = (float) (physicalTextScale / minecraftScale);
+    }
+
+    @Override protected void init() {
+        updateUiScale();
         zoom = zoomPixels / minecraft.getWindow().getGuiScale();
         if (!initialized) {
             initialized = true;
@@ -240,6 +249,10 @@ public final class AtlasScreen extends Screen {
     }
 
     @Override public void render(GuiGraphics g, int mx, int my, float partial) {
+        float oldScale = ui;
+        updateUiScale();
+        if (Math.abs(oldScale - ui) > 0.001f && dialog != Dialog.NONE)
+            resizeFields();
         mouseX = (int) ux(mx); mouseY = (int) ux(my);
         renderMap(g, mx, my);
         hits.clear();
@@ -499,6 +512,7 @@ public final class AtlasScreen extends Screen {
         if (i == 4) {
             panel = Panel.NONE;
             settingsTab = SettingsTab.MAP;
+            settingsScroll = 0;
             MapNetwork.MaterialRates r = CartographClient.settings().rates();
             for (int j = 0; j < 4; j++) { inputs[j] = r.input(j); costs[j] = r.cost(j); }
             permanentFlags = r.permanentFlags();
@@ -790,12 +804,21 @@ public final class AtlasScreen extends Screen {
         default -> 0;
     }; }
     private int modalX() { return (w() - modalW()) / 2; }
-    private int modalY() { return (h() - modalH()) / 2; }
+    private int modalY() {
+        return (h() - (dialog == Dialog.SETTINGS ? visibleSettingsH() : modalH())) / 2;
+    }
+    private int visibleSettingsH() {
+        return Math.min(modalH(), Math.max(110, h() - 16));
+    }
+    private int maxSettingsScroll() {
+        return Math.max(0, modalH() - visibleSettingsH());
+    }
 
     private void renderDialog(GuiGraphics g) {
         g.fill(0, 0, w(), h(), 0x8f17271f);
         int x = modalX(), y = modalY(), w = modalW(), h = modalH();
-        card(g, x, y, w, h, 9);
+        int visibleH = dialog == Dialog.SETTINGS ? visibleSettingsH() : h;
+        card(g, x, y, w, visibleH, 9);
         String title = switch (dialog) {
             case SETTINGS -> "地图设置";
             case MATERIALS -> "地图册 · 材料槽";
@@ -808,7 +831,42 @@ public final class AtlasScreen extends Screen {
         g.drawString(font, title, x + 14, y + 26, GOLD);
         button(g, x + w - 29, y + 9, 20, 20, "×", false, this::closeDialog);
         switch (dialog) {
-            case SETTINGS -> settings(g, x, y, w, h);
+            case SETTINGS -> {
+                settingsScroll = Math.clamp(settingsScroll, 0, maxSettingsScroll());
+                // Tabs are navigation, not scrolling contents: they stay
+                // visible when the lower settings require a scroll.
+                settingsTabs(g, x, y, w);
+                int bodyTop = y + 76, bodyBottom = y + visibleH - 34;
+                int startHit = hits.size();
+                g.flush();
+                // GuiGraphics scissor uses actual GUI coordinates, whereas
+                // cartograph's map UI is additionally scaled via PoseStack.
+                g.enableScissor((int) (x * ui), (int) (bodyTop * ui),
+                        (int) ((x + w) * ui), (int) (bodyBottom * ui));
+                settings(g, x, y - settingsScroll, w, h);
+                g.flush();
+                g.disableScissor();
+                // Hidden options must not still be clickable under the
+                // fixed title bar, completion button, or outside the dialog.
+                for (int i = hits.size() - 1; i >= startHit; i--) {
+                    Hit hit = hits.get(i);
+                    int top = Math.max(hit.y(), bodyTop), bottom = Math.min(hit.y() + hit.h(), bodyBottom);
+                    if (bottom <= top) hits.remove(i);
+                    else hits.set(i, new Hit(hit.x(), top, hit.w(), bottom - top, hit.action()));
+                }
+                if (maxSettingsScroll() > 0) {
+                    int sx = x + w - 5, sy = bodyTop + (bodyBottom - bodyTop - 20)
+                            * settingsScroll / maxSettingsScroll();
+                    rounded(g, sx, bodyTop, 3, bodyBottom - bodyTop, 1, CONTROL);
+                    rounded(g, sx, sy, 3, 20, 1, GOLD);
+                }
+                // Fixed actions remain usable, irrespective of scrolling.
+                if (settingsTab == SettingsTab.MINI)
+                    button(g, x + 14, y + visibleH - 30, 93, 21,
+                            "恢复紧凑默认", false, cfg::resetHud);
+                button(g, x + w - 85, y + visibleH - 30, 71, 21,
+                        "完成", true, this::closeDialog);
+            }
             case MATERIALS -> materials(g, x, y, w, h);
             case MARKER -> markerEditor(g, x, y, w, h);
             case REGION -> regionEditor(g, x, y, w, h);
@@ -824,8 +882,8 @@ public final class AtlasScreen extends Screen {
         }
     }
 
-    private void settings(GuiGraphics g, int x, int y, int w, int h) {
-        int inner = w - 28, left = x + 14, third = (inner - 10) / 3;
+    private void settingsTabs(GuiGraphics g, int x, int y, int w) {
+        int inner = w - 28, left = x + 14;
         String[] tabs = {"大地图", "小地图", "耗材倍率", "缓存与性能"};
         int tabWidth = (inner - 15) / 4;
         for (int i = 0; i < tabs.length; i++) {
@@ -833,9 +891,14 @@ public final class AtlasScreen extends Screen {
             button(g, left + i * (tabWidth + 5), y + 46, tabWidth, 23, tabs[i], settingsTab == t,
                     () -> {
                         settingsTab = t;
+                        settingsScroll = 0;
                         if (t == SettingsTab.CACHE) CartographClient.refreshControl(4);
                     });
         }
+    }
+
+    private void settings(GuiGraphics g, int x, int y, int w, int h) {
+        int inner = w - 28, left = x + 14, third = (inner - 10) / 3;
         if (settingsTab == SettingsTab.MAP) {
             g.drawString(font, "地图风格", left, y + 81, GOLD);
             ResourceLocation thumbnail = previewTexture();
@@ -891,7 +954,7 @@ public final class AtlasScreen extends Screen {
                     () -> minecraft.setScreen(new HudAdjustScreen(this)));
             g.drawString(font, shorten("手持地图：主手居中、副手左下；位置不需调整", inner),
                     left, y + 252, MUTED, false);
-            button(g, left, y + h - 28, 93, 21, "恢复紧凑默认", false, cfg::resetHud);
+
         } else if (settingsTab == SettingsTab.COST) {
             if (!ratesDirty) {
                 MapNetwork.MaterialRates rates = CartographClient.settings().rates();
@@ -957,7 +1020,6 @@ public final class AtlasScreen extends Screen {
                             + " · 显示旧缓存，后台并行更新实际世界", inner),
                     left, y + 304, MUTED, false);
         }
-        button(g, x + w - 85, y + h - 30, 71, 21, "完成", true, this::closeDialog);
     }
 
     private ResourceLocation previewTexture() {
@@ -1386,6 +1448,10 @@ public final class AtlasScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mx, double my, double dx, double dy) {
+        if (dialog == Dialog.SETTINGS) {
+            settingsScroll = Math.clamp(settingsScroll - (int) Math.round(dy * 24), 0, maxSettingsScroll());
+            return true;
+        }
         if (dialog != Dialog.NONE) return true;
         int panelX = w() - Math.min(228, w() - 28) - 14;
         int panelHeight = Math.min(h() - 122, panel == Panel.ATLAS ? 231 : panel == Panel.INFO ? 184 : 276);

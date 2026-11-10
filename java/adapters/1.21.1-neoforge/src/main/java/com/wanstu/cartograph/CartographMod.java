@@ -51,6 +51,8 @@ public final class CartographMod {
         NeoForge.EVENT_BUS.addListener(this::blockPlaced);
         NeoForge.EVENT_BUS.addListener(this::fluidChanged);
         NeoForge.EVENT_BUS.addListener(this::neighborChanged);
+        NeoForge.EVENT_BUS.addListener(SurfaceChangeMonitor::tick);
+        NeoForge.EVENT_BUS.addListener(SurfaceChangeMonitor::stopped);
         NeoForge.EVENT_BUS.addListener(AtlasMapServer::tick);
         NeoForge.EVENT_BUS.addListener(MapRefreshJobs::tick);
         NeoForge.EVENT_BUS.addListener(MapRefreshJobs::stopped);
@@ -60,26 +62,21 @@ public final class CartographMod {
         container.registerConfig(ModConfig.Type.SERVER, CartographConfig.SPEC);
     }
 
-    private static void dirtySurface(net.minecraft.world.level.LevelAccessor world,
-                                     net.minecraft.core.BlockPos pos) {
-        if (!(world instanceof ServerLevel level)) return;
-        WorldSurfaceIndex.of(level).markDirty(level, pos.getX() >> 4, pos.getZ() >> 4);
-        AtlasMapServer.markSurfaceChanged(level, pos.getX() >> 4, pos.getZ() >> 4);
-    }
     private void blockBroken(BlockEvent.BreakEvent event) {
-        if (!event.isCanceled()) dirtySurface(event.getLevel(), event.getPos());
+        if (!event.isCanceled()) SurfaceChangeMonitor.changed(event.getLevel(), event.getPos(), true);
     }
     private void blockPlaced(BlockEvent.EntityPlaceEvent event) {
-        if (!event.isCanceled()) dirtySurface(event.getLevel(), event.getPos());
+        if (!event.isCanceled()) SurfaceChangeMonitor.changed(event.getLevel(), event.getPos(), true);
     }
     private void fluidChanged(BlockEvent.FluidPlaceBlockEvent event) {
-        if (!event.isCanceled()) dirtySurface(event.getLevel(), event.getPos());
+        if (!event.isCanceled()) SurfaceChangeMonitor.changed(event.getLevel(), event.getPos(), true);
     }
 
-    /** Neighbor notifications also cover setBlock-driven terrain edits from
-     * other mods and natural changes. Dirty samples are coalesced per chunk. */
+    /** World updates from other mods may affect the surface, but most
+     * neighbor events do NOT change the top-visible terrain. Comparing the
+     * actual sampled result prevents constant all-page re-scan storms. */
     private void neighborChanged(BlockEvent.NeighborNotifyEvent event) {
-        if (!event.isCanceled()) dirtySurface(event.getLevel(), event.getPos());
+        if (!event.isCanceled()) SurfaceChangeMonitor.changed(event.getLevel(), event.getPos(), false);
     }
 
     private void creativeTab(BuildCreativeModeTabContentsEvent event) {
