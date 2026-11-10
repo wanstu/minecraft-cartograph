@@ -22,13 +22,13 @@ assert 'AtlasHud.draw(g, true)' in adjust
 assert 'AtlasHud.margin()' in adjust
 assert 'instanceof HudAdjustScreen' in client and 'event.setCanceled(true);' in client
 assert 'int travelY = Math.max(0, height - size - 2 * MARGIN)' in hud
-assert 'int size = Math.clamp((int) Math.round(120.0 / uiScale)' in hud
+assert 'cfg.heldSize / guiScale' in hud and 'static Layout heldLayout(' in hud
 assert 'held ? false : cfg.round' in hud
 assert 'held ? ClientMapSettings.Style.ILLUSTRATED : cfg.style' in hud
-assert 'if (!held && cfg.hud(ClientMapSettings.COORDS))' in hud
+assert 'cfg.held(ClientMapSettings.COORDS)' in hud and 'cfg.hud(ClientMapSettings.COORDS)' in hud
 assert 'g.enableScissor(' in hud and 'g.disableScissor()' in hud
-assert 'case MAP -> 366; case MINI -> 310;' in screen
-assert '手持地图册时自动收起小地图' in screen
+assert 'case MAP -> 366; case MINI -> 416;' in screen
+assert '手持古式地图（拿在手中时；独立方形样式）' in screen
 assert 'hudSize = 130' in settings
 assert '0.72' in model, 'Hand item still too large'
 print('PASS no partial overwriting complete tiles, grouped refresh, compact hand, scoped preview, HUD bounds')

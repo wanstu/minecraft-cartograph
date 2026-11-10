@@ -761,7 +761,7 @@ public final class AtlasScreen extends Screen {
     private int modalW() { return Math.min(486, w() - 24); }
     private int modalH() { return switch (dialog) {
         case SETTINGS -> switch (settingsTab) {
-            case MAP -> 366; case MINI -> 310; case COST -> 381; case CACHE -> 353;
+            case MAP -> 366; case MINI -> 416; case COST -> 381; case CACHE -> 353;
         };
         case MATERIALS -> 366;
         case MARKER -> 291;
@@ -852,22 +852,43 @@ public final class AtlasScreen extends Screen {
                     left, y + 312, MUTED);
         } else if (settingsTab == SettingsTab.MINI) {
             int half = (inner - 7) / 2;
+            // Float and held are visually different on purpose. Every control
+            // is clearly scoped: the preview for either draws the ACTUAL
+            // matching in-game surface, never a different map mode.
+            g.drawString(font, "悬浮小地图（未手持地图册时）", left, y + 80, GOLD, false);
             for (int i = 0; i < HUD_FLAGS.length; i++) {
                 int flag = i;
-                check(g, left + i % 2 * (half + 7), y + 82 + i / 2 * 24, half, HUD_FLAGS[i],
-                        cfg.hud(flag), () -> cfg.toggleHud(flag));
+                check(g, left + i % 2 * (half + 7), y + 97 + i / 2 * 24, half,
+                        HUD_FLAGS[i], cfg.hud(flag), () -> cfg.toggleHud(flag));
             }
-            g.drawString(font, "形状", left, y + 164, GOLD);
-            button(g, left + 33, y + 159, 52, 23, "方形", !cfg.round, () -> { cfg.round = false; cfg.save(); });
-            button(g, left + 91, y + 159, 52, 23, "圆形", cfg.round, () -> { cfg.round = true; cfg.save(); });
-            g.drawString(font, "缩放 " + String.format(Locale.ROOT, "%.1f×", cfg.hudZoom), left, y + 195, CREAM);
-            slider(g, left + 92, y + 189, inner - 95, (cfg.hudZoom - .5) / 3.5,
+            g.drawString(font, "形状", left, y + 172, GOLD, false);
+            button(g, left + 33, y + 167, 52, 23, "方形", !cfg.round,
+                    () -> { cfg.round = false; cfg.save(); });
+            button(g, left + 91, y + 167, 52, 23, "圆形", cfg.round,
+                    () -> { cfg.round = true; cfg.save(); });
+            g.drawString(font, "缩放 " + String.format(Locale.ROOT, "%.1f×", cfg.hudZoom),
+                    left, y + 204, CREAM, false);
+            slider(g, left + 92, y + 198, inner - 95, (cfg.hudZoom - .5) / 3.5,
                     n -> cfg.hudZoom = Math.round((.5 + n * 3.5) * 10) / 10.0);
-            button(g, left, y + 216, inner, 23, "预览并调整悬浮小地图位置与大小", true,
-                    () -> minecraft.setScreen(new HudAdjustScreen(this)));
-            g.drawString(font, shorten("手持地图册时自动收起小地图；手持页独立显示", inner),
-                    left, y + 250, MUTED, false);
-            button(g, left, y + h - 30, 79, 21, "恢复紧凑默认", false, cfg::resetHud);
+            button(g, left, y + 224, inner, 23, "预览及调整悬浮小地图位置与大小", true,
+                    () -> minecraft.setScreen(new HudAdjustScreen(this, HudAdjustScreen.Mode.FLOAT)));
+
+            g.drawString(font, "手持古式地图（拿在手中时；独立方形样式）",
+                    left, y + 260, GOLD, false);
+            int[] heldFlags = {ICONS, CARDINALS, COORDS, NORTH_UP};
+            String[] heldNames = {"显示地标图标", "显示方位刻度", "显示坐标", "锁定北方"};
+            for (int i = 0; i < heldFlags.length; i++) {
+                int flag = heldFlags[i];
+                check(g, left + i % 2 * (half + 7), y + 274 + i / 2 * 23, half,
+                        heldNames[i], cfg.held(flag), () -> cfg.toggleHeld(flag));
+            }
+            g.drawString(font, "缩放 " + String.format(Locale.ROOT, "%.1f×", cfg.heldZoom),
+                    left, y + 332, CREAM, false);
+            slider(g, left + 92, y + 326, inner - 95, (cfg.heldZoom - .5) / 3.5,
+                    n -> cfg.heldZoom = Math.round((.5 + n * 3.5) * 10) / 10.0);
+            button(g, left, y + 349, inner, 23, "预览及调整手持地图位置与大小", true,
+                    () -> minecraft.setScreen(new HudAdjustScreen(this, HudAdjustScreen.Mode.HELD)));
+            button(g, left, y + h - 28, 100, 21, "恢复两种地图默认", false, cfg::resetHud);
         } else if (settingsTab == SettingsTab.COST) {
             if (!ratesDirty) {
                 MapNetwork.MaterialRates rates = CartographClient.settings().rates();

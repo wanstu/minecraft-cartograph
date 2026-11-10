@@ -500,10 +500,10 @@ public final class CartographClient {
     private static void hideAtlasDuringHudEditing(
             net.neoforged.neoforge.client.event.RenderHandEvent event) {
         Minecraft mc = Minecraft.getInstance();
-        // Hide only the oversized in-world book while configuring the float.
-        // The live map preview uses AtlasHud.draw() with the SAME settings
-        // and pixel dimensions as normal gameplay.
-        if (mc.screen instanceof HudAdjustScreen
+        // Floating HUD preview simulates putting the atlas away. Held preview
+        // deliberately leaves the real first-person book/hand model visible,
+        // so it matches the eventual in-game visual footprint.
+        if (mc.screen instanceof HudAdjustScreen screen && screen.previewingFloating()
                 && event.getItemStack().is(CartographMod.ATLAS.get()))
             event.setCanceled(true);
     }

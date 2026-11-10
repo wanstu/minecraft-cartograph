@@ -45,30 +45,44 @@ final class AtlasHud {
         drawWithin(g, editing, false, layout(g.guiWidth(), g.guiHeight()));
     }
 
-    /** Compact, parchment-bound first-person atlas, not a second full-sized
-     * minimap. The book item mesh has its own smaller hand transform. */
-    static void drawHeld(GuiGraphics g) {
+    /** Actual held-map layout; the editor uses this SAME calculation. */
+    static Layout heldLayout(int width, int height) {
+        Minecraft mc = Minecraft.getInstance();
+        ClientMapSettings cfg = ClientMapSettings.get();
+        double guiScale = Math.max(1, mc.getWindow().getGuiScale());
+        int limit = Math.max(28, Math.min(width, height) - MARGIN * 2 - 10);
+        int size = Math.min(limit, Math.max(24, (int) Math.round(cfg.heldSize / guiScale)));
+        int travelX = Math.max(0, width - size - MARGIN * 2);
+        int travelY = Math.max(0, height - size - MARGIN * 2);
+        return new Layout(MARGIN + (int) Math.round(cfg.heldX * travelX),
+                MARGIN + (int) Math.round(cfg.heldY * travelY), size, travelX, travelY);
+    }
+
+    static void drawHeld(GuiGraphics g) { drawHeld(g, false); }
+
+    /** The editor and normal gameplay intentionally share exact coordinates,
+     * scaling, framing, flags, and pixel projection. No fake minimap preview. */
+    static void drawHeld(GuiGraphics g, boolean editing) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
-        int uiScale = (int) Math.max(1, mc.getWindow().getGuiScale());
-        // Physical-screen budget: <= 160 px including the binding at normal
-        // scales. Old code used 168 *GUI* pixels (hundreds physical pixels).
-        int size = Math.clamp((int) Math.round(120.0 / uiScale), 36, 70);
-        int x = Math.max(8, g.guiWidth() - size - 13);
-        int y = Math.max(8, g.guiHeight() - size - 16);
+        Layout area = heldLayout(g.guiWidth(), g.guiHeight());
+        int x = area.x(), y = area.y(), size = area.size();
         AtlasChrome.rounded(g, x - 4, y - 4, size + 8, size + 8, 3, 0xff4a3326);
         AtlasChrome.rounded(g, x - 2, y - 2, size + 4, size + 4, 2, 0xffd8bd84);
-        drawWithin(g, false, true, new Layout(x, y, size, 0, 0));
+        drawWithin(g, editing, true, area);
     }
 
     private static void drawWithin(GuiGraphics g, boolean editing, boolean held, Layout area) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         ClientMapSettings cfg = ClientMapSettings.get();
-        int rotation = cfg.hud(ClientMapSettings.NORTH_UP) ? 0 : Math.round((mc.player.getYRot() + 180) / 2) * 2;
-        boolean reduced = area.size() * mc.getWindow().getGuiScale() * cfg.hudZoom < 240.0;
+        boolean northUp = held ? cfg.held(ClientMapSettings.NORTH_UP)
+                : cfg.hud(ClientMapSettings.NORTH_UP);
+        int rotation = northUp ? 0 : Math.round((mc.player.getYRot() + 180) / 2) * 2;
+        double hudZoom = held ? cfg.heldZoom : cfg.hudZoom;
+        boolean reduced = area.size() * mc.getWindow().getGuiScale() * hudZoom < 240.0;
         Frame next = new Frame(mc.player.getBlockX(), mc.player.getBlockZ(), rotation,
-                held ? 1.2 : cfg.hudZoom, held ? false : cfg.round,
+                hudZoom, held ? false : cfg.round,
                 reduced, held ? ClientMapSettings.Style.ILLUSTRATED : cfg.style,
                 CartographClient.revision());
         if (!next.equals(previous) && (texture == null || lastFrameTick != mc.level.getGameTime() || editing)) {
@@ -80,8 +94,10 @@ final class AtlasHud {
         g.blit(textureId, area.x(), area.y(), area.size(), area.size(), 0, 0, RASTER, RASTER, RASTER, RASTER);
         Frame drawn = previous;
         double angle = Math.toRadians(drawn.rotation()), scale = area.size() * drawn.zoom() / 240.0;
-        if (cfg.hud(ClientMapSettings.ICONS)) drawIcons(g, mc, cfg, area, drawn, angle, scale);
-        if (!held && cfg.hud(ClientMapSettings.REGION_NAMES) && cfg.layer(ClientMapSettings.REGIONS)) {
+        if ((held ? cfg.held(ClientMapSettings.ICONS) : cfg.hud(ClientMapSettings.ICONS)))
+            drawIcons(g, mc, cfg, area, drawn, angle, scale);
+        if ((held ? cfg.held(ClientMapSettings.REGION_NAMES) : cfg.hud(ClientMapSettings.REGION_NAMES))
+                && cfg.layer(ClientMapSettings.REGIONS)) {
             for (NamedRegion region : CartographClient.regions()) {
                 NamedRegion.Point point = region.labelPosition();
                 int[] at = project(area, drawn, angle, scale, point.x(), point.z(), 12);
@@ -93,8 +109,9 @@ final class AtlasHud {
             double facing = Math.toRadians(mc.player.getYRot() + 180) - angle;
             AtlasChrome.arrow(g, area.x() + area.size() * .5, area.y() + area.size() * .5, facing, .76);
         }
-        if (!held && cfg.hud(ClientMapSettings.CARDINALS)) drawCardinals(g, mc, area, angle);
-        if (!held && cfg.hud(ClientMapSettings.COORDS)) {
+        if ((held ? cfg.held(ClientMapSettings.CARDINALS) : cfg.hud(ClientMapSettings.CARDINALS)))
+            drawCardinals(g, mc, area, angle);
+        if ((held ? cfg.held(ClientMapSettings.COORDS) : cfg.hud(ClientMapSettings.COORDS))) {
             // Even very small map sizes must never sprout a text bar larger
             // than the map itself. Use two compact rows and keep them bounded.
             int allowed = Math.max(18, area.size() - 8);
@@ -139,7 +156,7 @@ final class AtlasHud {
             if (cfg.layer(ClientMapSettings.WAYPOINTS)) for (AtlasMarker marker : page.markers()) {
                 int[] at = project(area, view, angle, scale, marker.x(), marker.z(), 8);
                 if (at == null || !seen.add(marker.id()) || !CartographClient.surveyed(marker.x(), marker.z())) continue;
-                AtlasChrome.rounded(g, at[0] - 6, at[1] - 6, 12, 12, cfg.round ? 4 : 2, 0xfff1dfb8);
+                AtlasChrome.rounded(g, at[0] - 6, at[1] - 6, 12, 12, view.round() ? 4 : 2, 0xfff1dfb8);
                 g.drawCenteredString(mc.font, AtlasScreen.markerGlyph(marker.icon()), at[0], at[1] - 4,
                         0xff000000 | marker.color());
             }
