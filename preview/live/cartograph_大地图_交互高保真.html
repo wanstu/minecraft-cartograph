@@ -154,14 +154,14 @@
 <aside id="pixelReview" class="pixelReview" aria-label="像素地形原型" hidden>
   <div class="pixelReviewTitle"><svg viewBox="0 0 24 20" aria-hidden="true"><path d="m2 16 7-11 4 6 3-4 6 9M6 9l3 1 2-2"/></svg>像素地形</div>
   <div class="pixelReviewButtons" role="group" aria-label="地形渲染对比">
-    <button type="button" data-pixel-view="classic" aria-pressed="false">原效果</button>
-    <button type="button" data-pixel-view="relief" aria-pressed="true">地形增强</button>
+    <button type="button" data-pixel-view="classic" aria-pressed="false">上一版</button>
+    <button type="button" data-pixel-view="relief" aria-pressed="true">新版像素</button>
     <button type="button" data-pixel-view="split" aria-pressed="false">左右对照</button>
   </div>
 </aside>
 <div id="pixelDivider" class="pixelDivider" hidden>
-  <span class="pixelSide left" aria-hidden="true">原效果</span>
-  <span class="pixelSide right" aria-hidden="true">地形增强</span>
+  <span class="pixelSide left" aria-hidden="true">上一版</span>
+  <span class="pixelSide right" aria-hidden="true">新版像素</span>
   <span id="pixelSeam" class="pixelSeam" aria-hidden="true"></span>
   <input id="pixelWipe" type="range" min="0" max="1000" value="500" aria-label="移动地形对照分隔线">
 </div>
@@ -186,6 +186,7 @@ const $=s=>document.querySelector(s),all=s=>Array.from(document.querySelectorAll
 const map=$('#map'),ctx=map.getContext('2d',{alpha:false}),area=$('#mapArea');
 const W=1280,H=960,GRID=2,GW=W/GRID,GH=H/GRID;
 const elevation=new Float32Array(GW*GH),moisture=new Float32Array(GW*GH),land=new Uint8Array(GW*GH),biome=new Uint8Array(GW*GH);
+const canopyCover=new Float32Array(GW*GH),riverDepth=new Uint8Array(GW*GH);
 const terrainPreview=new URLSearchParams(location.search).get('terrain')==='1';
 const pixelReview=$('#pixelReview'),pixelDivider=$('#pixelDivider'),pixelWipe=$('#pixelWipe');
 const mapStyles=['pixel','realistic','illustrated'];
@@ -212,26 +213,47 @@ function sample(x,y){let rough=fbm(x/125,y/125,3),detail=fbm(x/33,y/33,15);let r
 // In the synthetic scene, the existing river centerlines cut through the
 // shared DEM. The live renderer simply consumes measured terrain heights.
 function makeDemoValleys(){
- return [[riverA,70,.19],[riverB,49,.12],[riverC,53,.13]].map(([points,radius,depth])=>{
+ const profiles=[
+  [riverA,70,.19,3.7,12],[riverB,49,.12,2.8,5.9],[riverC,53,.13,2.6,5.4],
+  [[[1083,179],[1051,194],[1018,219],[955,238],[901,254]],24,.059],
+  [[[1070,237],[1036,258],[997,277],[923,315],[849,318]],23,.068],
+  [[[1045,311],[1008,331],[957,349],[888,372],[823,371]],26,.079],
+  [[[1089,473],[1052,468],[1012,451],[980,435],[951,448]],24,.066],
+  [[[1015,547],[984,531],[953,510],[917,476]],23,.073],
+  [[[857,602],[828,571],[819,536],[845,477]],27,.075],
+  [[[782,621],[763,585],[741,543],[715,475]],21,.060]
+ ];
+ return profiles.map(([points,radius,depth,headWidth=0,mouthWidth=0])=>{
+  let length=0;
   const segments=points.slice(1).map(([bx,by],i)=>{
    const [ax,ay]=points[i],dx=bx-ax,dy=by-ay;
-   return {ax,ay,dx,dy,inverseLength:1/(dx*dx+dy*dy)};
+   const size=Math.hypot(dx,dy);
+   const segment={ax,ay,dx,dy,inverseLength:1/(size*size),start:length,size};
+   length+=size;
+   return segment;
   });
-  return {segments,radius,depth};
+  return {segments,radius,depth,length,headWidth,mouthWidth};
  });
 }
-function demoValleyDepth(x,y,valleys){
- let cut=0;
- for(const {segments,radius,depth} of valleys){
-  let closest=radius*radius;
-  for(const {ax,ay,dx,dy,inverseLength} of segments){
+function sampleDemoRivers(x,y,valleys,index){
+ let cut=0,water=0;
+ for(const {segments,radius,depth,length,headWidth,mouthWidth} of valleys){
+  let closest=radius*radius,along=0;
+  for(const {ax,ay,dx,dy,inverseLength,start,size} of segments){
    const px=x-ax,py=y-ay;
    const t=clamp((px*dx+py*dy)*inverseLength,0,1);
    const sx=px-dx*t,sy=py-dy*t;
-   closest=Math.min(closest,sx*sx+sy*sy);
+   const distance=sx*sx+sy*sy;
+   if(distance<closest){closest=distance;along=start+t*size}
   }
-  cut=Math.max(cut,depth*smooth(1-Math.sqrt(closest)/radius));
+  if(closest>=radius*radius)continue;
+  const distance=Math.sqrt(closest);
+  const taper=headWidth>0?1:smooth(clamp(along/length*4,0,1));
+  cut=Math.max(cut,depth*taper*smooth(1-distance/radius));
+  const width=headWidth+(mouthWidth-headWidth)*along/length;
+  if(distance<width)water=Math.max(water,.1+.9*smooth(1-distance/width));
  }
+ riverDepth[index]=Math.round(water*255);
  return cut;
 }
 function collectGeometry(){
@@ -239,8 +261,9 @@ function collectGeometry(){
  for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
   const wx=x*GRID,wz=y*GRID;
   const [base,wet,woods]=sample(wx,wz),i=y*GW+x;
-  const h=base>.055?Math.max(.055,base-demoValleyDepth(wx,wz,valleys)):base;
-  elevation[i]=h;moisture[i]=wet;land[i]=h>0?1:0;
+  const cut=sampleDemoRivers(wx,wz,valleys,i);
+  const h=base>.055?Math.max(.055,base-cut):base;
+  elevation[i]=h;moisture[i]=wet;land[i]=h>0?1:0;canopyCover[i]=woods;
   biome[i]=h<0?0:h>.62?5:h>.42?4:woods>.135?2:wet>.17?3:1;
  }
 }
@@ -259,7 +282,7 @@ const pixelPal={water:[48,119,199],beach:[226,218,158],plains:[104,169,74],fores
 // Hillshade over the shared height field. The larger footprint keeps the
 // direction of a slope visible in overview; the smaller one preserves ridges.
 // The raster stays at one pixel per sample and the palette still comes from the surface.
-function terrainShade(x,y,height){
+function previousTerrainShade(x,y,height){
  const near=10,far=34,heightScale=560;
  const nearWeight=heightScale*.54/(2*near);
  const farWeight=heightScale*.46/(2*far);
@@ -273,15 +296,13 @@ function terrainShade(x,y,height){
  const terrainContrast=.35+.65*smooth(clamp((height-.07)/.38,0,1));
  return Math.round(relief*terrainContrast/6)*6;
 }
-function makePixelRaster(enhanced){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),image=c.createImageData(GW,GH),data=image.data;
+function makePreviousPixelRaster(){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),image=c.createImageData(GW,GH),data=image.data;
  const heights=new Int16Array(GW*GH);
  for(let i=0;i<heights.length;i++)heights[i]=Math.round(70+155*elevation[i]);
  for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
   const i=y*GW+x,h=elevation[i],b=biome[i],wx=x*GRID,wz=y*GRID;
   const center=heights[i],west=heights[y*GW+Math.max(0,x-1)],
-        east=heights[y*GW+Math.min(GW-1,x+1)],
-        north=heights[Math.max(0,y-1)*GW+x],
-        south=heights[Math.min(GH-1,y+1)*GW+x];
+        north=heights[Math.max(0,y-1)*GW+x];
   const shore=h<.038,water=h<=0,beach=shore&&!water;
 
   const patch=hash(Math.floor(x/4),Math.floor(y/4),32);
@@ -302,35 +323,115 @@ function makePixelRaster(enhanced){const out=document.createElement('canvas');ou
   if(beach&&patch>.72)base=[232,224,175];
   if(!water&&h<.4&&b===1&&n>.96)base=[159,176,85];
   // Top-down block-relief: per-block elevation determines directional brightness.
-  let heightBand=water?0:clamp((west-east)*7+(north-south)*5,-50,45);
   const stepEdge=water?0:(center>north?7:center<north?-10:0)
                       +(center>west?7:center<west?-10:0);
-  const dropShadow=water?0:clamp((center-east)*2+(center-south)*2,-14,14);
-  const originalShade=variation*.6+heightBand+stepEdge+dropShadow;
-  const relief=enhanced&&!water?terrainShade(wx,wz,h):0;
-  const shade=enhanced&&!water?relief+variation*.35+stepEdge*.27:originalShade;
-  const shadow=enhanced?Math.max(0,-relief):0;
+  const relief=water?0:previousTerrainShade(wx,wz,h);
+  const shade=water?variation*.6:relief+variation*.35+stepEdge*.27;
+  const shadow=Math.max(0,-relief);
   const k=i*4;
   data[k]=clamp(base[0]+shade,0,255);
   data[k+1]=clamp(base[1]+shade,0,255);
   data[k+2]=clamp(base[2]+shade+shadow*.25,0,255);
   data[k+3]=255;
  }c.putImageData(image,0,0);return out;}
-function makePixelLayer(base){
-  const c=document.createElement('canvas');c.width=GW;c.height=GH;
-  const g=c.getContext('2d',{alpha:false});
-  g.imageSmoothingEnabled=false;
-  g.drawImage(base,0,0);
-  // Low-resolution overlay drawn on the SAME source coordinate system.
-  // Path thickness and corners preserve the block-like top-down feel.
-  g.save();g.scale(.5,.5);g.lineJoin='bevel';g.lineCap='square';
-  // These lines stand in for actual top-level flowing-water blocks.
-  const riverLayers=[[riverA,18],[riverB,11],[riverC,10]];
-  for(const [points,width] of riverLayers){drawStroke(g,points,'#2c75ae',width+4);drawStroke(g,points,'#5298c9',width)}
+const naturalPixelPalette={
+ meadow:[111,126,81],canopy:[63,88,65],wet:[74,104,82],
+ rock:[138,132,114],snow:[211,218,210],sand:[148,143,108],
+ deep:[42,61,69],shallows:[79,107,102]
+};
+const sunSamples=[14,28,54,90];
+function terrainLight(x,z,height){
+ const near=10,far=34;
+ const west=getElev(x-far,z),east=getElev(x+far,z);
+ const north=getElev(x,z-far),south=getElev(x,z+far);
+ const dx=(getElev(x+near,z)-getElev(x-near,z))*12.3+(east-west)*3.2;
+ const dz=(getElev(x,z+near)-getElev(x,z-near))*12.3+(south-north)*3.2;
+ const slope=Math.hypot(dx,dz);
+ const diffuse=(.57+.59*dx+.57*dz)/Math.hypot(1,slope);
+ // Use the same north-west sun for the surface normal and the terrain horizon.
+ // The soft horizon term connects the shadows cast by neighboring ridges.
+ let horizon=0;
+ for(const distance of sunSamples){
+  const rise=getElev(x-distance*.72,z-distance*.69)-height;
+  horizon=Math.max(horizon,rise*500/distance);
+ }
+ const occlusion=.17*smooth(clamp((horizon-.69)/.95,0,1));
+ const concavity=clamp((height-(west+east+north+south)/4)*.75,-.055,.035);
+ const light=clamp((1+(diffuse-.57)*.80+concavity)*(1-occlusion),.58,1.27);
+ return {slope,light:Math.round(light*48)/48};
+}
+function makeNaturalPixelRaster(){
+ const out=document.createElement('canvas');
+ out.width=GW;out.height=GH;
+ const g=out.getContext('2d',{alpha:false}),image=g.createImageData(GW,GH),pixels=image.data;
+ const colors=naturalPixelPalette;
+ for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){
+  const i=y*GW+x,height=elevation[i],wx=x*GRID,wz=y*GRID;
+  const grain=hash(x,y,43)-.5;
+  const channelDepth=riverDepth[i]/255;
+  let base,light=1,texture=grain*2;
+  if(height<=0||channelDepth>0){
+   const depth=height<=0?smooth(clamp(-height/.11,0,1)):channelDepth;
+   base=blend(colors.shallows,colors.deep,depth);
+  }else{
+   const lighting=terrainLight(wx,wz,height);
+   light=lighting.light;
+   const crowns=noise(x/2.25,y/2.25,52)-.5;
+   const stands=noise(x/7,y/7,54)-.5;
+   const cover=smooth(clamp((canopyCover[i]+crowns*.085+stands*.12-.045)/.21,0,1));
+   const ground=blend(colors.meadow,colors.wet,clamp((moisture[i]-.12)/.39,0,.65));
+   const woods=blend(ground,colors.canopy,cover);
+   const flecks=noise(x/5,y/5,51)-.5;
+   // Elevation leaves room for vegetation. Exposed rock follows steep slopes,
+   // with scattered snow at the highest points in the synthetic sample.
+   const exposure=smooth(clamp((height-.39)/.29,0,1))
+                 *smooth(clamp((lighting.slope+.28*flecks-.64)/1.25,0,1));
+   const stone=blend(woods,colors.rock,exposure*.82);
+   const snow=smooth(clamp((height-.78+flecks*.095)/.17,0,1));
+   base=blend(stone,colors.snow,snow*.86);
+   if(height<.027)base=blend(colors.sand,base,smooth(height/.027));
+   texture=grain*(5+4*cover)+crowns*(4+22*cover)+stands*(4+6*cover)+flecks*7;
+  }
+  const shadow=Math.max(0,1-light),k=i*4;
+  pixels[k]=base[0]*light+texture;
+  pixels[k+1]=base[1]*light+texture+2*shadow;
+  pixels[k+2]=base[2]*light+texture+13*shadow;
+  pixels[k+3]=255;
+ }
+ g.putImageData(image,0,0);
+ return out;
+}
+function makePixelLayer(previous){
+ const c=document.createElement('canvas');c.width=GW;c.height=GH;
+ const g=c.getContext('2d',{alpha:false});
+ g.imageSmoothingEnabled=false;
+ g.drawImage(previous?pixelClassicBase:pixelBase,0,0);
+ g.scale(1/GRID,1/GRID);
+ if(previous){
+  for(const [points,width] of [[riverA,18],[riverB,11],[riverC,10]]){
+   drawStroke(g,points,'#2c75ae',width+4);
+   drawStroke(g,points,'#5298c9',width);
+  }
   g.beginPath();g.ellipse(624,254,75,39,-.22,0,Math.PI*2);g.fillStyle='#4d9ed5';g.fill();
-  if(layers.roads){for(const points of [roadA,roadB]){drawStroke(g,points,'#8a7650',9);drawStroke(g,points,'#c9b28b',6)}}
-  if(layers.rail){drawStroke(g,railway,'#403f3a',6);drawStroke(g,railway,'#898d82',3);drawStroke(g,railway,'#454843',1.4,[3,8])}
-  g.restore();return c;}
+ }
+ if(layers.roads){
+  for(const points of [roadA,roadB]){
+   if(previous)drawStroke(g,points,'#8a7650',9);
+   drawStroke(g,points,previous?'#c9b28b':'#c0b796d2',previous?6:3.6);
+  }
+ }
+ if(layers.rail){
+  if(previous){
+   drawStroke(g,railway,'#403f3a',6);
+   drawStroke(g,railway,'#898d82',3);
+   drawStroke(g,railway,'#454843',1.4,[3,8]);
+  }else{
+   drawStroke(g,railway,'#413d35bd',3.5);
+   drawStroke(g,railway,'#b9b1a0b3',1.4,[2,5]);
+  }
+ }
+ return c;
+}
 
 function makeRaster(style){const out=document.createElement('canvas');out.width=GW;out.height=GH;const c=out.getContext('2d',{alpha:false}),im=c.createImageData(GW,GH),data=im.data;const pal=style==='realistic'?realPal:inkPal;for(let y=0;y<GH;y++){for(let x=0;x<GW;x++){let i=y*GW+x,px=x*GRID,py=y*GRID,hi=elevation[i],bi=biome[i],rr=0,cc;
  if(hi<=0){let depth=clamp(-hi,0,.3)/.3;cc=style==='realistic'?blend([122,173,179],[50,117,141],depth):blend([188,208,192],pal.water,depth*.5)}
@@ -355,7 +456,7 @@ function mountainInk(c){c.save();for(let y=45;y<H-40;y+=54){for(let x=420;x<W-25
 function seaHatch(c){c.save();c.strokeStyle='#638a8199';c.lineWidth=1;for(let y=30;y<H;y+=27){for(let x=25;x<250;x+=43){let px=x+(hash(x,y,2)-.5)*12,py=y+(hash(x,y,4)-.5)*9;if(getElev(px,py)>-.02||hash(x,y,5)<.22)continue;c.beginPath();c.moveTo(px-7,py);c.quadraticCurveTo(px-2,py-3,px+4,py);c.quadraticCurveTo(px+7,py+2,px+10,py);c.stroke();if(hash(x,y,8)>.65){c.beginPath();c.moveTo(px-2,py+5);c.lineTo(px+6,py+5);c.stroke()}}}c.restore()}
 function paperGrain(c){c.save();for(let i=0;i<12500;i++){let x=hash(i,77)*W,y=hash(i,19)*H;c.fillStyle=i%3?'#5a402006':'#fff2b515';c.fillRect(x,y,1.5,1.5)}c.restore()}
 function addLabels(c,style){c.save();const old=style==='illustrated';const labels=[{s:'北镜海',x:75,y:395,z:29,rotation:-.07,color:old?'#5f806d':'#e0f6ef'},{s:'苍岚山脉',x:990,y:163,z:21,rotation:-.25,color:old?'#66503b':'#eaf0e5'},{s:'白 河 谷 地',x:573,y:634,z:19,rotation:-.16,color:old?'#80684c':'#eef3d3'},{s:'雾松林',x:924,y:750,z:20,rotation:.10,color:old?'#5d6441':'#e6efdd'}];for(let t of labels){c.save();c.translate(t.x,t.y);c.rotate(t.rotation);c.textAlign='center';c.font=(old?'bold ':'600 ')+t.z+'px '+(old?'Georgia,"SimSun",serif':'"Microsoft YaHei",sans-serif');c.fillStyle=t.color;c.globalAlpha=old?.76:.69;if(!old){c.shadowColor='#3045339a';c.shadowBlur=9;c.shadowOffsetY=1}c.fillText(t.s,0,0);c.restore()}c.restore()}
-function makeLayer(style){if(isPixelTexture(style))return makePixelLayer(style==='pixel'?pixelBase:pixelClassicBase);const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d',{alpha:false});g.imageSmoothingEnabled=true;g.drawImage(style==='realistic'?realBase:inkBase,0,0,W,H);if(style==='illustrated')paperGrain(g);if(layers.contours)textureContours(g,style);coastline(g,style);drawLakes(g,style);rivers(g,style);forest(g,style);if(style==='illustrated'){mountainInk(g);seaHatch(g)}drawRoads(g,style);if(style==='illustrated'){g.strokeStyle='#b08e5b67';g.lineWidth=6;g.strokeRect(14,14,W-28,H-28);g.strokeStyle='#795b3f48';g.lineWidth=1;g.strokeRect(22,22,W-44,H-44)}return c}
+function makeLayer(style){if(isPixelTexture(style))return makePixelLayer(style==='pixelClassic');const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d',{alpha:false});g.imageSmoothingEnabled=true;g.drawImage(style==='realistic'?realBase:inkBase,0,0,W,H);if(style==='illustrated')paperGrain(g);if(layers.contours)textureContours(g,style);coastline(g,style);drawLakes(g,style);rivers(g,style);forest(g,style);if(style==='illustrated'){mountainInk(g);seaHatch(g)}drawRoads(g,style);if(style==='illustrated'){g.strokeStyle='#b08e5b67';g.lineWidth=6;g.strokeRect(14,14,W-28,H-28);g.strokeStyle='#795b3f48';g.lineWidth=1;g.strokeRect(22,22,W-44,H-44)}return c}
 /* The world is generated once. Two separate 16×16-world-block masks control
  * visibility and color; neither reloads/recalculates terrain or style art.
  * A map pixel is 3 world blocks in this preview. One mask pixel = one chunk.
@@ -518,7 +619,7 @@ function paint(g){
  g.fillStyle='#d4d6be';g.fillRect(0,0,w,h);
  const v=view();
  function draw(style){
-  g.imageSmoothingEnabled=!isPixelTexture(style)&&scale<1.25;
+  g.imageSmoothingEnabled=isPixelTexture(style)?scale*dpr*GRID<1:scale<1.25;
   g.drawImage(coveredTextures[style],v.left,v.top,v.ww,v.hh);
  }
  if(mode==='pixel'&&pixelView==='split'){
@@ -576,7 +677,7 @@ function toast(message){const el=$('#toast');el.textContent=message;el.classList
  function mini(which){return `<div class="miniPreview"><canvas id="mini-${which}"></canvas><span class="chip">${which==='pixel'?'MC 方块':which==='realistic'?'自然地貌':'古式地图'}</span></div>`}
  function paintMiniThumbs(){for(let m of ['pixel','realistic','illustrated']){const el=$('#mini-'+m);if(!el)continue;el.width=360;el.height=180;const g=el.getContext('2d');g.imageSmoothingEnabled=m!=='pixel';g.drawImage(textures[m],m==='pixel'?180:360,m==='pixel'?100:200,m==='pixel'?270:540,m==='pixel'?135:270,0,0,360,180)}}
  function settingsOpen(tab='map'){detailClose();panelClose();settingTab=tab;modal='settings';const header=`<div class="modalHeading"><div><div class="panelLabel">CARTOGRAPH / SETTINGS</div><h2>地图设置</h2><p>配置地图画面和小地图</p></div><button data-act="modal-close">×</button></div><div class="configRow" style="margin-top:14px"><button class="btn ${tab==='map'?'active':''}" data-settings-tab="map">大地图 / 风格</button><button class="btn ${tab==='mini'?'active':''}" data-settings-tab="mini">小地图设置</button><button class="btn ${tab==='cost'?'active':''}" data-settings-tab="cost">耗材与倍率</button></div>`;
- if(tab==='map')modalEl.innerHTML=header+`<div class="settingCaption">地图风格</div><div class="styleCards">${[['pixel','像素 · Minecraft','方块色与多尺度坡面阴影，读出山脊和谷地'],['realistic','写实 · 现代地形图','自然地貌、坡面阴影、森林与水系'],['illustrated','手绘 · 古式地图','羊皮纸、墨线、山脉与树林符号']].map(([key,t,desc])=>`<button class="styleCard ${mode===key?'chosen':''}" data-style="${key}">${mini(key)}<strong>${t}</strong><small>${desc}</small></button>`).join('')}</div><div class="settingCaption">显示选项</div><label class="settingsToggle"><b>显示区域名称</b><input type="checkbox" data-layer="regions" ${layers.regions?'checked':''}></label><label class="settingsToggle"><b>显示区域边界</b><input type="checkbox" data-layer="regionBoundaries" ${layers.regionBoundaries?'checked':''}></label><label class="settingsToggle" ${mode==='pixel'?'style="opacity:.55"':''}><b>${mode==='pixel'?'方块高差阴影（自动启用）':'显示等高线'}</b><input type="checkbox" data-layer="contours" ${mode==='pixel'?'checked disabled':layers.contours?'checked':''}></label><div class="modalFooter"><small></small><button class="btn primary" data-act="modal-close">完成</button></div>`;
+ if(tab==='map')modalEl.innerHTML=header+`<div class="settingCaption">地图风格</div><div class="styleCards">${[['pixel','像素 · Minecraft','地表方块色、统一光向与阴影，辨认山脊和河谷'],['realistic','写实 · 现代地形图','自然地貌、坡面阴影、森林与水系'],['illustrated','手绘 · 古式地图','羊皮纸、墨线、山脉与树林符号']].map(([key,t,desc])=>`<button class="styleCard ${mode===key?'chosen':''}" data-style="${key}">${mini(key)}<strong>${t}</strong><small>${desc}</small></button>`).join('')}</div><div class="settingCaption">显示选项</div><label class="settingsToggle"><b>显示区域名称</b><input type="checkbox" data-layer="regions" ${layers.regions?'checked':''}></label><label class="settingsToggle"><b>显示区域边界</b><input type="checkbox" data-layer="regionBoundaries" ${layers.regionBoundaries?'checked':''}></label><label class="settingsToggle" ${mode==='pixel'?'style="opacity:.55"':''}><b>${mode==='pixel'?'方块高差阴影（自动启用）':'显示等高线'}</b><input type="checkbox" data-layer="contours" ${mode==='pixel'?'checked disabled':layers.contours?'checked':''}></label><div class="modalFooter"><small></small><button class="btn primary" data-act="modal-close">完成</button></div>`;
  else if(tab==='cost')modalEl.innerHTML=header+
  `<div class="costGroup"><h3>测绘墨水</h3><p>每单位 16 × 16 方块。投入墨水逐格揭开空白；底层地形无需重绘。</p>
  ${costRow('inkInput','投入倍率')}${costRow('inkCost','消耗倍率')}
@@ -1040,7 +1141,7 @@ function start(){
  initRegionEvents();
  collectGeometry();initMasks();
  realBase=makeRaster('realistic');inkBase=makeRaster('illustrated');
- pixelBase=makePixelRaster(true);pixelClassicBase=makePixelRaster(false);
+ pixelBase=makeNaturalPixelRaster();pixelClassicBase=makePreviousPixelRaster();
  let preferred='pixel';
  if(!terrainPreview){
   try{
