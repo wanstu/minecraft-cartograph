@@ -42,6 +42,27 @@ public final class AtlasActions {
         return ItemStack.EMPTY;
     }
 
+    /** Expand a possessed atlas in place; ordinary maps are spent, never generated or predicted. */
+    public static void addPage(ServerPlayer player, MapNetwork.AddPage req) {
+        if (!allowed(player, OTHER_ACTIONS)) { reply(player, false, "操作过快，请稍后再试"); return; }
+        ItemStack atlas = AtlasMapServer.findAtlas(player, req.atlasId());
+        if (atlas.isEmpty()) { reply(player, false, "背包中未找到对应地图册"); return; }
+        AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
+        AtlasWorldData.Entry entry = data.access(atlas);
+        AtlasState current = entry.state();
+        if (current.pages() >= AtlasState.MAX_PAGES) {
+            reply(player, false, "地图册已达到最大页数"); return;
+        }
+        ItemStack map = findIngredient(player, Items.MAP);
+        if (map.isEmpty() && !player.getAbilities().instabuild) {
+            reply(player, false, "背包中没有原版空地图，无法扩充地图册"); return;
+        }
+        if (!player.getAbilities().instabuild) map.shrink(1);
+        AtlasState expanded = current.extendOnePage();
+        data.update(entry, expanded, atlas);
+        reply(player, true, "已装订 1 张空地图 · 当前 " + expanded.pages() + " 页");
+    }
+
     public static void refill(ServerPlayer player, MapNetwork.Refill req) {
         if (req.material() < 0 || req.material() > 5) {
             reply(player, false, "未知耗材类型");

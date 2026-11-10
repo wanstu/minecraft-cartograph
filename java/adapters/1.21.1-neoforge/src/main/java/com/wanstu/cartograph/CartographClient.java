@@ -149,6 +149,7 @@ public final class CartographClient {
     static void sendRegion(MapNetwork.EditRegion value) { PacketDistributor.sendToServer(value); }
     static void requestAnnotations() { PacketDistributor.sendToServer(new MapNetwork.RequestAnnotations(atlasId())); }
     static void sendRefill(int slot) { PacketDistributor.sendToServer(new MapNetwork.Refill(atlasId(), slot)); }
+    static void sendAddPage() { PacketDistributor.sendToServer(new MapNetwork.AddPage(atlasId())); }
     static List<NamedRegion> regions() { return regions; }
     static List<AtlasMarker> markers() { return markers; }
     public static void acceptAnnotations(MapNetwork.Annotations value) {
@@ -270,6 +271,7 @@ public final class CartographClient {
         String requested = atlasId(), dim = dimension();
         if (!hasAtlas() || !page.dimension().equals(dim) || !requested.isBlank() && !requested.equals(page.atlasId())) return;
         boolean first = coverage() == null;
+        int previousPageCount = first ? -1 : coverage.totalPages();
         if (!page.atlasId().equals(lastAtlasId) || !dim.equals(lastDimension)) {
             QUEUED.clear();
             previousAtlas = currentAtlas();
@@ -310,7 +312,10 @@ public final class CartographClient {
                 if (removed.page().heights().length != 0) redrawNeighbors(oldest);
             }
         }
-        if (first && mc.screen instanceof AtlasScreen screen) screen.coverageReady();
+        if (mc.screen instanceof AtlasScreen screen) {
+            if (first) screen.coverageReady();
+            else if (previousPageCount != page.totalPages()) screen.coverageChanged();
+        }
     }
 
     public static void clear() {

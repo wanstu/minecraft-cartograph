@@ -162,6 +162,15 @@ public final class MapNetwork {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
+    /** The atlas and ordinary empty map are consumed server-side without losing the atlas identity. */
+    public record AddPage(String atlasId) implements CustomPacketPayload {
+        public static final Type<AddPage> TYPE = new Type<>(id("add_page"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, AddPage> CODEC = StreamCodec.of(
+                (buf, v) -> buf.writeUtf(v.atlasId, 64),
+                buf -> new AddPage(buf.readUtf(64)));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     public record ExportMap(String atlasId, int pageX, int pageZ) implements CustomPacketPayload {
         public static final Type<ExportMap> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "export_map"));
@@ -307,7 +316,7 @@ public final class MapNetwork {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("8");
+        var registrar = event.registrar("9");
         registrar.playToServer(RequestAnnotations.TYPE, RequestAnnotations.CODEC, (req, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.listAnnotations(player, req.atlasId());
@@ -331,6 +340,10 @@ public final class MapNetwork {
         registrar.playToServer(EditMarker.TYPE, EditMarker.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.editMarker(player, request);
+                }));
+        registrar.playToServer(AddPage.TYPE, AddPage.CODEC, (request, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (ctx.player() instanceof ServerPlayer player) AtlasActions.addPage(player, request);
                 }));
         registrar.playToServer(Refill.TYPE, Refill.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {

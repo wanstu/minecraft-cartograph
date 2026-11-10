@@ -94,8 +94,9 @@ public final class AtlasScreen extends Screen {
     private double ux(double x) { return x / ui; }
 
     @Override protected void init() {
-        ui = (float) Math.min(1.55 / minecraft.getWindow().getGuiScale(),
-                Math.min(width / 370.0, height / 381.0));
+        // Keep the native Minecraft typeface readable; cap by viewport to avoid clipping.
+        ui = (float) Math.min(2.2 / minecraft.getWindow().getGuiScale(),
+                Math.min(width / 400.0, height / 390.0));
         zoom = zoomPixels / minecraft.getWindow().getGuiScale();
         if (!initialized) {
             initialized = true;
@@ -107,6 +108,8 @@ public final class AtlasScreen extends Screen {
             reload(false, false);
         }
     }
+
+    public void coverageChanged() { reload(false, false); }
 
     public void coverageReady() {
         MapNetwork.Page c = CartographClient.coverage();
@@ -189,7 +192,8 @@ public final class AtlasScreen extends Screen {
             statusBox(g, mx, my);
             if (dialog == Dialog.NONE) {
                 toolbar(g);
-                pixelTools(g);
+                // The old/new/split comparison bar was a developer preview control,
+                // absent from the approved atlas prototype; do not render it in game.
                 if (panel != Panel.NONE) renderPanel(g);
                 if (selection != null) renderSelection(g);
                 if (draft != null) drawGuide(g);
@@ -449,7 +453,7 @@ public final class AtlasScreen extends Screen {
 
     private void renderPanel(GuiGraphics g) {
         int width = Math.min(228, w() - 28), x = w() - width - 14, y = 62;
-        int height = Math.min(h() - y - 60, panel == Panel.ATLAS ? 257 : panel == Panel.INFO ? 150 : 276);
+        int height = Math.min(h() - y - 60, panel == Panel.ATLAS ? 257 : panel == Panel.INFO ? 184 : 276);
         card(g, x, y, width, height, 8);
         String title = switch (panel) {
             case LAYERS -> "地图图层"; case MARKERS -> "我的标点"; case REGIONS -> "区域命名";
@@ -472,17 +476,25 @@ public final class AtlasScreen extends Screen {
                 AtlasState state = CartographClient.state();
                 MapNetwork.Page c = CartographClient.coverage();
                 int count = CartographClient.pageCount() * 64;
-                textRow(g, left, row, inner, "扩展地图页", CartographClient.pageCount() + " 页");
-                textRow(g, left, row + 21, inner, RESOURCES[0], balance(state.inkUnits(), 0, state.inkEnabled()));
-                textRow(g, left, row + 42, inner, RESOURCES[1], balance(state.pigmentUnits(), 1, state.colorEnabled()));
-                textRow(g, left, row + 63, inner, RESOURCES[2], balance(state.glowUnits(), 2, state.glowEnabled()));
-                textRow(g, left, row + 84, inner, "指南针", state.compassInstalled() ? "已装入" : "未装入");
-                progress(g, left, row + 109, inner, "测绘覆盖", c == null ? 0 : c.totalSurveyed(), count, 0xff93ad8b);
-                progress(g, left, row + 135, inner, "彩色覆盖", c == null ? 0 : c.totalColored(), count, 0xffb1a6d2);
-                button(g, left, Math.min(row + 163, y + height - 27), inner, 21, "打开材料槽", true,
-                        () -> dialog = Dialog.MATERIALS);
-                g.drawString(font, shorten("工作台用地图册和空地图增加 128×128 方块覆盖", inner),
-                        left, row + 194, MUTED);
+                int emptyMaps = 0;
+                for (ItemStack stack : minecraft.player.getInventory().items)
+                    if (stack.is(Items.MAP)) emptyMaps += stack.getCount();
+                if (minecraft.player.getOffhandItem().is(Items.MAP))
+                    emptyMaps += minecraft.player.getOffhandItem().getCount();
+                textRow(g, left, row, inner, "地图页", CartographClient.pageCount() + " 页");
+                textRow(g, left, row + 18, inner, "背包空地图", emptyMaps + " 张");
+                textRow(g, left, row + 36, inner, RESOURCES[0], balance(state.inkUnits(), 0, state.inkEnabled()));
+                textRow(g, left, row + 54, inner, RESOURCES[1], balance(state.pigmentUnits(), 1, state.colorEnabled()));
+                textRow(g, left, row + 72, inner, RESOURCES[2], balance(state.glowUnits(), 2, state.glowEnabled()));
+                textRow(g, left, row + 90, inner, "指南针", state.compassInstalled() ? "已装入" : "未装入");
+                progress(g, left, row + 110, inner, "测绘覆盖", c == null ? 0 : c.totalSurveyed(), count, 0xff93ad8b);
+                progress(g, left, row + 136, inner, "彩色覆盖", c == null ? 0 : c.totalColored(), count, 0xffb1a6d2);
+                button(g, left, row + 161, inner, 21, "打开材料槽", true, () -> dialog = Dialog.MATERIALS);
+                boolean canExpand = emptyMaps > 0 || minecraft.player.getAbilities().instabuild;
+                button(g, left, row + 187, inner, 22, canExpand ? "＋ 装订 1 张空地图" : "背包中没有空地图",
+                        canExpand, canExpand ? CartographClient::sendAddPage : null);
+                g.drawString(font, shorten("每张空地图扩展 128×128 方块 · 工作台也可装订", inner),
+                        left, row + 216, MUTED);
             }
             case MARKERS -> {
                 button(g, left, row, inner, 24, "＋ 新增标点", true, () -> openMarker(null, world(viewX), world(viewZ)));
@@ -513,6 +525,10 @@ public final class AtlasScreen extends Screen {
                 textRow(g, left, row + 22, inner, "风格", cfg.style.label);
                 textRow(g, left, row + 44, inner, "已加载标点", Integer.toString(markers().size()));
                 textRow(g, left, row + 66, inner, "命名区域", Integer.toString(CartographClient.regions().size()));
+                MapNetwork.Page current = CartographClient.page(pageX(viewX), pageX(viewZ));
+                textRow(g, left, row + 88, inner, "当前页采样", current == null ? "未请求" : current.scanned() + " / 64");
+                textRow(g, left, row + 110, inner, "已生成区块", current == null ? "—" : current.generated() + " / 64");
+                textRow(g, left, row + 132, inner, "已绘制区块", current == null ? "—" : current.painted() + " / 64");
             }
             default -> { }
         }
@@ -1149,7 +1165,7 @@ public final class AtlasScreen extends Screen {
         if (dy == 0) return false;
         selection = null; menu = Menu.NONE; manuallyMoved = true;
         double x = viewX + (mx - width * .5) / zoom, z = viewZ + (my - height * .5) / zoom;
-        zoomPixels = Math.clamp(zoomPixels * Math.pow(1.25, Math.clamp(dy, -4, 4)), .40, 10.0);
+        zoomPixels = Math.clamp(zoomPixels * Math.pow(1.25, Math.clamp(dy, -4, 4)), .20, 20.0);
         zoom = zoomPixels / minecraft.getWindow().getGuiScale();
         viewX = Math.clamp(x - (mx - width * .5) / zoom, -WORLD_LIMIT, WORLD_LIMIT);
         viewZ = Math.clamp(z - (my - height * .5) / zoom, -WORLD_LIMIT, WORLD_LIMIT);
