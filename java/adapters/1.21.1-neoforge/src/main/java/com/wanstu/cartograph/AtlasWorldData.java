@@ -34,12 +34,18 @@ public final class AtlasWorldData extends SavedData {
         private String anchorDimension = "";
         private int anchorX, anchorZ;
         // Locked to each atlas when created; legacy records gain the generous default.
-        private int sheetSideBlocks = CartographConfig.pageSideBlocks();
+        private int sheetSideBlocks = MapSheetCoverage.DEFAULT_BLOCKS;
         private final Map<String, AtlasMarker> markers = new HashMap<>();
         private final Map<String, NamedRegion> namedRegions = new HashMap<>();
         private SurveyLedger ledger = new SurveyLedger();
 
-        private Entry(AtlasState state) { this.state = state; }
+        private Entry(AtlasState state) {
+            this(state, CartographConfig.pageSideBlocks()); // new atlases only
+        }
+        private Entry(AtlasState state, int side) {
+            this.state = state;
+            this.sheetSideBlocks = side;
+        }
         public AtlasState state() { return state; }
 
         public boolean anchored() { return !anchorDimension.isEmpty(); }
@@ -159,13 +165,14 @@ public final class AtlasWorldData extends SavedData {
         private static Entry loadEntry(CompoundTag tag) {
             AtlasState state = AtlasState.CODEC.parse(NbtOps.INSTANCE, tag.get("state"))
                     .result().orElse(AtlasState.blank());
-            Entry entry = new Entry(state);
+            // Persisted atlas sheet width is authoritative. Loading world
+            // data must not depend on live ModConfig availability.
+            int storedSide = tag.getInt("sheet_side_blocks");
+            int width = MapSheetCoverage.valid(storedSide)
+                    ? storedSide : MapSheetCoverage.DEFAULT_BLOCKS;
+            Entry entry = new Entry(state, width);
             entry.anchorDimension = tag.getString("anchor_dim");
             entry.anchorX = tag.getInt("anchor_x"); entry.anchorZ = tag.getInt("anchor_z");
-            // Existing single-tile atlas pages become 512x512 sheets at no resource cost.
-            int storedSide = tag.getInt("sheet_side_blocks");
-            entry.sheetSideBlocks = MapSheetCoverage.valid(storedSide)
-                    ? storedSide : MapSheetCoverage.DEFAULT_BLOCKS;
             Set<SurveyLedger.ChunkKey> paid = new HashSet<>(), color = new HashSet<>();
             if (tag.contains("survey_mask", Tag.TAG_LIST)) {
                 loadMask(tag.getList("survey_mask", Tag.TAG_COMPOUND), paid);

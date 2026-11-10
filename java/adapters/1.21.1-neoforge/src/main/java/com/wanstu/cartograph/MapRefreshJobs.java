@@ -109,7 +109,7 @@ final class MapRefreshJobs {
         int remaining = job.unfinishedPerPage.merge(page, -1, Integer::sum);
         if (remaining == 0) {
             job.unfinishedPerPage.remove(page);
-            AtlasMapServer.markSurfaceChanged(world, c.x(), c.z());
+            AtlasMapServer.markWholePageChanged(world, page.x(), page.z());
         }
     }
 

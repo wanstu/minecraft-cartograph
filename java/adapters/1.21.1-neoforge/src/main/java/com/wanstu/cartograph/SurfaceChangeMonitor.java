@@ -55,9 +55,13 @@ final class SurfaceChangeMonitor {
         if (pending != null) {
             if (direct) {
                 pending.direct = true;
-                pending.due = Math.min(pending.due, ticks + DIRECT_DEBOUNCE_TICKS);
+                // Direct edits during an existing candidate MUST expire an
+                // intermediate live snapshot. Otherwise the loaded-chunk
+                // TTL could return the sample taken before the latest edit.
+                indexDirty(level, cx, cz);
+                pending.due = ticks + DIRECT_DEBOUNCE_TICKS;
             }
-            return; // Do not repeatedly invalidate the same in-flight source.
+            return; // Neighbor-only noise does not repeatedly resample.
         }
         WorldSurfaceIndex index = WorldSurfaceIndex.of(level);
         WorldSurfaceIndex.Lookup existing = index.cached(level, cx, cz);
@@ -71,6 +75,10 @@ final class SurfaceChangeMonitor {
         if (!direct) due = Math.max(due, LAST_CHECK.getOrDefault(key, 0L) + NEIGHBOR_RECHECK_TICKS);
         PENDING.put(key, new Candidate(level, cx, cz, baseline, due, direct));
         index.markDirty(level, cx, cz);
+    }
+
+    private static void indexDirty(ServerLevel level, int cx, int cz) {
+        WorldSurfaceIndex.of(level).markDirty(level, cx, cz);
     }
 
     static void tick(ServerTickEvent.Post event) {

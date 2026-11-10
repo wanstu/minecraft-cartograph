@@ -238,7 +238,8 @@ public final class AtlasScreen extends Screen {
         // refreshing visible tiles, but keep their old GPU textures until replaced.
         if (surveyChanged) reload(true, false);
         else {
-            CartographClient.queue(pageX(viewX), pageX(viewZ), true, false);
+            // Marker, paper, compass and settings feedback only change UI
+            // metadata; they must not rescan a paid 128x128 terrain tile.
             reload(false, false);
         }
     }

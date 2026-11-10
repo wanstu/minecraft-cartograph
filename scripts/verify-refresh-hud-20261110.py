@@ -14,7 +14,7 @@ settings=load('ClientMapSettings.java')
 assert 'boolean mayReplace = old == null' in client
 assert 'if (IN_FLIGHT.containsKey(key)) {' in client
 assert 'unfinishedPerPage' in jobs and 'if (remaining == 0)' in jobs
-assert jobs.count('AtlasMapServer.markSurfaceChanged(')==1
+assert jobs.count('AtlasMapServer.markWholePageChanged(')==1  # manual refresh completes one whole page
 assert 'boolean milestone = done;' in server
 assert 'task.next == 8 || task.next == 32' not in server
 assert 'static void drawHeld(GuiGraphics g)' in hud

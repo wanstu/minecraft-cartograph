@@ -70,6 +70,53 @@ public final class MapNetwork {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
+    /**
+     * Server-only, cost-free edit of exactly ONE previously surveyed 16x16
+     * world chunk. Never authorizes an unknown square, never changes resource
+     * balances, survey coverage, or color entitlement.
+     */
+    public record TerrainPatch(String atlasId, String dimension, int chunkX, int chunkZ,
+                               byte[] pixels, byte[] features, short[] heights, byte[] waterDepths,
+                               List<SurfaceStructure> structures)
+            implements CustomPacketPayload {
+        public static final int PIXELS = 16 * 16;
+        public TerrainPatch {
+            if (pixels.length != PIXELS || features.length != PIXELS
+                    || heights.length != PIXELS || waterDepths.length != PIXELS
+                    || structures.size() > 16)
+                throw new IllegalArgumentException("Invalid 16x16 terrain patch");
+        }
+        public static final Type<TerrainPatch> TYPE = new Type<>(id("terrain_patch"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, TerrainPatch> CODEC = StreamCodec.of(
+                (buf, v) -> {
+                    buf.writeUtf(v.atlasId, 64); buf.writeUtf(v.dimension, 128);
+                    buf.writeInt(v.chunkX); buf.writeInt(v.chunkZ);
+                    buf.writeByteArray(v.pixels); buf.writeByteArray(v.features);
+                    for (short height : v.heights) buf.writeShort(height);
+                    buf.writeByteArray(v.waterDepths);
+                    buf.writeVarInt(v.structures.size());
+                    for (SurfaceStructure f : v.structures) {
+                        buf.writeUtf(f.type(), 64);
+                        buf.writeInt(f.x()); buf.writeInt(f.z());
+                    }
+                }, buf -> {
+                    String atlas = buf.readUtf(64), dim = buf.readUtf(128);
+                    int cx = buf.readInt(), cz = buf.readInt();
+                    byte[] pixels = buf.readByteArray(PIXELS), features = buf.readByteArray(PIXELS);
+                    short[] heights = new short[PIXELS];
+                    for (int i = 0; i < PIXELS; i++) heights[i] = buf.readShort();
+                    byte[] depths = buf.readByteArray(PIXELS);
+                    int count = buf.readVarInt();
+                    if (count < 0 || count > 16) throw new IllegalArgumentException("Too many patch structures");
+                    List<SurfaceStructure> structures = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++)
+                        structures.add(new SurfaceStructure(buf.readUtf(64), buf.readInt(), buf.readInt()));
+                    return new TerrainPatch(atlas, dim, cx, cz, pixels, features, heights, depths,
+                            List.copyOf(structures));
+                });
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     public record Request(String atlasId, int pageX, int pageZ, boolean cachedOnly) implements CustomPacketPayload {
         public static final Type<Request> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "request_page"));
@@ -384,7 +431,7 @@ public final class MapNetwork {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("14");
+        var registrar = event.registrar("15");
         registrar.playToServer(RequestAnnotations.TYPE, RequestAnnotations.CODEC, (req, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.listAnnotations(player, req.atlasId());
@@ -400,6 +447,10 @@ public final class MapNetwork {
         registrar.playToClient(InvalidatePage.TYPE, InvalidatePage.CODEC, (item, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.invalidatePage(item);
+                }));
+        registrar.playToClient(TerrainPatch.TYPE, TerrainPatch.CODEC, (patch, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.acceptTerrainPatch(patch);
                 }));
         registrar.playToServer(SetPerformance.TYPE, SetPerformance.CODEC, (req, ctx) ->
                 ctx.enqueueWork(() -> {

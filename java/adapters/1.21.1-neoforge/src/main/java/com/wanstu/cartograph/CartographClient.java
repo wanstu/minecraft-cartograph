@@ -40,6 +40,9 @@ public final class CartographClient {
     private static final int GPU_TEXTURE_LIMIT = 140;
     private static final int MAX_PARALLEL_PAGES = 4;
     private static final int SURFACE_RECHECK_TICKS = 12000; // 10 min for fully drawn tiles
+    private static final int DISK_READ_GRACE_TICKS = 16; // 0.8 seconds, never blocks render/tick
+    private static final int DISK_VALIDATION_DELAY_TICKS = 200; // show cached terrain first
+    private static final LinkedHashMap<CacheKey, Integer> DISK_LOADING = new LinkedHashMap<>();
     private static final LinkedHashMap<CacheKey, Entry> PAGES = new LinkedHashMap<>(32, 0.75f, true);
     private static final LinkedHashMap<CacheKey, Boolean> QUEUED = new LinkedHashMap<>();
     private static final Set<CacheKey> REDRAW = new LinkedHashSet<>();
@@ -175,6 +178,17 @@ public final class CartographClient {
      * after a manual pan or zoom, so newly visible tiles jump to the front. */
     static void prioritizeViewport() { QUEUED.clear(); }
 
+    /**
+     * Scanning cadence depends on the survey layer, not image existence:
+     * an incomplete page still needs regular checks while ink remains,
+     * but an empty page with no paint budget is stable until refill.
+     */
+    private static int recheckInterval(MapNetwork.Page page) {
+        boolean noPaintBudget = page.complete() && page.inkUnits() == 0
+                && page.painted() == 0 && page.surveyedChunks() == 0;
+        return page.painted() >= 64 || noPaintBudget ? SURFACE_RECHECK_TICKS : 600;
+    }
+
     public static boolean queue(int x, int z, boolean force) { return queue(x, z, force, false); }
 
     /** Return whether a NEW tile request was queued, so visible missing tiles
@@ -183,10 +197,23 @@ public final class CartographClient {
         if (Math.abs((long) x) > 234375 || Math.abs((long) z) > 234375 || !hasAtlas() || !covered(x, z)) return false;
         CacheKey key = key(x, z);
         Entry entry = PAGES.get(key);
-        if (entry == null && !force && !key.atlasId().isBlank()) {
-            // First display the previous server-confirmed page from local disk.
-            // The actual server refresh happens after the cached pixels appear.
-            ClientPageStore.request(Minecraft.getInstance().gameDirectory.toPath(), diskKey(key));
+        if (entry == null && !key.atlasId().isBlank() && !force) {
+            // Disk-first: when returning to a covered/known area, allow the
+            // async local cache to return before scheduling a 64-chunk server
+            // scan. This is bounded by DISK_READ_GRACE_TICKS; a slow disk or
+            // missing file cannot make the map wait indefinitely.
+            Integer started = DISK_LOADING.get(key);
+            if (started == null && DISK_LOADING.size() < CACHE_LIMIT) {
+                DISK_LOADING.put(key, ticks);
+                ClientPageStore.request(Minecraft.getInstance().gameDirectory.toPath(), diskKey(key));
+                return false;
+            }
+            if (started != null && ticks - started < DISK_READ_GRACE_TICKS) return false;
+            DISK_LOADING.remove(key);
+        } else if (force) {
+            // User-triggered refresh and server invalidation always bypass
+            // pending disk loads. A late disk result cannot replace live data.
+            DISK_LOADING.remove(key);
         }
         if (!force && entry != null) {
             // Fully drawn map tiles need no continual re-reading. Partially
@@ -196,11 +223,7 @@ public final class CartographClient {
             // 30 seconds (or sooner after harmless world updates) wastes CPU.
             // Real terrain edits still arrive via InvalidatePage, and refill
             // feedback explicitly forces a new survey request.
-            boolean noPaintBudget = entry.page().complete() && entry.page().inkUnits() == 0
-                    && entry.page().painted() == 0 && entry.page().surveyedChunks() == 0;
-            int refreshAfter = entry.page().painted() >= 64 || noPaintBudget
-                    ? SURFACE_RECHECK_TICKS : 600;
-            if (ticks - entry.updated() < refreshAfter) return false;
+            if (ticks - entry.updated() < recheckInterval(entry.page())) return false;
         }
         if (IN_FLIGHT.containsKey(key)) return false;
         if (QUEUED.size() >= CACHE_LIMIT && !QUEUED.containsKey(key)) return false;
@@ -278,6 +301,7 @@ public final class CartographClient {
             IN_FLIGHT.clear();
             QUEUED.clear();
             STALE.clear();
+            DISK_LOADING.clear();
             while (OPEN.consumeClick()) { } // no atlas: key cannot open
             ticks++;
             return;
@@ -302,16 +326,26 @@ public final class CartographClient {
             if (cached == null) break;
             CacheKey k = new CacheKey(cached.key().atlas(), cached.key().dimension(),
                     cached.key().x(), cached.key().z());
+            boolean awaitedDisk = DISK_LOADING.remove(k) != null;
             if (cached.page() != null && diskKey(k).world().equals(cached.key().world())
                     && k.atlasId().equals(atlasId()) && k.dimension().equals(dimension())
                     && !PAGES.containsKey(k) && covered(k.px(), k.pz())) {
                 // CPU pixels are immediately available. GPU upload follows the
                 // 2-tiles/tick budget without blocking world rendering.
+                // Persisted image is visible immediately. Background
+                // revalidation follows after 10 seconds so offline edits are
+                // eventually reconciled, without racing the disk read.
                 PAGES.put(k, new Entry(cached.page(), null, null, null,
-                        ticks - SURFACE_RECHECK_TICKS));
+                        ticks - recheckInterval(cached.page()) + DISK_VALIDATION_DELAY_TICKS));
                 REDRAW.add(k);
                 QUEUED.remove(k);
                 textureRevision++;
+            } else if (awaitedDisk && !PAGES.containsKey(k) && !IN_FLIGHT.containsKey(k)
+                    && k.atlasId().equals(atlasId()) && k.dimension().equals(dimension())
+                    && covered(k.px(), k.pz())) {
+                // A legitimate cache miss should fetch real data immediately;
+                // it must not retry disk reading or remain blank forever.
+                QUEUED.put(k, false);
             }
         }
         Iterator<java.util.Map.Entry<CacheKey, Integer>> active = IN_FLIGHT.entrySet().iterator();
@@ -430,6 +464,7 @@ public final class CartographClient {
                 || !invalidation.dimension().equals(dimension())) return;
         CacheKey key = new CacheKey(invalidation.atlasId(), invalidation.dimension(),
                 invalidation.pageX(), invalidation.pageZ());
+        DISK_LOADING.remove(key);
         if (IN_FLIGHT.containsKey(key)) {
             // A second world edit raced an already-running request. Request
             // once MORE only in this case, after its old snapshot completes.
@@ -441,6 +476,37 @@ public final class CartographClient {
             QUEUED.remove(key);
             QUEUED.put(key, false);
         }
+    }
+
+    /** A real world edit replaces only the 16x16 paid terrain pixels.
+     * No paint charges, no 64-chunk rescan, and no blank intermediate frame. */
+    public static void acceptTerrainPatch(MapNetwork.TerrainPatch patch) {
+        if (!hasAtlas() || !patch.atlasId().equals(atlasId())
+                || !patch.dimension().equals(dimension())) return;
+        CacheKey k = new CacheKey(patch.atlasId(), patch.dimension(),
+                Math.floorDiv(patch.chunkX(), 8), Math.floorDiv(patch.chunkZ(), 8));
+        Entry old = PAGES.get(k);
+        if (old == null) return; // Not viewed yet: future full page request is authoritative.
+        if (IN_FLIGHT.containsKey(k)) {
+            // A full-page snapshot taken before this edit may still be on the
+            // wire. Retry once after it completes, rather than lose the edit.
+            STALE.add(k);
+            return;
+        }
+        MapNetwork.Page next = TerrainPatchApplier.apply(old.page(), patch);
+        if (next == null) {
+            invalidatePage(new MapNetwork.InvalidatePage(patch.atlasId(), patch.dimension(),
+                    k.px(), k.pz()));
+            return;
+        }
+        REDRAW.add(k);
+        PAGES.put(k, new Entry(next, old.texture(), old.id(), null, ticks));
+        // Elevation lighting at an atlas page edge depends on the adjacent
+        // page's heights. Interior changes need repainting only THIS page.
+        int x = Math.floorMod(patch.chunkX(), 8), z = Math.floorMod(patch.chunkZ(), 8);
+        if (x == 0 || x == 7 || z == 0 || z == 7) redrawNeighbors(k);
+        if (!next.atlasId().isBlank())
+            ClientPageStore.save(Minecraft.getInstance().gameDirectory.toPath(), diskKey(k), next);
     }
 
     public static void acceptPage(MapNetwork.Page page) {
@@ -516,6 +582,7 @@ public final class CartographClient {
     public static void clear() {
         for (Entry e : PAGES.values()) release(e);
         PAGES.clear(); QUEUED.clear(); REDRAW.clear(); IN_FLIGHT.clear(); STALE.clear();
+        DISK_LOADING.clear();
         coverage = null; regions = List.of(); markers = List.of(); previousAtlas = ItemStack.EMPTY;
         lastAtlasId = ""; lastDimension = ""; textureRevision++;
         settings = new MapNetwork.CostSettings(MapNetwork.MaterialRates.DEFAULT, false);

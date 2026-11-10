@@ -39,9 +39,14 @@ public final class AtlasMapServer {
     private record PageKey(String dimension, int x, int z) {}
     private static final Map<UUID, Map<PageKey, Pending>> PENDING = new HashMap<>();
     private static final ArrayDeque<Pending> ORDER = new ArrayDeque<>();
-    // Several block-change events within one tick are coalesced per page.
-    private record Changed(String dimension, int pageX, int pageZ) {}
+    // Coalesce individual CHUNKS (16x16), never invalidate 64 neighboring
+    // chunks merely because a player placed a single block.
+    private record Changed(String dimension, int cx, int cz) {}
+    private record ChangedPage(String dimension, int pageX, int pageZ) {}
     private static final Map<Changed, Integer> CHANGED = new HashMap<>();
+    // Manual "refresh all surveyed" retains its full-page reconciliation,
+    // because it may have updated many chunks on the same page.
+    private static final Map<ChangedPage, Integer> WHOLE_PAGES = new HashMap<>();
     private static final Map<UUID, Long> LAST_DIAGNOSTIC = new HashMap<>();
     private static int ticks;
 
@@ -124,19 +129,26 @@ public final class AtlasMapServer {
     }
 
     static void markSurfaceChanged(net.minecraft.server.level.ServerLevel level, int cx, int cz) {
-        CHANGED.put(new Changed(level.dimension().location().toString(),
-                Math.floorDiv(cx, 8), Math.floorDiv(cz, 8)), ticks + 4);
+        CHANGED.put(new Changed(level.dimension().location().toString(), cx, cz), ticks + 4);
     }
 
-    /** Changed block events only invalidate pixels: the survey/ink ledger is not touched. */
+    static void markWholePageChanged(net.minecraft.server.level.ServerLevel level, int pageX, int pageZ) {
+        ChangedPage page = new ChangedPage(level.dimension().location().toString(), pageX, pageZ);
+        WHOLE_PAGES.put(page, ticks + 4);
+    }
+
+    /** No resource debit. A 16x16 terrain patch is sent only for a chunk
+     * already surveyed by that atlas, after its refreshed surface is ready.
+     * All snapshotting happens on the logical server thread with hard budget.
+     */
     private static void sendChangedPages(MinecraftServer server) {
-        Iterator<Map.Entry<Changed, Integer>> it = CHANGED.entrySet().iterator();
+        Iterator<Map.Entry<ChangedPage, Integer>> whole = WHOLE_PAGES.entrySet().iterator();
         int sent = 0;
-        while (it.hasNext() && sent < 32) {
-            var e = it.next();
+        while (whole.hasNext() && sent < 8) {
+            var e = whole.next();
             if (ticks < e.getValue()) continue;
-            Changed changed = e.getKey();
-            it.remove();
+            ChangedPage changed = e.getKey();
+            whole.remove();
             for (ServerPlayer viewer : server.getPlayerList().getPlayers()) {
                 if (!viewer.serverLevel().dimension().location().toString().equals(changed.dimension())) continue;
                 ItemStack atlas = findAtlas(viewer);
@@ -146,6 +158,68 @@ public final class AtlasMapServer {
                     PacketDistributor.sendToPlayer(viewer,
                             new MapNetwork.InvalidatePage(entry.state().id(), changed.dimension(),
                                     changed.pageX(), changed.pageZ()));
+            }
+            sent++;
+        }
+        Iterator<Map.Entry<Changed, Integer>> it = CHANGED.entrySet().iterator();
+        long deadline = System.nanoTime() + 2_000_000L;
+        while (it.hasNext() && sent < 12 && System.nanoTime() < deadline) {
+            var e = it.next();
+            if (ticks < e.getValue()) continue;
+            Changed changed = e.getKey();
+            int px = Math.floorDiv(changed.cx(), 8), pz = Math.floorDiv(changed.cz(), 8);
+            // A manual bulk refresh already queues the complete page.
+            if (WHOLE_PAGES.containsKey(new ChangedPage(changed.dimension(), px, pz))) {
+                it.remove();
+                continue;
+            }
+            // Only inspect a changed tile while an atlas owner is present.
+            // No chunk loads, no generated world; leaves queued disk parsing
+            // under WorldSurfaceIndex's existing bounded async worker pool.
+            net.minecraft.server.level.ServerLevel level = null;
+            for (ServerPlayer viewer : server.getPlayerList().getPlayers()) {
+                if (!viewer.serverLevel().dimension().location().toString().equals(changed.dimension())) continue;
+                ItemStack atlas = findAtlas(viewer);
+                if (atlas.isEmpty()) continue;
+                AtlasWorldData.Entry atlasData = AtlasWorldData.get(viewer.serverLevel()).access(atlas);
+                if (atlasData.isCovered(changed.dimension(), px, pz)
+                        && atlasData.paid(new SurveyLedger.ChunkKey(changed.dimension(), changed.cx(), changed.cz()))) {
+                    level = viewer.serverLevel();
+                    break;
+                }
+            }
+            if (level == null) { it.remove(); continue; }
+            WorldSurfaceIndex.Lookup updated =
+                    WorldSurfaceIndex.of(level).inspect(level, changed.cx(), changed.cz());
+            if (updated.state() == WorldSurfaceIndex.State.PENDING) continue;
+            it.remove();
+            for (ServerPlayer viewer : server.getPlayerList().getPlayers()) {
+                if (viewer.serverLevel() != level) continue;
+                ItemStack atlas = findAtlas(viewer);
+                if (atlas.isEmpty()) continue;
+                AtlasWorldData.Entry atlasData = AtlasWorldData.get(level).access(atlas);
+                if (!atlasData.isCovered(changed.dimension(), px, pz)) continue;
+                var key = new SurveyLedger.ChunkKey(changed.dimension(), changed.cx(), changed.cz());
+                if (!atlasData.paid(key)) continue;
+                if (updated.state() != WorldSurfaceIndex.State.READY) {
+                    // Previously surveyed terrain was removed / is no longer
+                    // a valid FULL chunk. Only this exceptional case falls
+                    // back to complete page verification.
+                    PacketDistributor.sendToPlayer(viewer,
+                            new MapNetwork.InvalidatePage(atlasData.state().id(),
+                                    changed.dimension(), px, pz));
+                    continue;
+                }
+                SurfaceSampler.SurfaceTile tile = updated.snapshot().tile();
+                byte[] pixels = tile.colors().clone();
+                if (!atlasData.isColored(key))
+                    for (int i = 0; i < pixels.length; i++)
+                        pixels[i] = SurfacePalette.graySample(tile.colors()[i], tile.waterDepths()[i]);
+                PacketDistributor.sendToPlayer(viewer, new MapNetwork.TerrainPatch(
+                        atlasData.state().id(), changed.dimension(), changed.cx(), changed.cz(),
+                        pixels, tile.features().clone(), tile.heights().clone(),
+                        tile.waterDepths().clone(),
+                        List.copyOf(tile.structures().subList(0, Math.min(tile.structures().size(), 16)))));
             }
             sent++;
         }
@@ -163,6 +237,7 @@ public final class AtlasMapServer {
         PENDING.clear();
         ORDER.clear();
         CHANGED.clear();
+        WHOLE_PAGES.clear();
         LAST_DIAGNOSTIC.clear();
         ticks = 0;
     }
