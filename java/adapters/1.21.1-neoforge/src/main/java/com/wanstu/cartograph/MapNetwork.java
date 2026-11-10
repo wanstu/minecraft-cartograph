@@ -19,7 +19,7 @@ import java.util.List;
 public final class MapNetwork {
     private MapNetwork() {}
 
-    public record Request(String atlasId, int pageX, int pageZ) implements CustomPacketPayload {
+    public record Request(String atlasId, int pageX, int pageZ, boolean cachedOnly) implements CustomPacketPayload {
         public static final Type<Request> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "request_page"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Request> CODEC = StreamCodec.of(
@@ -27,17 +27,19 @@ public final class MapNetwork {
                     buf.writeUtf(value.atlasId, 64);
                     buf.writeInt(value.pageX);
                     buf.writeInt(value.pageZ);
+                    buf.writeBoolean(value.cachedOnly);
                 },
-                buf -> new Request(buf.readUtf(64), buf.readInt(), buf.readInt()));
+                buf -> new Request(buf.readUtf(64), buf.readInt(), buf.readInt(), buf.readBoolean()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
     public record Page(String atlasId, String dimension, int pageX, int pageZ,
                        byte[] pixels, byte[] features, short[] heights, byte[] waterDepths,
-                       long coloredChunks, int inkUnits, int pigmentUnits,
+                       long surveyedChunks, long coloredChunks, int inkUnits, int pigmentUnits,
                        int glowUnits, boolean compass, boolean inRange,
-                       boolean complete, int scanned, int generated, int painted,
-                       int anchorX, int anchorZ, int totalPages,
+                       boolean complete, boolean cachedOnly, int scanned, int generated, int painted,
+                       String anchorDimension, int anchorX, int anchorZ, int totalPages,
+                       int totalSurveyed, int totalColored,
                        List<AtlasMarker> markers, List<SurfaceStructure> structures) implements CustomPacketPayload {
         public static final int PIXELS = AtlasPage.SIDE_BLOCKS * AtlasPage.SIDE_BLOCKS;
 
@@ -60,26 +62,23 @@ public final class MapNetwork {
                     buf.writeVarInt(value.heights.length);
                     for (short height : value.heights) buf.writeShort(height);
                     buf.writeByteArray(value.waterDepths);
+                    buf.writeLong(value.surveyedChunks);
                     buf.writeLong(value.coloredChunks);
                     buf.writeInt(value.inkUnits); buf.writeInt(value.pigmentUnits);
                     buf.writeInt(value.glowUnits);
                     buf.writeBoolean(value.compass); buf.writeBoolean(value.inRange);
                     buf.writeBoolean(value.complete);
+                    buf.writeBoolean(value.cachedOnly);
                     buf.writeVarInt(value.scanned); buf.writeVarInt(value.generated);
                     buf.writeVarInt(value.painted);
+                    buf.writeUtf(value.anchorDimension, 128);
                     buf.writeInt(value.anchorX); buf.writeInt(value.anchorZ);
                     buf.writeVarInt(value.totalPages);
+                    buf.writeVarInt(value.totalSurveyed);
+                    buf.writeVarInt(value.totalColored);
                     if (value.markers.size() > 128) throw new IllegalArgumentException("Too many markers");
                     buf.writeVarInt(value.markers.size());
-                    for (AtlasMarker m : value.markers) {
-                        buf.writeUtf(m.id(), 48);
-                        buf.writeUtf(m.dimension(), 128);
-                        buf.writeInt(m.x()); buf.writeInt(m.z());
-                        buf.writeUtf(m.name(), 24);
-                        buf.writeByte(m.icon()); buf.writeByte(m.color());
-                        buf.writeBoolean(m.glowing());
-                        buf.writeBoolean(m.glowEverPaid());
-                    }
+                    for (AtlasMarker m : value.markers) writeMarker(buf, m);
                     if (value.structures.size() > 64) throw new IllegalArgumentException("Too many structures");
                     buf.writeVarInt(value.structures.size());
                     for (SurfaceStructure marker : value.structures) {
@@ -99,26 +98,25 @@ public final class MapNetwork {
                     short[] heights = new short[heightCount];
                     for (int i = 0; i < heightCount; i++) heights[i] = buf.readShort();
                     byte[] waterDepths = buf.readByteArray(heightCount);
-                    long colored = buf.readLong();
+                    long surveyed = buf.readLong(), colored = buf.readLong();
                     int ink = buf.readInt(), pigment = buf.readInt(), glow = buf.readInt();
                     boolean compass = buf.readBoolean(), inRange = buf.readBoolean();
-                    boolean complete = buf.readBoolean();
+                    boolean complete = buf.readBoolean(), cachedOnly = buf.readBoolean();
                     int scanned = buf.readVarInt(), generated = buf.readVarInt();
                     int painted = buf.readVarInt();
+                    String anchorDimension = buf.readUtf(128);
                     int anchorX = buf.readInt(), anchorZ = buf.readInt();
                     int totalPages = buf.readVarInt();
+                    int totalSurveyed = buf.readVarInt(), totalColored = buf.readVarInt();
                     if (scanned < 0 || scanned > 64 || generated < 0 || generated > 64
-                            || painted < 0 || painted > 64 || totalPages < 1 || totalPages > 65536)
+                            || painted < 0 || painted > 64 || totalPages < 1 || totalPages > AtlasState.MAX_PAGES
+                            || totalSurveyed < 0 || totalSurveyed > totalPages * 64
+                            || totalColored < 0 || totalColored > totalPages * 64)
                         throw new IllegalArgumentException("Invalid survey progress");
                     int count = buf.readVarInt();
                     if (count < 0 || count > 128) throw new IllegalArgumentException("Invalid waypoint count");
                     List<AtlasMarker> markers = new ArrayList<>(count);
-                    for (int i = 0; i < count; i++) {
-                        markers.add(new AtlasMarker(buf.readUtf(48), buf.readUtf(128),
-                                buf.readInt(), buf.readInt(), buf.readUtf(24),
-                                buf.readUnsignedByte(), buf.readUnsignedByte(),
-                                buf.readBoolean(), buf.readBoolean()));
-                    }
+                    for (int i = 0; i < count; i++) markers.add(readMarker(buf));
                     int countStructures = buf.readVarInt();
                     if (countStructures < 0 || countStructures > 64)
                         throw new IllegalArgumentException("Too many automatic structures");
@@ -126,9 +124,9 @@ public final class MapNetwork {
                     for (int i = 0; i < countStructures; i++) {
                         structures.add(new SurfaceStructure(buf.readUtf(64), buf.readInt(), buf.readInt()));
                     }
-                    return new Page(atlasId, dim, pageX, pageZ, pixels, features, heights, waterDepths, colored,
-                            ink, pigment, glow, compass, inRange, complete, scanned, generated,
-                            painted, anchorX, anchorZ, totalPages,
+                    return new Page(atlasId, dim, pageX, pageZ, pixels, features, heights, waterDepths, surveyed, colored,
+                            ink, pigment, glow, compass, inRange, complete, cachedOnly, scanned, generated,
+                            painted, anchorDimension, anchorX, anchorZ, totalPages, totalSurveyed, totalColored,
                             List.copyOf(markers), List.copyOf(structures));
                 });
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -144,13 +142,13 @@ public final class MapNetwork {
                     buf.writeUtf(marker.atlasId, 64);
                     buf.writeUtf(marker.id, 48);
                     buf.writeInt(marker.x); buf.writeInt(marker.z);
-                    buf.writeUtf(marker.name, 24);
-                    buf.writeByte(marker.icon); buf.writeByte(marker.color);
+                    buf.writeUtf(marker.name, AtlasMarker.MAX_NAME);
+                    buf.writeByte(marker.icon); buf.writeInt(marker.color);
                     buf.writeBoolean(marker.glow); buf.writeBoolean(marker.delete);
                 },
                 buf -> new EditMarker(buf.readUtf(64), buf.readUtf(48),
-                        buf.readInt(), buf.readInt(), buf.readUtf(24),
-                        buf.readUnsignedByte(), buf.readUnsignedByte(),
+                        buf.readInt(), buf.readInt(), buf.readUtf(AtlasMarker.MAX_NAME),
+                        buf.readUnsignedByte(), buf.readInt(),
                         buf.readBoolean(), buf.readBoolean()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
@@ -176,36 +174,125 @@ public final class MapNetwork {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    public record CostSettings(int ink, int pigment, int glow,
-                               int inkRefill, int pigmentRefill, int glowRefill, boolean editable)
-            implements CustomPacketPayload {
-        public static final Type<CostSettings> TYPE =
-                new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "cost_settings"));
+    public record MaterialRates(int inkCost, int pigmentCost, int glowCost,
+                                int inkInput, int pigmentInput, int glowInput, int permanentFlags) {
+        public static final MaterialRates DEFAULT = new MaterialRates(1, 1, 1, 40, 40, 40, 0);
+        public int cost(int slot) { return switch (slot) { case 0 -> inkCost; case 1 -> pigmentCost; default -> glowCost; }; }
+        public int input(int slot) { return switch (slot) { case 0 -> inkInput; case 1 -> pigmentInput; default -> glowInput; }; }
+        public boolean permanent(int slot) { return (permanentFlags & (1 << slot)) != 0; }
+        public boolean valid() {
+            for (int i = 0; i < 3; i++)
+                if (cost(i) < 1 || cost(i) > 100 || input(i) < 1 || input(i) > 100) return false;
+            return (permanentFlags & ~7) == 0;
+        }
+        void encode(RegistryFriendlyByteBuf b) {
+            b.writeByte(inkCost); b.writeByte(pigmentCost); b.writeByte(glowCost);
+            b.writeByte(inkInput); b.writeByte(pigmentInput); b.writeByte(glowInput);
+            b.writeByte(permanentFlags);
+        }
+        static MaterialRates decode(RegistryFriendlyByteBuf b) {
+            return new MaterialRates(b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(),
+                    b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte(), b.readUnsignedByte());
+        }
+    }
+
+    public record CostSettings(MaterialRates rates, boolean editable) implements CustomPacketPayload {
+        public static final Type<CostSettings> TYPE = new Type<>(id("cost_settings"));
         public static final StreamCodec<RegistryFriendlyByteBuf, CostSettings> CODEC = StreamCodec.of(
-                (buf, v) -> {
-                    buf.writeByte(v.ink); buf.writeByte(v.pigment); buf.writeByte(v.glow);
-                    buf.writeVarInt(v.inkRefill); buf.writeVarInt(v.pigmentRefill);
-                    buf.writeVarInt(v.glowRefill);
-                    buf.writeBoolean(v.editable);
-                },
-                buf -> new CostSettings(buf.readUnsignedByte(), buf.readUnsignedByte(),
-                        buf.readUnsignedByte(), buf.readVarInt(), buf.readVarInt(),
-                        buf.readVarInt(), buf.readBoolean()));
+                (b, v) -> { v.rates.encode(b); b.writeBoolean(v.editable); },
+                b -> new CostSettings(MaterialRates.decode(b), b.readBoolean()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    public record SetCostSettings(int ink, int pigment, int glow,
-                                  int inkRefill, int pigmentRefill, int glowRefill) implements CustomPacketPayload {
-        public static final Type<SetCostSettings> TYPE =
-                new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "set_cost_settings"));
+    public record SetCostSettings(MaterialRates rates) implements CustomPacketPayload {
+        public static final Type<SetCostSettings> TYPE = new Type<>(id("set_cost_settings"));
         public static final StreamCodec<RegistryFriendlyByteBuf, SetCostSettings> CODEC = StreamCodec.of(
-                (buf, v) -> {
-                    buf.writeByte(v.ink); buf.writeByte(v.pigment); buf.writeByte(v.glow);
-                    buf.writeVarInt(v.inkRefill); buf.writeVarInt(v.pigmentRefill);
-                    buf.writeVarInt(v.glowRefill);
+                (b, v) -> v.rates.encode(b), b -> new SetCostSettings(MaterialRates.decode(b)));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    private static ResourceLocation id(String path) {
+        return ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, path);
+    }
+
+    private static void writeMarker(RegistryFriendlyByteBuf buf, AtlasMarker marker) {
+        buf.writeUtf(marker.id(), 48); buf.writeUtf(marker.dimension(), 128);
+        buf.writeInt(marker.x()); buf.writeInt(marker.z());
+        buf.writeUtf(marker.name(), AtlasMarker.MAX_NAME);
+        buf.writeByte(marker.icon()); buf.writeInt(marker.color());
+        buf.writeBoolean(marker.glowing()); buf.writeBoolean(marker.glowEverPaid());
+    }
+
+    private static AtlasMarker readMarker(RegistryFriendlyByteBuf buf) {
+        return new AtlasMarker(buf.readUtf(48), buf.readUtf(128),
+                buf.readInt(), buf.readInt(), buf.readUtf(AtlasMarker.MAX_NAME),
+                buf.readUnsignedByte(), buf.readInt(), buf.readBoolean(), buf.readBoolean());
+    }
+
+    private static void writePoints(RegistryFriendlyByteBuf b, List<NamedRegion.Point> points) {
+        if (points.size() > NamedRegion.MAX_VERTICES) throw new IllegalArgumentException("Too many vertices");
+        b.writeVarInt(points.size());
+        for (NamedRegion.Point p : points) { b.writeInt(p.x()); b.writeInt(p.z()); }
+    }
+
+    private static List<NamedRegion.Point> readPoints(RegistryFriendlyByteBuf b) {
+        int count = b.readVarInt();
+        if (count < 0 || count > NamedRegion.MAX_VERTICES) throw new IllegalArgumentException("Too many vertices");
+        List<NamedRegion.Point> points = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) points.add(new NamedRegion.Point(b.readInt(), b.readInt()));
+        return List.copyOf(points);
+    }
+
+    public record RequestAnnotations(String atlasId) implements CustomPacketPayload {
+        public static final Type<RequestAnnotations> TYPE = new Type<>(id("request_annotations"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, RequestAnnotations> CODEC = StreamCodec.of(
+                (b, v) -> b.writeUtf(v.atlasId, 64), b -> new RequestAnnotations(b.readUtf(64)));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    public record Annotations(String atlasId, String dimension, List<NamedRegion> entries,
+                              List<AtlasMarker> markers) implements CustomPacketPayload {
+        public static final Type<Annotations> TYPE = new Type<>(id("annotations"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, Annotations> CODEC = StreamCodec.of(
+                (b, v) -> {
+                    b.writeUtf(v.atlasId, 64); b.writeUtf(v.dimension, 128);
+                    b.writeVarInt(v.entries.size());
+                    for (NamedRegion region : v.entries) {
+                        b.writeUtf(region.id(), 48); b.writeUtf(region.name(), NamedRegion.MAX_NAME);
+                        b.writeByte(region.type()); b.writeInt(region.color());
+                        b.writeUtf(region.note(), NamedRegion.MAX_NOTE); writePoints(b, region.boundary());
+                    }
+                    if (v.markers.size() > AtlasMarker.MAX_MARKERS) throw new IllegalArgumentException("Too many markers");
+                    b.writeVarInt(v.markers.size());
+                    for (AtlasMarker marker : v.markers) writeMarker(b, marker);
+                }, b -> {
+                    String atlas = b.readUtf(64), dimension = b.readUtf(128);
+                    int n = b.readVarInt();
+                    if (n < 0 || n > NamedRegion.MAX_REGIONS) throw new IllegalArgumentException("Too many regions");
+                    List<NamedRegion> entries = new ArrayList<>(n);
+                    for (int i = 0; i < n; i++)
+                        entries.add(new NamedRegion(b.readUtf(48), dimension, b.readUtf(NamedRegion.MAX_NAME),
+                                b.readUnsignedByte(), b.readInt(), b.readUtf(NamedRegion.MAX_NOTE), readPoints(b)));
+                    int count = b.readVarInt();
+                    if (count < 0 || count > AtlasMarker.MAX_MARKERS) throw new IllegalArgumentException("Too many markers");
+                    List<AtlasMarker> markers = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++) markers.add(readMarker(b));
+                    return new Annotations(atlas, dimension, List.copyOf(entries), List.copyOf(markers));
+                });
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    public record EditRegion(String atlasId, String regionId, String name, int regionType, int color, String note,
+                             List<NamedRegion.Point> boundary, boolean delete) implements CustomPacketPayload {
+        public static final Type<EditRegion> TYPE = new Type<>(id("edit_region"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, EditRegion> CODEC = StreamCodec.of(
+                (b, v) -> {
+                    b.writeUtf(v.atlasId, 64); b.writeUtf(v.regionId, 48); b.writeUtf(v.name, NamedRegion.MAX_NAME);
+                    b.writeByte(v.regionType); b.writeInt(v.color); b.writeUtf(v.note, NamedRegion.MAX_NOTE);
+                    writePoints(b, v.boundary); b.writeBoolean(v.delete);
                 },
-                buf -> new SetCostSettings(buf.readUnsignedByte(), buf.readUnsignedByte(),
-                        buf.readUnsignedByte(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt()));
+                b -> new EditRegion(b.readUtf(64), b.readUtf(48), b.readUtf(NamedRegion.MAX_NAME),
+                        b.readUnsignedByte(), b.readInt(), b.readUtf(NamedRegion.MAX_NOTE), readPoints(b), b.readBoolean()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
@@ -220,7 +307,19 @@ public final class MapNetwork {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("6");
+        var registrar = event.registrar("8");
+        registrar.playToServer(RequestAnnotations.TYPE, RequestAnnotations.CODEC, (req, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (ctx.player() instanceof ServerPlayer player) AtlasActions.listAnnotations(player, req.atlasId());
+                }));
+        registrar.playToServer(EditRegion.TYPE, EditRegion.CODEC, (req, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (ctx.player() instanceof ServerPlayer player) AtlasActions.editRegion(player, req);
+                }));
+        registrar.playToClient(Annotations.TYPE, Annotations.CODEC, (annotations, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.acceptAnnotations(annotations);
+                }));
         registrar.playToServer(Request.TYPE, Request.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasMapServer.enqueue(player, request);

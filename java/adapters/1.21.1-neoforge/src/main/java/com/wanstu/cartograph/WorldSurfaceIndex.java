@@ -90,6 +90,13 @@ public final class WorldSurfaceIndex implements AutoCloseable {
         return INSTANCES.computeIfAbsent(level.getServer(), server -> new WorldSurfaceIndex());
     }
 
+    /** Material changes can reveal a prepared snapshot without reading the world again. */
+    public Lookup cached(ServerLevel level, int cx, int cz) {
+        Cached cached = chunks.get(new ChunkKey(level.dimension().location().toString(), cx, cz));
+        return cached != null && cached.status == State.READY
+                ? Lookup.ready(cached.snapshot) : Lookup.missing();
+    }
+
     /** Main thread read and cache only. Never run the disk I/O inline. */
     public Lookup inspect(ServerLevel level, int cx, int cz) {
         if (closed) return Lookup.pending();

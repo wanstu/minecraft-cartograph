@@ -1,12 +1,13 @@
 package com.wanstu.cartograph;
 
-import com.wanstu.cartograph.core.SpiralCoverage;
+import com.mojang.blaze3d.platform.NativeImage;
 import com.wanstu.cartograph.core.AtlasPage;
+import com.wanstu.cartograph.core.SpiralCoverage;
 import com.wanstu.cartograph.core.TerrainRelief;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.api.distmarker.Dist;
@@ -18,80 +19,61 @@ import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
+
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
 
-/** Loader-separated client renderer. Multiple @Mod classes for one ID are supported by NeoForge. */
 @Mod(value = CartographMod.MOD_ID, dist = Dist.CLIENT)
 public final class CartographClient {
     public static final KeyMapping OPEN =
             new KeyMapping("key.cartograph.open", GLFW.GLFW_KEY_M, "key.categories.cartograph");
     private static final int CACHE_LIMIT = 64;
     private static final LinkedHashMap<CacheKey, Entry> PAGES = new LinkedHashMap<>(32, 0.75f, true);
-    private static final Set<CacheKey> QUEUED = new LinkedHashSet<>();
+    private static final LinkedHashMap<CacheKey, Boolean> QUEUED = new LinkedHashMap<>();
     private static final Set<CacheKey> REDRAW = new LinkedHashSet<>();
-    private static int ticks;
-    private static boolean drawRoads = true;
-    private static boolean drawRails = true;
     private static CacheKey inFlight;
-    private static boolean coverageKnown;
-    private static int anchorX, anchorZ, totalPages;
-    private static String coverageAtlas = "";
-    private static int sentAt;
-    private static String lastDimension = "";
-    private static String lastAtlasId = "";
     private static ItemStack previousAtlas = ItemStack.EMPTY;
-    private static MapNetwork.CostSettings settings = new MapNetwork.CostSettings(10,10,10,128,128,32,false);
+    private static String lastDimension = "", lastAtlasId = "";
+    private static MapNetwork.Page coverage;
+    private static List<NamedRegion> regions = List.of();
+    private static List<AtlasMarker> markers = List.of();
+    private static MapNetwork.CostSettings settings = new MapNetwork.CostSettings(MapNetwork.MaterialRates.DEFAULT, false);
+    private static int ticks, sentAt, textureRevision;
 
-    public record CacheKey(String atlasId, String dimension, int px, int pz) {}
-    public record Entry(MapNetwork.Page page, ResourceLocation textureId, int updated) {}
+    private record CacheKey(String atlasId, String dimension, int px, int pz) {}
+    private record Entry(MapNetwork.Page page, DynamicTexture texture, ResourceLocation id, float[] light, int updated) {}
 
     public CartographClient(IEventBus bus) {
-        bus.addListener(CartographClient::registerKeys);
+        bus.addListener((RegisterKeyMappingsEvent event) -> event.register(OPEN));
         NeoForge.EVENT_BUS.addListener(CartographClient::tick);
         NeoForge.EVENT_BUS.addListener(CartographClient::hud);
     }
 
-    private static void registerKeys(RegisterKeyMappingsEvent event) { event.register(OPEN); }
-
     public static ItemStack currentAtlas() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return ItemStack.EMPTY;
-        if (mc.player.getMainHandItem().is(CartographMod.ATLAS.get())) return mc.player.getMainHandItem();
-        if (mc.player.getOffhandItem().is(CartographMod.ATLAS.get())) return mc.player.getOffhandItem();
-        for (ItemStack stack : mc.player.getInventory().items) {
-            if (stack.is(CartographMod.ATLAS.get())) return stack;
-        }
+        var player = Minecraft.getInstance().player;
+        if (player == null) return ItemStack.EMPTY;
+        if (player.getMainHandItem().is(CartographMod.ATLAS.get())) return player.getMainHandItem();
+        if (player.getOffhandItem().is(CartographMod.ATLAS.get())) return player.getOffhandItem();
+        for (ItemStack stack : player.getInventory().items) if (stack.is(CartographMod.ATLAS.get())) return stack;
         return ItemStack.EMPTY;
     }
 
+    static AtlasState state() { return currentAtlas().getOrDefault(CartographMod.ATLAS_STATE.get(), AtlasState.blank()); }
+
     public static String atlasId() {
-        ItemStack current = currentAtlas();
-        if (current.isEmpty()) {
-            previousAtlas = ItemStack.EMPTY;
-            return "";
-        }
-        String id = current.getOrDefault(CartographMod.ATLAS_STATE.get(), AtlasState.blank()).id();
-        // A newly crafted book has no ID until the server processes its first
-        // request. Keep the returned ID while this exact item awaits syncing.
-        if (id.isBlank() && current == previousAtlas && !lastAtlasId.isBlank()) return lastAtlasId;
-        previousAtlas = current;
+        ItemStack stack = currentAtlas();
+        String id = stack.getOrDefault(CartographMod.ATLAS_STATE.get(), AtlasState.blank()).id();
+        if (!stack.isEmpty() && stack == previousAtlas && id.isBlank()) return lastAtlasId;
+        previousAtlas = stack;
         return id;
     }
 
     public static boolean hasAtlas() { return !currentAtlas().isEmpty(); }
-
-    public static boolean held() {
-        Minecraft mc = Minecraft.getInstance();
-        return mc.player != null && (mc.player.getMainHandItem().is(CartographMod.ATLAS.get())
-                || mc.player.getOffhandItem().is(CartographMod.ATLAS.get()));
-    }
 
     public static void open() {
         Minecraft mc = Minecraft.getInstance();
@@ -99,151 +81,138 @@ public final class CartographClient {
     }
 
     public static String dimension() {
-        Minecraft mc = Minecraft.getInstance();
-        return mc.level == null ? "" : mc.level.dimension().location().toString();
+        var level = Minecraft.getInstance().level;
+        return level == null ? "" : level.dimension().location().toString();
     }
 
-    public static CacheKey key(int pageX, int pageZ) {
-        return new CacheKey(atlasId(), dimension(), pageX, pageZ);
+    static String dimensionName(String dim) {
+        return switch (dim) {
+            case "minecraft:overworld" -> "主世界";
+            case "minecraft:the_nether" -> "下界";
+            case "minecraft:the_end" -> "末地";
+            default -> dim;
+        };
     }
 
-    public static MapNetwork.Page page(int px, int pz) {
-        CacheKey key = key(px, pz);
-        Entry e = PAGES.get(key);
-        return e == null ? null : e.page();
+    private static CacheKey key(int x, int z) { return new CacheKey(atlasId(), dimension(), x, z); }
+
+    public static MapNetwork.Page page(int x, int z) {
+        Entry e = PAGES.get(key(x, z)); return e == null ? null : e.page();
+    }
+    static ResourceLocation texture(int x, int z) {
+        Entry e = PAGES.get(key(x, z)); return e == null ? null : e.id();
+    }
+    static NativeImage image(int x, int z) {
+        Entry e = PAGES.get(key(x, z)); return e == null || e.texture() == null ? null : e.texture().getPixels();
+    }
+    static int revision() { return textureRevision; }
+
+    static MapNetwork.Page coverage() {
+        return coverage != null && coverage.atlasId().equals(atlasId()) && coverage.dimension().equals(dimension())
+                ? coverage : null;
     }
 
-    public static ResourceLocation texture(int px, int pz) {
-        Entry e = PAGES.get(key(px, pz));
-        return e == null ? null : e.textureId();
+    public static boolean covered(int x, int z) {
+        MapNetwork.Page c = coverage();
+        return c == null || c.anchorDimension().equals(dimension())
+                && SpiralCoverage.covers(c.anchorX(), c.anchorZ(), x, z, c.totalPages());
     }
 
-    public static void requestPage(int pageX, int pageZ) {
-        if (hasAtlas()) PacketDistributor.sendToServer(
-                new MapNetwork.Request(atlasId(), pageX, pageZ));
+    static boolean surveyed(int x, int z) {
+        MapNetwork.Page p = page(Math.floorDiv(x, 128), Math.floorDiv(z, 128));
+        if (p == null || !p.inRange()) return false;
+        int i = Math.floorMod(z, 128) / 16 * 8 + Math.floorMod(x, 128) / 16;
+        return (p.surveyedChunks() & 1L << i) != 0;
     }
 
-    public static boolean coverageKnown() {
-        return coverageKnown && coverageAtlas.equals(atlasId());
-    }
-    public static boolean covered(int px, int pz) {
-        return !coverageKnown() || SpiralCoverage.covers(anchorX, anchorZ, px, pz, totalPages);
-    }
-    public static int pageCount() { return coverageKnown() ? totalPages :
-            currentAtlas().getOrDefault(CartographMod.ATLAS_STATE.get(), AtlasState.blank()).pages(); }
-    public static int pendingPages() { return QUEUED.size() + (inFlight != null ? 1 : 0); }
-    public static boolean awaitingPage() { return inFlight != null; }
+    static int pageCount() { MapNetwork.Page c = coverage(); return c == null ? state().pages() : c.totalPages(); }
+    static boolean awaitingPage() { return inFlight != null || !QUEUED.isEmpty(); }
 
-    public static void queue(int px, int pz, boolean force) {
-        if (Math.abs((long) px) > 234375 || Math.abs((long) pz) > 234375 || !hasAtlas()) return;
-        if (!covered(px, pz)) return;
-        CacheKey cacheKey = key(px, pz);
-        Entry entry = PAGES.get(cacheKey);
+    public static void queue(int x, int z, boolean force) { queue(x, z, force, false); }
+
+    static void queue(int x, int z, boolean force, boolean cachedOnly) {
+        if (Math.abs((long) x) > 234375 || Math.abs((long) z) > 234375 || !hasAtlas() || !covered(x, z)) return;
+        CacheKey key = key(x, z);
+        Entry entry = PAGES.get(key);
         if (!force && entry != null && ticks - entry.updated() < 200) return;
-        // Don't queue repeated work while a page is actively being scanned.
-        if (!cacheKey.equals(inFlight)) QUEUED.add(cacheKey);
+        if (key.equals(inFlight) && !cachedOnly) return;
+        if (QUEUED.size() >= CACHE_LIMIT && !QUEUED.containsKey(key)) return;
+        QUEUED.merge(key, cachedOnly, (before, after) -> before && after);
     }
 
-    public static MapNetwork.CostSettings settings() { return settings; }
-    public static void acceptSettings(MapNetwork.CostSettings newSettings) {
-        settings = newSettings;
+    static MapNetwork.CostSettings settings() { return settings; }
+    public static void acceptSettings(MapNetwork.CostSettings value) { if (value.rates().valid()) settings = value; }
+    static void sendSettings(MapNetwork.MaterialRates rates) {
+        PacketDistributor.sendToServer(new MapNetwork.SetCostSettings(rates));
     }
-    public static void sendSettings(int ink, int pigment, int glow,
-                                    int inkRefill, int pigmentRefill, int glowRefill) {
-        if (hasAtlas()) PacketDistributor.sendToServer(
-                new MapNetwork.SetCostSettings(ink, pigment, glow,
-                        inkRefill, pigmentRefill, glowRefill));
-    }
-
-    public static void sendMarker(MapNetwork.EditMarker request) {
-        if (hasAtlas()) PacketDistributor.sendToServer(request);
-    }
-
-    public static void exportAt(int blockX, int blockZ) {
-        if (!hasAtlas()) return;
-        PacketDistributor.sendToServer(new MapNetwork.ExportMap(atlasId(),
-                Math.floorDiv(blockX, 128), Math.floorDiv(blockZ, 128)));
+    static void sendMarker(MapNetwork.EditMarker value) { PacketDistributor.sendToServer(value); }
+    static void sendRegion(MapNetwork.EditRegion value) { PacketDistributor.sendToServer(value); }
+    static void requestAnnotations() { PacketDistributor.sendToServer(new MapNetwork.RequestAnnotations(atlasId())); }
+    static void sendRefill(int slot) { PacketDistributor.sendToServer(new MapNetwork.Refill(atlasId(), slot)); }
+    static List<NamedRegion> regions() { return regions; }
+    static List<AtlasMarker> markers() { return markers; }
+    public static void acceptAnnotations(MapNetwork.Annotations value) {
+        if (value.atlasId().equals(atlasId()) && value.dimension().equals(dimension())) {
+            regions = value.entries();
+            markers = value.markers();
+        }
     }
 
-    public static void sendRefill(int slot) {
-        if (hasAtlas()) PacketDistributor.sendToServer(new MapNetwork.Refill(atlasId(), slot));
+    static void redrawMaps() { REDRAW.addAll(PAGES.keySet()); }
+    static List<MapNetwork.Page> cachedPages() {
+        String atlas = atlasId(), dim = dimension();
+        List<MapNetwork.Page> result = new ArrayList<>();
+        for (var e : PAGES.entrySet())
+            if (e.getKey().atlasId.equals(atlas) && e.getKey().dimension.equals(dim) && e.getValue().page().inRange())
+                result.add(e.getValue().page());
+        return result;
     }
 
     private static void tick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) {
-            if (!PAGES.isEmpty()) clear();
+            if (!PAGES.isEmpty() || coverage != null || inFlight != null || !QUEUED.isEmpty()) clear();
             return;
         }
-        String dim = dimension(), atlas = atlasId();
-        if (!lastDimension.equals(dim) || !lastAtlasId.equals(atlas)) {
+        String dim = dimension(), id = atlasId();
+        if (!lastDimension.equals(dim) || !lastAtlasId.equals(id)) {
             clear();
-            lastDimension = dim;
-            lastAtlasId = atlas;
+            lastDimension = dim; lastAtlasId = id;
         }
         while (OPEN.consumeClick()) if (hasAtlas()) open();
         ticks++;
-
-        if (held() && mc.screen == null) {
-            int px = Math.floorDiv(mc.player.getBlockX(), 128);
-            int pz = Math.floorDiv(mc.player.getBlockZ(), 128);
-            queue(px, pz, false);
+        if (hasAtlas() && ClientMapSettings.get().hud(ClientMapSettings.ENABLED)
+                && (mc.screen == null || mc.screen instanceof HudAdjustScreen) && ticks % 10 == 1) {
+            int radius = (int) Math.ceil(120 * Math.sqrt(2) / ClientMapSettings.get().hudZoom);
+            int bx = mc.player.getBlockX(), bz = mc.player.getBlockZ();
+            queue(Math.floorDiv(bx, 128), Math.floorDiv(bz, 128), false);
+            for (int z = Math.floorDiv(bz - radius, 128); z <= Math.floorDiv(bz + radius, 128); z++)
+                for (int x = Math.floorDiv(bx - radius, 128); x <= Math.floorDiv(bx + radius, 128); x++) queue(x, z, false);
         }
-
-        // One request in flight per player. Without this guard, opening a
-        // multi-page book with several online viewers can replace an
-        // incomplete 64-chunk request forever on busy servers.
         if (inFlight != null && ticks - sentAt >= 220) inFlight = null;
-        // Re-rendering all 64 cached textures in a click handler froze the
-        // game UI. Redraw at most two per client tick instead.
-        int redrawn = 0;
-        Iterator<CacheKey> redrawing = REDRAW.iterator();
-        while (redrawing.hasNext() && redrawn < 2) {
-            CacheKey key = redrawing.next();
-            redrawing.remove();
-            Entry old = PAGES.get(key);
+        Iterator<CacheKey> redraw = REDRAW.iterator();
+        int budget = 2;
+        while (redraw.hasNext() && budget-- > 0) {
+            CacheKey k = redraw.next(); redraw.remove();
+            Entry old = PAGES.get(k);
             if (old == null || !drawable(old.page())) continue;
-            PAGES.put(key, createEntry(key, old.page(), old.updated()));
-            release(old);
-            redrawn++;
+            float[] light = old.light() == null ? PixelPageTexture.lightMap(heightWindow(k, old.page())) : old.light();
+            DynamicTexture texture = PixelPageTexture.create(old.page(), light, ClientMapSettings.get());
+            ResourceLocation location = mc.getTextureManager().register("cartograph/page", texture);
+            PAGES.put(k, new Entry(old.page(), texture, location, light, old.updated()));
+            release(old); textureRevision++;
         }
-
-        if (ticks % 6 == 1 && inFlight == null && !QUEUED.isEmpty()) {
-            Iterator<CacheKey> it = QUEUED.iterator();
-            CacheKey q = it.next();
+        if (ticks % 4 == 1 && inFlight == null && !QUEUED.isEmpty()) {
+            var it = QUEUED.entrySet().iterator();
+            var job = it.next();
+            CacheKey k = job.getKey();
+            boolean cached = job.getValue();
             it.remove();
-            if (q.atlasId().equals(atlasId()) && q.dimension().equals(dimension())) {
-                inFlight = q;
-                sentAt = ticks;
-                requestPage(q.px(), q.pz());
+            if (k.atlasId().equals(atlasId()) && k.dimension().equals(dimension()) && covered(k.px(), k.pz())) {
+                inFlight = k; sentAt = ticks;
+                PacketDistributor.sendToServer(new MapNetwork.Request(k.atlasId(), k.px(), k.pz(), cached));
             }
         }
-    }
-
-    /** Layer visibility affects only locally cached rendering, never the server's survey ledger. */
-    public static void showSurfaceFeatures(boolean roads, boolean rails) {
-        if (drawRoads == roads && drawRails == rails) return;
-        drawRoads = roads;
-        drawRails = rails;
-        REDRAW.addAll(PAGES.keySet());
-    }
-
-    /** Map points panel lists markers only from pages already supplied for this atlas. */
-    public static List<MapNetwork.Page> cachedPages() {
-        String atlas = atlasId(), dimension = dimension();
-        List<MapNetwork.Page> out = new ArrayList<>();
-        for (var e : PAGES.entrySet()) {
-            CacheKey key = e.getKey();
-            if (key.atlasId().equals(atlas) && key.dimension().equals(dimension) &&
-                    e.getValue().page().inRange()) out.add(e.getValue().page());
-        }
-        return List.copyOf(out);
-    }
-
-    private static Entry createEntry(CacheKey key, MapNetwork.Page page, int updated) {
-        DynamicTexture texture = PixelPageTexture.create(page, heightWindow(key, page), drawRoads, drawRails);
-        ResourceLocation id = Minecraft.getInstance().getTextureManager().register("cartograph/page", texture);
-        return new Entry(page, id, updated);
     }
 
     private static short[] heightWindow(CacheKey key, MapNetwork.Page page) {
@@ -253,7 +222,7 @@ public final class CartographClient {
         for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
             MapNetwork.Page source = page;
             if (dx != 0 || dz != 0) {
-                Entry neighbor = PAGES.get(adjacentKey(key, dx, dz));
+                Entry neighbor = PAGES.get(adjacent(key, dx, dz));
                 if (neighbor == null) continue;
                 source = neighbor.page();
             }
@@ -270,144 +239,92 @@ public final class CartographClient {
         return window;
     }
 
-    private static CacheKey adjacentKey(CacheKey key, int dx, int dz) {
-        return new CacheKey(key.atlasId(), key.dimension(), key.px() + dx, key.pz() + dz);
+    private static CacheKey adjacent(CacheKey k, int dx, int dz) {
+        return new CacheKey(k.atlasId(), k.dimension(), k.px() + dx, k.pz() + dz);
     }
 
     private static void redrawNeighbors(CacheKey key) {
         for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
             if (dx == 0 && dz == 0) continue;
-            CacheKey adjacent = adjacentKey(key, dx, dz);
-            if (PAGES.containsKey(adjacent)) REDRAW.add(adjacent);
+            CacheKey k = adjacent(key, dx, dz);
+            Entry entry = PAGES.get(k);
+            if (entry == null || !drawable(entry.page())) continue;
+            PAGES.put(k, new Entry(entry.page(), entry.texture(), entry.id(), null, entry.updated()));
+            REDRAW.add(k);
         }
     }
 
-    private static boolean drawable(MapNetwork.Page page) {
-        return page.inRange() && page.painted() > 0;
-    }
-
+    private static boolean drawable(MapNetwork.Page page) { return page.inRange() && page.painted() > 0; }
     private static void release(Entry entry) {
-        if (entry != null && entry.textureId() != null)
-            Minecraft.getInstance().getTextureManager().release(entry.textureId());
+        if (entry != null && entry.id() != null) Minecraft.getInstance().getTextureManager().release(entry.id());
     }
 
     public static void acceptFeedback(MapNetwork.Feedback result) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.screen instanceof AtlasScreen atlas) {
-            atlas.feedback(result.ok(), result.message());
-        } else if (mc.player != null) {
-            mc.player.displayClientMessage(
-                    net.minecraft.network.chat.Component.literal(
-                            (result.ok() ? "绘图师：" : "绘图师 · 失败：") + result.message()), true);
-        }
+        if (mc.screen instanceof AtlasScreen screen) screen.feedback(result.ok(), result.message());
+        else if (mc.player != null) mc.player.displayClientMessage(Component.literal(result.message()), true);
     }
 
     public static void acceptPage(MapNetwork.Page page) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null || !mc.level.dimension().location().toString().equals(page.dimension()))
-            return;
-        String requestedId = atlasId();
-        // Fresh books are assigned an ID on first server access and sync later.
-        if (!requestedId.isBlank() && !requestedId.equals(page.atlasId())) return;
-        boolean firstCoverage = !coverageKnown || !coverageAtlas.equals(page.atlasId());
-        coverageKnown = true;
-        coverageAtlas = page.atlasId();
-        anchorX = page.anchorX(); anchorZ = page.anchorZ();
-        totalPages = page.totalPages();
-        if (inFlight != null && inFlight.px() == page.pageX()
-                && inFlight.pz() == page.pageZ()
-                && inFlight.dimension().equals(page.dimension())) {
+        String requested = atlasId(), dim = dimension();
+        if (!hasAtlas() || !page.dimension().equals(dim) || !requested.isBlank() && !requested.equals(page.atlasId())) return;
+        boolean first = coverage() == null;
+        if (!page.atlasId().equals(lastAtlasId) || !dim.equals(lastDimension)) {
+            QUEUED.clear();
+            previousAtlas = currentAtlas();
+            lastAtlasId = page.atlasId();
+            lastDimension = dim;
+        }
+        if (inFlight != null && page.pageX() == inFlight.px() && page.pageZ() == inFlight.pz()) {
             if (page.complete()) inFlight = null;
-            else sentAt = ticks; // progress packet is a heartbeat; don't time out an active scan.
+            else sentAt = ticks;
         }
-        // Ignore the dozens of out-of-coverage requests accumulated while the
-        // first page was still determining the atlas' authoritative anchor.
-        QUEUED.removeIf(q -> !SpiralCoverage.covers(anchorX, anchorZ,
-                q.px(), q.pz(), totalPages));
-        lastAtlasId = page.atlasId();
-        if (firstCoverage && mc.screen instanceof AtlasScreen screen) {
-            screen.refreshVisible();
-        }
-        CacheKey key = new CacheKey(page.atlasId(), page.dimension(), page.pageX(), page.pageZ());
-        Entry previous = PAGES.get(key);
-        MapNetwork.Page old = previous == null ? null : previous.page();
-        // A refresh should not replace a complete page with its temporary partial scan.
-        if (!page.complete() && old != null && old.complete() && drawable(old)) return;
+        coverage = page;
+        QUEUED.keySet().removeIf(k -> !covered(k.px(), k.pz()));
 
-        boolean heightsChanged = old == null ? page.heights().length != 0
-                : !Arrays.equals(old.heights(), page.heights());
-        boolean rasterChanged = heightsChanged || old == null
-                || page.coloredChunks() != old.coloredChunks()
-                || !Arrays.equals(page.pixels(), old.pixels())
-                || !Arrays.equals(page.features(), old.features())
-                || !Arrays.equals(page.waterDepths(), old.waterDepths());
-        ResourceLocation existing = previous == null ? null : previous.textureId();
-        if (drawable(page)) {
-            if (rasterChanged || existing == null) REDRAW.add(key);
-        } else {
-            REDRAW.remove(key);
-            release(previous);
-            existing = null;
+        CacheKey k = new CacheKey(page.atlasId(), dim, page.pageX(), page.pageZ());
+        Entry previous = PAGES.get(k);
+        MapNetwork.Page old = previous == null ? null : previous.page();
+        if (old == null || (!page.cachedOnly() || (page.surveyedChunks() & old.surveyedChunks()) == old.surveyedChunks())
+                && (page.complete() || !old.complete() || !drawable(old))) {
+            boolean changedHeights = old == null || !Arrays.equals(old.heights(), page.heights());
+            boolean changed = changedHeights || old == null || page.coloredChunks() != old.coloredChunks()
+                    || !Arrays.equals(old.pixels(), page.pixels()) || !Arrays.equals(old.features(), page.features())
+                    || !Arrays.equals(old.waterDepths(), page.waterDepths());
+            DynamicTexture texture = previous == null ? null : previous.texture();
+            ResourceLocation id = previous == null ? null : previous.id();
+            if (drawable(page)) {
+                if (changed || texture == null) REDRAW.add(k);
+            } else {
+                REDRAW.remove(k);
+                release(previous); texture = null; id = null;
+                if (previous != null) textureRevision++;
+            }
+            PAGES.put(k, new Entry(page, texture, id, changedHeights || previous == null ? null : previous.light(), ticks));
+            if (changedHeights && (page.heights().length != 0 || old != null && old.heights().length != 0)) redrawNeighbors(k);
+            while (PAGES.size() > CACHE_LIMIT) {
+                CacheKey oldest = PAGES.keySet().iterator().next();
+                Entry removed = PAGES.remove(oldest);
+                REDRAW.remove(oldest); release(removed); textureRevision++;
+                if (removed.page().heights().length != 0) redrawNeighbors(oldest);
+            }
         }
-        PAGES.put(key, new Entry(page, existing, ticks));
-        if (heightsChanged) redrawNeighbors(key);
-        while (PAGES.size() > CACHE_LIMIT) {
-            CacheKey oldest = PAGES.keySet().iterator().next();
-            Entry removed = PAGES.remove(oldest);
-            REDRAW.remove(oldest);
-            release(removed);
-            if (removed.page().heights().length != 0) redrawNeighbors(oldest);
-        }
+        if (first && mc.screen instanceof AtlasScreen screen) screen.coverageReady();
     }
 
     public static void clear() {
         for (Entry e : PAGES.values()) release(e);
-        PAGES.clear();
-        QUEUED.clear();
-        REDRAW.clear();
-        inFlight = null;
-        coverageKnown = false;
-        coverageAtlas = "";
-        anchorX = 0; anchorZ = 0; totalPages = 0;
-        lastDimension = "";
-        lastAtlasId = "";
-        previousAtlas = ItemStack.EMPTY;
-        settings = new MapNetwork.CostSettings(10,10,10,128,128,32,false);
+        PAGES.clear(); QUEUED.clear(); REDRAW.clear(); inFlight = null;
+        coverage = null; regions = List.of(); markers = List.of(); previousAtlas = ItemStack.EMPTY;
+        lastAtlasId = ""; lastDimension = ""; textureRevision++;
+        settings = new MapNetwork.CostSettings(MapNetwork.MaterialRates.DEFAULT, false);
+        AtlasHud.clear();
     }
 
-    public static void drawPlayer(GuiGraphics g, int left, int top, int display, int px, int pz) {
+    private static void hud(RenderGuiEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
-        MapNetwork.Page page = page(px, pz);
-        if (mc.player == null || page == null || !page.compass()) return;
-        int playerPX = Math.floorDiv(mc.player.getBlockX(), 128);
-        int playerPZ = Math.floorDiv(mc.player.getBlockZ(), 128);
-        if (playerPX != px || playerPZ != pz) return;
-        double tx = Math.floorMod(mc.player.getBlockX(), 128) / 128.0;
-        double tz = Math.floorMod(mc.player.getBlockZ(), 128) / 128.0;
-        int x = left + (int) (tx * display), y = top + (int) (tz * display);
-        g.fill(x - 2, y - 2, x + 3, y + 3, 0xffed4536);
-        g.fill(x - 1, y - 1, x + 2, y + 2, 0xfffff2c0);
-    }
-
-    private static void hud(RenderGuiEvent.Post e) {
-        if (!held()) return;
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.screen != null) return;
-        int px = Math.floorDiv(mc.player.getBlockX(), 128);
-        int pz = Math.floorDiv(mc.player.getBlockZ(), 128);
-        ResourceLocation t = texture(px, pz);
-        MapNetwork.Page page = page(px, pz);
-        if (t == null || page == null || !page.inRange()) return;
-        GuiGraphics g = e.getGuiGraphics();
-        int left = g.guiWidth() - 108, top = 15;
-        g.fill(left - 5, top - 5, left + 101, top + 110, 0xe01a2420);
-        g.fill(left - 2, top - 2, left + 98, top + 98, 0xffc8af7d);
-        g.pose().pushPose();
-        g.pose().translate(left, top, 0);
-        g.pose().scale(0.75f, 0.75f, 1);
-        PixelPageTexture.blit(g, t, 0.75 * mc.getWindow().getGuiScale());
-        g.pose().popPose();
-        drawPlayer(g, left, top, 96, px, pz);
-        g.drawString(mc.font, "Cartograph", left + 2, top + 99, 0xffe9d2a5, false);
+        if (mc.screen == null && !mc.options.hideGui && hasAtlas() && ClientMapSettings.get().hud(ClientMapSettings.ENABLED))
+            AtlasHud.draw(event.getGuiGraphics(), false);
     }
 }

@@ -32,24 +32,29 @@ public final class CoreSelfTest {
 
         SurveyLedger ledger = new SurveyLedger();
         var c = new SurveyLedger.ChunkKey("minecraft:overworld", 3, -5);
-        var waiting = ledger.survey(c, false, true, true, false, 10, 0, 10, 10);
-        yes(!waiting.firstSurvey(), "unpersisted chunk must never be charged");
-        waiting = ledger.survey(c, true, false, true, false, 10, 0, 10, 10);
-        yes(!waiting.firstSurvey(), "uncovered page must never be charged");
-        waiting = ledger.survey(c, true, true, false, false, 10, 0, 0, 10);
-        yes(!waiting.firstSurvey(), "zero multiplier must not bypass missing ink");
-        var first = ledger.survey(c, true, true, true, false, 10, 0, 10, 10);
-        yes(first.firstSurvey() && first.inkCostUnits() == 10, "first survey billed once");
-        var again = ledger.survey(c, true, true, true, false, 0, 0, 10, 10);
-        yes(!again.firstSurvey() && again.inkCostUnits() == 0, "free updates");
-        var color = ledger.survey(c, true, true, true, true, 0, 10, 10, 10);
-        yes(!color.firstSurvey() && color.firstColor() && color.pigmentCostUnits() == 10, "color once");
-        var recolor = ledger.survey(c, true, true, true, true, 0, 0, 10, 10);
-        yes(!recolor.firstColor() && recolor.pigmentCostUnits() == 0, "free recolor");
-        yes(new SurveyLedger(ledger.snapshot()).updateMayRender(c), "ledger snapshot restore");
+        var waiting = ledger.survey(c, false, true, true, true, 10, 10, 10, 10, false, false);
+        yes(!waiting.firstSurvey() && !waiting.firstColor(), "ungenerated chunk leaves both masks untouched");
+        waiting = ledger.survey(c, true, false, true, true, 10, 10, 10, 10, false, false);
+        yes(!waiting.firstSurvey() && !waiting.firstColor(), "uncovered page leaves both masks untouched");
+        waiting = ledger.survey(c, true, true, false, false, 0, 0, 10, 10, true, true);
+        yes(!waiting.firstSurvey() && !waiting.firstColor(), "permanent flags retain initial unlocks");
+        var color = ledger.survey(c, true, true, false, true, 0, 10, 10, 10, false, false);
+        yes(!color.fullySurveyed() && color.firstColor() && color.pigmentCostUnits() == 10,
+                "color can be stored before the area is visible");
+        ledger = new SurveyLedger(ledger.snapshot());
+        yes(ledger.isColored(c) && !ledger.updateMayRender(c), "independent masks survive restore");
+        var first = ledger.survey(c, true, true, true, true, 10, 0, 10, 10, false, false);
+        yes(first.firstSurvey() && first.inkCostUnits() == 10 && first.colored() && !first.firstColor(),
+                "first survey reveals previously paid color");
+        var again = ledger.survey(c, true, true, true, true, 0, 0, 10, 10, false, false);
+        yes(again.fullySurveyed() && again.colored() && again.inkCostUnits() == 0 && again.pigmentCostUnits() == 0,
+                "exhausting resources preserves both masks");
         var another = new SurveyLedger.ChunkKey("minecraft:overworld", 4, -5);
-        yes(ledger.survey(another, true, true, true, true, 0, 0, 0, 0).firstSurvey(), "zero-rate but unlocked");
-        yes(ledger.survey(new SurveyLedger.ChunkKey("minecraft:the_nether", 3, -5), false, true, true, false, 1, 0, 1, 1).fullySurveyed() == false, "dimensions isolated");
+        var free = ledger.survey(another, true, true, true, true, 0, 0, 10, 10, true, true);
+        yes(free.firstSurvey() && free.firstColor() && free.inkCostUnits() == 0 && free.pigmentCostUnits() == 0,
+                "permanent flags permit expansion after unlock");
+        yes(!ledger.updateMayRender(new SurveyLedger.ChunkKey("minecraft:the_nether", 3, -5)),
+                "dimensions isolated");
 
         // No accidental fabricated pixels: unknown and colorized areas remain
         // untouched while isolated binary speckles are suppressed in linear time.

@@ -21,7 +21,6 @@ public final class SurveyLedger {
         public Snapshot {
             surveyed = Set.copyOf(surveyed);
             colorized = Set.copyOf(colorized);
-            if (!surveyed.containsAll(colorized)) throw new IllegalArgumentException("colorized must be surveyed");
         }
     }
 
@@ -38,38 +37,25 @@ public final class SurveyLedger {
         colorized.addAll(snapshot.colorized());
     }
 
-    /**
-     * Only call after the adapter proves the chunk is already persisted
-     * AND the atlas has paid/allocated a real 128x128 page for this chunk.
-     * Units are integer tenths; 0 multiplier is valid but never unlocks
-     * a missing ink/primary-color upgrade.
-     *
-     * The caller must immediately persist ledger + resource balances
-     * atomically to prevent a crash granting a free page.
-     */
-    public Result survey(ChunkKey key, boolean persisted, boolean pageCovered,
+    /** Advance each world-aligned mask independently after a real snapshot is ready. */
+    public Result survey(ChunkKey key, boolean generated, boolean pageCovered,
                          boolean inkUnlocked, boolean colorsUnlocked,
-                         int inkAvailable, int pigmentAvailable,
-                         int inkCost, int pigmentCost) {
-        boolean existing = surveyed.contains(key);
-        if (!persisted || !pageCovered || (!existing && !inkUnlocked))
-            return new Result(false, false, 0, 0, existing, colorized.contains(key));
-        if (!existing && inkAvailable < inkCost)
-            return new Result(false, false, 0, 0, false, false);
-        boolean firstSurvey = false;
-        if (!existing) {
-            surveyed.add(key);
-            firstSurvey = true;
+                         int inkAvailable, int pigmentAvailable, int inkCost, int pigmentCost,
+                         boolean permanentInk, boolean permanentColor) {
+        if (inkCost < 1 || pigmentCost < 1) throw new IllegalArgumentException("Cost must be positive");
+        boolean firstSurvey = false, firstColor = false;
+        if (generated && pageCovered) {
+            if (inkUnlocked && (permanentInk || inkAvailable >= inkCost)) firstSurvey = surveyed.add(key);
+            if (colorsUnlocked && (permanentColor || pigmentAvailable >= pigmentCost)) firstColor = colorized.add(key);
         }
-        boolean firstColor = false;
-        if (colorsUnlocked && !colorized.contains(key)
-                && pigmentAvailable >= pigmentCost) {
-            colorized.add(key);
-            firstColor = true;
-        }
-        return new Result(firstSurvey, firstColor, firstSurvey ? inkCost : 0,
-                firstColor ? pigmentCost : 0, true, colorized.contains(key));
+        return new Result(firstSurvey, firstColor,
+                firstSurvey && !permanentInk ? inkCost : 0,
+                firstColor && !permanentColor ? pigmentCost : 0,
+                surveyed.contains(key), colorized.contains(key));
     }
+
+    public int surveyedCount() { return surveyed.size(); }
+    public int colorizedCount() { return colorized.size(); }
 
     /** Rendering an already-surveyed chunk is always free; do not call survey for dirty-only updates. */
     public boolean updateMayRender(ChunkKey key) { return surveyed.contains(key); }

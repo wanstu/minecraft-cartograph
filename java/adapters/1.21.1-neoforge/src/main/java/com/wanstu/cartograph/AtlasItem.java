@@ -55,23 +55,26 @@ public final class AtlasItem extends Item {
                     message = "cartograph.message.compass_installed";
                 } else message = "cartograph.message.compass_present";
             } else if (input.is(Items.INK_SAC)) {
-                next = current.fillInk(CartographConfig.INK_REFILL.get());
+                if (!(current.inkEnabled() && CartographConfig.permanent(0)))
+                    next = current.fillInkUnits(CartographConfig.refillUnits(0));
                 consume = true;
                 message = "cartograph.message.ink_filled";
             } else if (input.is(Items.GLOW_INK_SAC)) {
-                next = current.fillGlow(CartographConfig.GLOW_REFILL.get());
+                if (!(current.glowEnabled() && CartographConfig.permanent(2)))
+                    next = current.fillGlowUnits(CartographConfig.refillUnits(2));
                 consume = true;
                 message = "cartograph.message.glow_filled";
             } else if (input.is(Items.RED_DYE) || input.is(Items.YELLOW_DYE) || input.is(Items.BLUE_DYE)) {
                 AtlasState.Primary primary = input.is(Items.RED_DYE) ? AtlasState.Primary.RED :
                         input.is(Items.YELLOW_DYE) ? AtlasState.Primary.YELLOW : AtlasState.Primary.BLUE;
-                next = current.addDye(primary, CartographConfig.PIGMENT_REFILL.get());
+                if (!(current.colorEnabled() && CartographConfig.permanent(1)))
+                    next = current.addDye(primary, CartographConfig.refillUnits(1));
                 consume = true;
                 message = next.colorEnabled() ? "cartograph.message.dye_installed" : "cartograph.message.dye_waiting";
             } else message = "cartograph.message.inspect";
 
             data.update(entry, next, atlas);
-            if (consume && !player.getAbilities().instabuild) input.shrink(1);
+            if (consume && !next.equals(current) && !player.getAbilities().instabuild) input.shrink(1);
             player.displayClientMessage(Component.translatable(message,
                     next.pages(), next.inkUnits() / 10.0, next.pigmentUnits() / 10.0,
                     next.glowUnits() / 10.0).withStyle(ChatFormatting.GOLD), true);

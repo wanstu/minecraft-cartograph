@@ -67,29 +67,32 @@ public record AtlasState(
                 redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, glowEnabled, compassInstalled);
     }
 
-    private static int addUnits(int old, int points) {
-        return (int) Math.min(MAX_UNITS, (long) old + Math.max(0L, (long) points) * 10);
+    private static int addUnits(int old, int units) {
+        return (int) Math.min(MAX_UNITS, (long) old + Math.max(0L, (long) units));
     }
 
-    public AtlasState fillInk(int points) {
-        return new AtlasState(id, pages, addUnits(inkUnits, points), pigmentUnits, glowUnits,
+    public AtlasState fillInkUnits(int units) {
+        return new AtlasState(id, pages, addUnits(inkUnits, units), pigmentUnits, glowUnits,
                 redDyes, yellowDyes, blueDyes, true, colorEnabled, glowEnabled, compassInstalled);
     }
 
-    public AtlasState fillGlow(int points) {
-        return new AtlasState(id, pages, inkUnits, pigmentUnits, addUnits(glowUnits, points),
+    public AtlasState fillGlowUnits(int units) {
+        return new AtlasState(id, pages, inkUnits, pigmentUnits, addUnits(glowUnits, units),
                 redDyes, yellowDyes, blueDyes, inkEnabled, colorEnabled, true, compassInstalled);
     }
 
     public enum Primary { RED, YELLOW, BLUE }
 
     /** Complete RED+YELLOW+BLUE sets only; unmatched dyes remain stored. */
-    public AtlasState addDye(Primary primary, int pointsPerSet) {
+    public AtlasState addDye(Primary primary, int unitsPerSet) {
+        if ((primary == Primary.RED && redDyes > 0)
+                || (primary == Primary.YELLOW && yellowDyes > 0)
+                || (primary == Primary.BLUE && blueDyes > 0)) return this;
         int r = redDyes + (primary == Primary.RED ? 1 : 0);
         int y = yellowDyes + (primary == Primary.YELLOW ? 1 : 0);
         int b = blueDyes + (primary == Primary.BLUE ? 1 : 0);
         int sets = Math.min(r, Math.min(y, b));
-        return new AtlasState(id, pages, inkUnits, addUnits(pigmentUnits, sets * Math.max(0, pointsPerSet)), glowUnits,
+        return new AtlasState(id, pages, inkUnits, addUnits(pigmentUnits, sets * Math.max(0, unitsPerSet)), glowUnits,
                 r - sets, y - sets, b - sets, inkEnabled, colorEnabled || sets > 0, glowEnabled, compassInstalled);
     }
 

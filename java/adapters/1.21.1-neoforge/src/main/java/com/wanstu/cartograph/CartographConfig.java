@@ -2,37 +2,45 @@ package com.wanstu.cartograph;
 
 import net.neoforged.neoforge.common.ModConfigSpec;
 
-/** Server-authoritative rates and refill amounts; 0x means no debits, not a free unlock. */
+/** Server-wide material settings. The wire and ledger use integer tenths. */
 public final class CartographConfig {
     private CartographConfig() {}
-
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
-
-    public static final ModConfigSpec.DoubleValue INK_MULTIPLIER = BUILDER
-            .comment("Per first-time black/white chunk survey, range 0..10. Zero means no debit, but ink must first be installed.")
-            .defineInRange("cost.ink_multiplier", 1.0, 0.0, 10.0);
-    public static final ModConfigSpec.DoubleValue PIGMENT_MULTIPLIER = BUILDER
-            .comment("Per first-time chunk colorization, range 0..10. Zero still requires the primary-color upgrade.")
-            .defineInRange("cost.pigment_multiplier", 1.0, 0.0, 10.0);
-    public static final ModConfigSpec.DoubleValue GLOW_MULTIPLIER = BUILDER
-            .comment("Per new glowing waypoint (or normal->glowing), base cost 1; 0 disables the debit, not the unlock.")
-            .defineInRange("cost.glow_multiplier", 1.0, 0.0, 10.0);
-
-    public static final ModConfigSpec.IntValue INK_REFILL = BUILDER
-            .comment("Points granted per vanilla ink sac.")
-            .defineInRange("refill.ink", 128, 1, 100000);
-    public static final ModConfigSpec.IntValue PIGMENT_REFILL = BUILDER
-            .comment("Points granted per complete red+yellow+blue dye set.")
-            .defineInRange("refill.pigment", 128, 1, 100000);
-    public static final ModConfigSpec.IntValue GLOW_REFILL = BUILDER
-            .comment("Points granted per glow ink sac.")
-            .defineInRange("refill.glow", 32, 1, 100000);
+    private static final String[] RESOURCES = {"ink", "pigment", "glow"};
+    private static final ModConfigSpec.DoubleValue[] COST = multipliers("cost", 0.1);
+    private static final ModConfigSpec.DoubleValue[] INPUT = multipliers("input", 4.0);
+    private static final ModConfigSpec.BooleanValue[] PERMANENT = permanents();
+    private static final int[] BASE_POINTS = {128, 128, 32};
     public static final ModConfigSpec SPEC = BUILDER.build();
 
-    public static int inkCostUnits() { return toTenths(INK_MULTIPLIER.get()); }
-    public static int pigmentCostUnits() { return toTenths(PIGMENT_MULTIPLIER.get()); }
-    public static int glowCostUnits() { return toTenths(GLOW_MULTIPLIER.get()); }
-    public static int toTenths(double multiplier) {
-        return (int) Math.round(Math.clamp(multiplier, 0, 10) * 10.0);
+    private static ModConfigSpec.DoubleValue[] multipliers(String group, double fallback) {
+        ModConfigSpec.DoubleValue[] out = new ModConfigSpec.DoubleValue[RESOURCES.length];
+        for (int i = 0; i < out.length; i++)
+            out[i] = BUILDER.defineInRange(group + "." + RESOURCES[i] + "_multiplier", fallback, 0.1, 10.0);
+        return out;
+    }
+    private static ModConfigSpec.BooleanValue[] permanents() {
+        ModConfigSpec.BooleanValue[] out = new ModConfigSpec.BooleanValue[RESOURCES.length];
+        for (int i = 0; i < out.length; i++) out[i] = BUILDER.define("permanent." + RESOURCES[i], false);
+        return out;
+    }
+    static int cost(int material) { return (int) Math.round(COST[material].get() * 10.0); }
+    static int input(int material) { return (int) Math.round(INPUT[material].get() * 10.0); }
+    static int refillUnits(int material) { return refillUnits(material, input(material)); }
+    static int refillUnits(int material, int inputTenths) { return BASE_POINTS[material] * inputTenths; }
+    static boolean permanent(int material) { return PERMANENT[material].get(); }
+
+    static MapNetwork.MaterialRates rates() {
+        int flags = 0;
+        for (int i = 0; i < RESOURCES.length; i++) if (permanent(i)) flags |= 1 << i;
+        return new MapNetwork.MaterialRates(cost(0), cost(1), cost(2), input(0), input(1), input(2), flags);
+    }
+    static void update(MapNetwork.MaterialRates rates) {
+        for (int i = 0; i < RESOURCES.length; i++) {
+            COST[i].set(rates.cost(i) / 10.0);
+            INPUT[i].set(rates.input(i) / 10.0);
+            PERMANENT[i].set(rates.permanent(i));
+        }
+        SPEC.save();
     }
 }

@@ -50,12 +50,12 @@ public final class AtlasMapServer {
 
     public static ItemStack findAtlas(ServerPlayer player, String atlasId) {
         if (atlasId == null || atlasId.isBlank()) {
-            for (ItemStack stack : player.getInventory().items) {
+            for (ItemStack stack : List.of(player.getMainHandItem(), player.getOffhandItem())) {
                 if (stack.is(CartographMod.ATLAS.get())
                         && stack.getOrDefault(CartographMod.ATLAS_STATE.get(),
                         AtlasState.blank()).id().isBlank()) return stack;
             }
-            for (ItemStack stack : List.of(player.getMainHandItem(), player.getOffhandItem())) {
+            for (ItemStack stack : player.getInventory().items) {
                 if (stack.is(CartographMod.ATLAS.get())
                         && stack.getOrDefault(CartographMod.ATLAS_STATE.get(),
                         AtlasState.blank()).id().isBlank()) return stack;
@@ -92,11 +92,12 @@ public final class AtlasMapServer {
             PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
                     entry.state().id(), dim, request.pageX(), request.pageZ(),
                     new byte[MapNetwork.Page.PIXELS], new byte[MapNetwork.Page.PIXELS],
-                    new short[0], new byte[0], 0L,
+                    new short[0], new byte[0], 0L, 0L,
                     entry.state().inkUnits(), entry.state().pigmentUnits(),
                     entry.state().glowUnits(), entry.state().compassInstalled(),
-                    false, true, 0, 0, 0,
-                    entry.anchorX(), entry.anchorZ(), entry.state().pages(),
+                    false, true, request.cachedOnly(), 0, 0, 0,
+                    entry.anchorDimension(), entry.anchorX(), entry.anchorZ(), entry.state().pages(),
+                    entry.surveyedCount(), entry.coloredCount(),
                     List.of(), List.of()));
             return;
         }
@@ -112,7 +113,7 @@ public final class AtlasMapServer {
             return;
         }
         Pending next = new Pending(entry.state().id(),
-                request.pageX(), request.pageZ(), dim);
+                request.pageX(), request.pageZ(), dim, request.cachedOnly());
         PENDING.put(player.getUUID(), next);
         ORDER.addLast(player.getUUID());
     }
@@ -151,7 +152,8 @@ public final class AtlasMapServer {
             int chunkZ = task.pageZ * AtlasPage.CHUNKS_PER_SIDE + index / 8;
             WorldSurfaceIndex indexer = WorldSurfaceIndex.of(player.serverLevel());
             WorldSurfaceIndex.Lookup lookup =
-                    indexer.inspect(player.serverLevel(), chunkX, chunkZ);
+                    task.cachedOnly ? indexer.cached(player.serverLevel(), chunkX, chunkZ)
+                            : indexer.inspect(player.serverLevel(), chunkX, chunkZ);
             if (lookup.state() == WorldSurfaceIndex.State.PENDING) {
                 // Never count or debit a chunk before the background disk
                 // scan completes. Polling here is constant-time, no NBT I/O.
@@ -160,7 +162,7 @@ public final class AtlasMapServer {
             }
             // Early prefetch avoids a disk-read stall for each sequential
             // chunk, while at most one extra loaded snapshot is sampled.
-            if (index + 1 < 64) {
+            if (!task.cachedOnly && index + 1 < 64) {
                 int ahead = index + 1;
                 indexer.inspect(player.serverLevel(),
                         task.pageX * AtlasPage.CHUNKS_PER_SIDE + ahead % 8,
@@ -171,26 +173,28 @@ public final class AtlasMapServer {
             if (lookup.state() == WorldSurfaceIndex.State.READY) {
                 task.generated++;
                 SurfaceSampler.SurfaceTile tile = lookup.snapshot().tile();
-                data.sample(entry, key, tile.colors(), tile.features(), atlas);
-                byte[] savedColors = entry.getPixels(key);
-                if (savedColors != null && entry.paid(key)) {
+                data.reveal(entry, key, atlas);
+                boolean color = entry.isColored(key);
+                if (color) task.coloredChunks |= 1L << index;
+                if (entry.paid(key)) {
+                    task.surveyedChunks |= 1L << index;
                     task.painted++;
                     int x = index % 8, z = index / 8;
-                    byte[] features = entry.getFeatures(key);
                     for (int localZ = 0; localZ < 16; localZ++) {
                         int source = localZ * 16;
                         int destination = (z * 16 + localZ) * AtlasPage.SIDE_BLOCKS + x * 16;
-                        System.arraycopy(savedColors, source, task.pixels, destination, 16);
+                        if (color) System.arraycopy(tile.colors(), source, task.pixels, destination, 16);
+                        else for (int lx = 0; lx < 16; lx++)
+                            task.pixels[destination + lx] =
+                                    SurfacePalette.graySample(tile.colors()[source + lx], tile.waterDepths()[source + lx]);
                         System.arraycopy(tile.heights(), source, task.heights, destination, 16);
                         System.arraycopy(tile.waterDepths(), source, task.waterDepths, destination, 16);
-                        if (features != null && features.length == 256)
-                            System.arraycopy(features, source, task.features, destination, 16);
+                        System.arraycopy(tile.features(), source, task.features, destination, 16);
                     }
                     for (SurfaceStructure structure : tile.structures()) {
                         if (task.structures.size() >= 64) break;
                         task.structures.add(structure);
                     }
-                    if (entry.isColored(key)) task.coloredChunks |= 1L << index;
                 }
             }
 
@@ -200,11 +204,12 @@ public final class AtlasMapServer {
                         task.atlasId, task.dimension, task.pageX, task.pageZ,
                         task.pixels.clone(), task.features.clone(),
                         task.painted == 0 ? new short[0] : task.heights.clone(),
-                        task.painted == 0 ? new byte[0] : task.waterDepths.clone(), task.coloredChunks,
+                        task.painted == 0 ? new byte[0] : task.waterDepths.clone(), task.surveyedChunks, task.coloredChunks,
                         entry.state().inkUnits(), entry.state().pigmentUnits(),
                         entry.state().glowUnits(), entry.state().compassInstalled(),
-                        true, done, task.next, task.generated, task.painted,
-                        entry.anchorX(), entry.anchorZ(), entry.state().pages(),
+                        true, done, task.cachedOnly, task.next, task.generated, task.painted,
+                        entry.anchorDimension(), entry.anchorX(), entry.anchorZ(), entry.state().pages(),
+                    entry.surveyedCount(), entry.coloredCount(),
                         entry.markersOnPage(task.dimension, task.pageX, task.pageZ),
                         List.copyOf(task.structures)));
             }
@@ -223,7 +228,7 @@ public final class AtlasMapServer {
                                         "required_per_chunk={} bought_pages={}",
                                 task.dimension, task.pageX, task.pageZ, task.generated,
                                 entry.state().inkEnabled(), entry.state().inkUnits(),
-                                CartographConfig.inkCostUnits(), entry.state().pages());
+                                CartographConfig.cost(0), entry.state().pages());
                         LAST_DIAGNOSTIC.put(viewer, now);
                     }
                 }
@@ -242,9 +247,11 @@ public final class AtlasMapServer {
         final byte[] waterDepths = new byte[MapNetwork.Page.PIXELS];
         final java.util.List<SurfaceStructure> structures = new java.util.ArrayList<>();
         int next, generated, painted;
-        long coloredChunks;
-        Pending(String atlasId, int pageX, int pageZ, String dimension) {
+        long surveyedChunks, coloredChunks;
+        final boolean cachedOnly;
+        Pending(String atlasId, int pageX, int pageZ, String dimension, boolean cachedOnly) {
             this.atlasId = atlasId; this.pageX = pageX; this.pageZ = pageZ; this.dimension = dimension;
+            this.cachedOnly = cachedOnly;
             Arrays.fill(heights, TerrainRelief.UNKNOWN_HEIGHT);
         }
     }

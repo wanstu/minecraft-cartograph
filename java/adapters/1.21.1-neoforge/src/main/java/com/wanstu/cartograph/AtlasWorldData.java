@@ -19,7 +19,7 @@ import java.util.Set;
 
 /**
  * World authoritative atlas catalog and paid-chunk journal.
- * Render data and all balances are saved together in one SavedData NBT file.
+ * Coverage masks, annotations and balances are saved together in one SavedData NBT file.
  * Inventory components mirror balances; old/doubled item copies cannot refund
  * spent credits. Only the server mutates the journal.
  */
@@ -33,9 +33,8 @@ public final class AtlasWorldData extends SavedData {
         private AtlasState state;
         private String anchorDimension = "";
         private int anchorX, anchorZ;
-        private final Map<SurveyLedger.ChunkKey, byte[]> pixels = new HashMap<>();
-        private final Map<SurveyLedger.ChunkKey, byte[]> features = new HashMap<>();
         private final Map<String, AtlasMarker> markers = new HashMap<>();
+        private final Map<String, NamedRegion> namedRegions = new HashMap<>();
         private SurveyLedger ledger = new SurveyLedger();
 
         private Entry(AtlasState state) { this.state = state; }
@@ -51,14 +50,29 @@ public final class AtlasWorldData extends SavedData {
             return dim.equals(anchorDimension) && SpiralCoverage.covers(anchorX, anchorZ,
                     pageX, pageZ, state.pages());
         }
-        public byte[] getPixels(SurveyLedger.ChunkKey key) { return pixels.get(key); }
-        public byte[] getFeatures(SurveyLedger.ChunkKey key) { return features.get(key); }
+        public String anchorDimension() { return anchorDimension; }
+        public int surveyedCount() { return ledger.surveyedCount(); }
+        public int coloredCount() { return ledger.colorizedCount(); }
         public boolean isColored(SurveyLedger.ChunkKey key) {
             return ledger.isColored(key);
         }
         public boolean paid(SurveyLedger.ChunkKey key) { return ledger.updateMayRender(key); }
         public AtlasMarker getMarker(String id) { return markers.get(id); }
         public int markerCount() { return markers.size(); }
+        public List<AtlasMarker> markers(String dimension) {
+            return markers.values().stream().filter(marker -> marker.dimension().equals(dimension)).toList();
+        }
+        public int regionCount() { return namedRegions.size(); }
+        public NamedRegion getRegion(String id) { return namedRegions.get(id); }
+        public List<NamedRegion> regions(String dimension) {
+            List<NamedRegion> result = new ArrayList<>();
+            for (NamedRegion region : namedRegions.values())
+                if (region.dimension().equals(dimension)) result.add(region);
+            result.sort(java.util.Comparator.comparing(NamedRegion::id));
+            return List.copyOf(result);
+        }
+        private void putRegion(NamedRegion region) { namedRegions.put(region.id(), region); }
+        private void deleteRegion(String id) { namedRegions.remove(id); }
         public int markerCountOnPage(String dimension, int px, int pz) {
             int count = 0;
             for (AtlasMarker marker : markers.values()) {
@@ -82,20 +96,37 @@ public final class AtlasWorldData extends SavedData {
         private void deleteMarker(String id) { markers.remove(id); }
         private void setState(AtlasState s) { state = s; }
 
-        private boolean sample(SurveyLedger.ChunkKey key, byte[] pixelData, byte[] featureData) {
-            if (pixelData == null || pixelData.length != 256
-                    || featureData == null || featureData.length != 256) return false;
+        private boolean reveal(SurveyLedger.ChunkKey key) {
             SurveyLedger.Result result = ledger.survey(key, true, true,
-                    state.inkEnabled(), state.colorEnabled(),
-                    state.inkUnits(), state.pigmentUnits(),
-                    CartographConfig.inkCostUnits(), CartographConfig.pigmentCostUnits());
-            if (!result.fullySurveyed()) return false;
-            if (result.firstSurvey()) state = state.payInk(result.inkCostUnits());
-            if (result.firstColor()) state = state.payPigment(result.pigmentCostUnits());
-            byte[] previous = pixels.put(key, pixelData.clone());
-            byte[] oldFeatures = features.put(key, featureData.clone());
-            return result.firstSurvey() || result.firstColor() || !java.util.Arrays.equals(previous, pixelData)
-                    || !java.util.Arrays.equals(oldFeatures, featureData);
+                    state.inkEnabled(), state.colorEnabled(), state.inkUnits(), state.pigmentUnits(),
+                    CartographConfig.cost(0), CartographConfig.cost(1),
+                    CartographConfig.permanent(0), CartographConfig.permanent(1));
+            if (result.inkCostUnits() > 0) state = state.payInk(result.inkCostUnits());
+            if (result.pigmentCostUnits() > 0) state = state.payPigment(result.pigmentCostUnits());
+            return result.firstSurvey() || result.firstColor();
+        }
+
+        private static ListTag saveMask(Set<SurveyLedger.ChunkKey> keys) {
+            ListTag out = new ListTag();
+            for (SurveyLedger.ChunkKey key : keys) {
+                CompoundTag tag = new CompoundTag();
+                tag.putString("dim", key.dimension());
+                tag.putInt("x", key.x()); tag.putInt("z", key.z());
+                out.add(tag);
+            }
+            return out;
+        }
+
+        private static SurveyLedger.ChunkKey maskKey(CompoundTag tag) {
+            String dim = tag.getString("dim");
+            return dim.isBlank() ? null : new SurveyLedger.ChunkKey(dim, tag.getInt("x"), tag.getInt("z"));
+        }
+
+        private static void loadMask(ListTag tags, Set<SurveyLedger.ChunkKey> out) {
+            for (int i = 0; i < tags.size(); i++) {
+                SurveyLedger.ChunkKey key = maskKey(tags.getCompound(i));
+                if (key != null) out.add(key);
+            }
         }
 
         private CompoundTag saveEntry() {
@@ -103,20 +134,15 @@ public final class AtlasWorldData extends SavedData {
             out.put("state", AtlasState.CODEC.encodeStart(NbtOps.INSTANCE, state).getOrThrow());
             out.putString("anchor_dim", anchorDimension);
             out.putInt("anchor_x", anchorX); out.putInt("anchor_z", anchorZ);
-            Set<SurveyLedger.ChunkKey> colored = ledger.snapshot().colorized();
-            ListTag chunks = new ListTag();
-            for (Map.Entry<SurveyLedger.ChunkKey, byte[]> line : pixels.entrySet()) {
-                CompoundTag c = new CompoundTag(); var key = line.getKey();
-                c.putString("dim", key.dimension()); c.putInt("x", key.x()); c.putInt("z", key.z());
-                c.putByteArray("colors", line.getValue()); c.putBoolean("colored", colored.contains(key));
-                byte[] feature = features.get(key);
-                if (feature != null) c.putByteArray("features", feature);
-                chunks.add(c);
-            }
-            out.put("chunks", chunks);
+            SurveyLedger.Snapshot masks = ledger.snapshot();
+            out.put("survey_mask", saveMask(masks.surveyed()));
+            out.put("color_mask", saveMask(masks.colorized()));
             ListTag markersTag = new ListTag();
             for (AtlasMarker marker : markers.values()) markersTag.add(marker.save());
             out.put("markers", markersTag);
+            ListTag regionTags = new ListTag();
+            for (NamedRegion region : namedRegions.values()) regionTags.add(region.save());
+            out.put("named_regions", regionTags);
             return out;
         }
 
@@ -127,25 +153,30 @@ public final class AtlasWorldData extends SavedData {
             entry.anchorDimension = tag.getString("anchor_dim");
             entry.anchorX = tag.getInt("anchor_x"); entry.anchorZ = tag.getInt("anchor_z");
             Set<SurveyLedger.ChunkKey> paid = new HashSet<>(), color = new HashSet<>();
-            ListTag list = tag.getList("chunks", Tag.TAG_COMPOUND);
-            for (int i = 0; i < list.size(); i++) {
-                CompoundTag c = list.getCompound(i);
-                byte[] colors = c.getByteArray("colors");
-                if (colors.length != 256) continue;
-                String dim = c.getString("dim");
-                if (dim.isBlank()) continue;
-                var key = new SurveyLedger.ChunkKey(dim, c.getInt("x"), c.getInt("z"));
-                paid.add(key);
-                if (c.getBoolean("colored")) color.add(key);
-                entry.pixels.put(key, colors);
-                byte[] feature = c.getByteArray("features");
-                if (feature.length == 256) entry.features.put(key, feature);
+            if (tag.contains("survey_mask", Tag.TAG_LIST)) {
+                loadMask(tag.getList("survey_mask", Tag.TAG_COMPOUND), paid);
+                loadMask(tag.getList("color_mask", Tag.TAG_COMPOUND), color);
+            } else {
+                // Legacy worlds stored paid coverage alongside a duplicate pixel raster.
+                ListTag list = tag.getList("chunks", Tag.TAG_COMPOUND);
+                for (int i = 0; i < list.size(); i++) {
+                    CompoundTag chunk = list.getCompound(i);
+                    SurveyLedger.ChunkKey key = maskKey(chunk);
+                    if (key == null || chunk.getByteArray("colors").length != 256) continue;
+                    paid.add(key);
+                    if (chunk.getBoolean("colored")) color.add(key);
+                }
             }
             entry.ledger = new SurveyLedger(new SurveyLedger.Snapshot(paid, color));
             ListTag markerTags = tag.getList("markers", Tag.TAG_COMPOUND);
             for (int i = 0; i < markerTags.size(); i++) {
                 AtlasMarker marker = AtlasMarker.read(markerTags.getCompound(i));
                 if (marker != null) entry.markers.put(marker.id(), marker);
+            }
+            ListTag regionTags = tag.getList("named_regions", Tag.TAG_COMPOUND);
+            for (int i = 0; i < regionTags.size() && i < NamedRegion.MAX_REGIONS; i++) {
+                NamedRegion region = NamedRegion.read(regionTags.getCompound(i));
+                if (region != null) entry.namedRegions.put(region.id(), region);
             }
             return entry;
         }
@@ -205,14 +236,12 @@ public final class AtlasWorldData extends SavedData {
         setDirty();
     }
 
-    public boolean sample(Entry entry, SurveyLedger.ChunkKey key, byte[] bytes,
-                          byte[] features, ItemStack item) {
-        boolean changed = entry.sample(key, bytes, features);
+    public void reveal(Entry entry, SurveyLedger.ChunkKey key, ItemStack item) {
+        boolean changed = entry.reveal(key);
         if (changed) {
             item.set(CartographMod.ATLAS_STATE.get(), entry.state());
             setDirty();
         }
-        return changed;
     }
 
     public void putMarker(Entry entry, AtlasMarker marker, ItemStack atlas) {
@@ -223,6 +252,15 @@ public final class AtlasWorldData extends SavedData {
 
     public void deleteMarker(Entry entry, String id) {
         entry.deleteMarker(id);
+        setDirty();
+    }
+
+    public void putRegion(Entry entry, NamedRegion region) {
+        entry.putRegion(region);
+        setDirty();
+    }
+    public void deleteRegion(Entry entry, String id) {
+        entry.deleteRegion(id);
         setDirty();
     }
 

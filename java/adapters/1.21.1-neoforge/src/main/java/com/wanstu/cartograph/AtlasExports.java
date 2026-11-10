@@ -119,7 +119,6 @@ public final class AtlasExports {
             job.next++;
             if (previouslySurveyed && lookup.state() == WorldSurfaceIndex.State.READY) {
                     SurfaceSampler.SurfaceTile tile = lookup.snapshot().tile();
-                    data.sample(entry, key, tile.colors(), tile.features(), atlas); // existing paid -> free
                     boolean colorized = entry.isColored(key);
                     for (int z = 0; z < 16; z++) {
                         for (int x = 0; x < 16; x++) {

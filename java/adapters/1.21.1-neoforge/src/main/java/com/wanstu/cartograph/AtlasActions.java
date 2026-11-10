@@ -17,18 +17,20 @@ import java.util.UUID;
  * the bound dimension, purchased page and actually surveyed chunk.
  */
 public final class AtlasActions {
-    private static final Map<UUID, Long> LAST_ACTION = new HashMap<>();
+    private static final int OTHER_ACTIONS = 6;
+    private static final Map<UUID, long[]> LAST_ACTION = new HashMap<>();
     private AtlasActions() {}
 
     public static void reply(ServerPlayer player, boolean ok, String message) {
         PacketDistributor.sendToPlayer(player, new MapNetwork.Feedback(ok, message));
     }
 
-    private static boolean allowed(ServerPlayer player) {
-        long now = player.serverLevel().getGameTime();
-        Long prior = LAST_ACTION.get(player.getUUID());
-        if (prior != null && now >= prior && now - prior < 3) return false;
-        LAST_ACTION.put(player.getUUID(), now);
+    private static boolean allowed(ServerPlayer player, int action) {
+        long now = player.serverLevel().getGameTime() + 1;
+        long[] timings = LAST_ACTION.computeIfAbsent(player.getUUID(), id -> new long[OTHER_ACTIONS + 1]);
+        long prior = timings[action];
+        if (prior != 0 && now >= prior && now - prior < 3) return false;
+        timings[action] = now;
         if (LAST_ACTION.size() > 512) LAST_ACTION.entrySet().removeIf(e ->
                 player.server.getPlayerList().getPlayer(e.getKey()) == null);
         return true;
@@ -45,7 +47,7 @@ public final class AtlasActions {
             reply(player, false, "未知耗材类型");
             return;
         }
-        if (!allowed(player)) { reply(player, false, "操作过快，请稍后再试"); return; }
+        if (!allowed(player, req.material())) { reply(player, false, "操作过快，请稍后再试"); return; }
         ItemStack atlas = AtlasMapServer.findAtlas(player, req.atlasId());
         if (atlas.isEmpty()) { reply(player, false, "背包中未找到对应地图册"); return; }
         AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
@@ -61,6 +63,11 @@ public final class AtlasActions {
             return;
         }
 
+        if ((slot == 0 && state.inkEnabled() && CartographConfig.permanent(0))
+                || (slot == 1 && state.glowEnabled() && CartographConfig.permanent(2))
+                || (slot >= 2 && slot <= 4 && state.colorEnabled() && CartographConfig.permanent(1))) {
+            reply(player, false, "该材料已永久解锁"); return;
+        }
         Item material = switch (slot) {
             case 0 -> Items.INK_SAC;
             case 1 -> Items.GLOW_INK_SAC;
@@ -76,11 +83,11 @@ public final class AtlasActions {
             return;
         }
         AtlasState next = switch (slot) {
-            case 0 -> state.fillInk(CartographConfig.INK_REFILL.get());
-            case 1 -> state.fillGlow(CartographConfig.GLOW_REFILL.get());
-            case 2 -> state.addDye(AtlasState.Primary.RED, CartographConfig.PIGMENT_REFILL.get());
-            case 3 -> state.addDye(AtlasState.Primary.YELLOW, CartographConfig.PIGMENT_REFILL.get());
-            case 4 -> state.addDye(AtlasState.Primary.BLUE, CartographConfig.PIGMENT_REFILL.get());
+            case 0 -> state.fillInkUnits(CartographConfig.refillUnits(0));
+            case 1 -> state.fillGlowUnits(CartographConfig.refillUnits(2));
+            case 2 -> state.addDye(AtlasState.Primary.RED, CartographConfig.refillUnits(1));
+            case 3 -> state.addDye(AtlasState.Primary.YELLOW, CartographConfig.refillUnits(1));
+            case 4 -> state.addDye(AtlasState.Primary.BLUE, CartographConfig.refillUnits(1));
             case 5 -> state.withCompass(true);
             default -> state;
         };
@@ -97,39 +104,60 @@ public final class AtlasActions {
     }
 
     public static MapNetwork.CostSettings settings(ServerPlayer player) {
-        return new MapNetwork.CostSettings(
-                CartographConfig.inkCostUnits(), CartographConfig.pigmentCostUnits(),
-                CartographConfig.glowCostUnits(), CartographConfig.INK_REFILL.get(),
-                CartographConfig.PIGMENT_REFILL.get(), CartographConfig.GLOW_REFILL.get(),
-                mayConfigure(player));
+        return new MapNetwork.CostSettings(CartographConfig.rates(), mayConfigure(player));
     }
 
     public static void updateCosts(ServerPlayer player, MapNetwork.SetCostSettings request) {
         if (!mayConfigure(player)) { reply(player, false, "没有权限修改服务器设置"); return; }
-        if (!allowed(player)) { reply(player, false, "操作过快，请稍后再试"); return; }
-        if (request.ink() < 0 || request.ink() > 100
-                || request.pigment() < 0 || request.pigment() > 100
-                || request.glow() < 0 || request.glow() > 100
-                || request.inkRefill() < 1 || request.inkRefill() > 10000
-                || request.pigmentRefill() < 1 || request.pigmentRefill() > 10000
-                || request.glowRefill() < 1 || request.glowRefill() > 10000) {
-            reply(player, false, "设置超出范围，请使用 0–10 倍和 1–10000 资源量");
-            return;
-        }
-        CartographConfig.INK_MULTIPLIER.set(request.ink() / 10.0);
-        CartographConfig.PIGMENT_MULTIPLIER.set(request.pigment() / 10.0);
-        CartographConfig.GLOW_MULTIPLIER.set(request.glow() / 10.0);
-        CartographConfig.INK_REFILL.set(request.inkRefill());
-        CartographConfig.PIGMENT_REFILL.set(request.pigmentRefill());
-        CartographConfig.GLOW_REFILL.set(request.glowRefill());
-        CartographConfig.INK_MULTIPLIER.save();
-        CartographConfig.PIGMENT_MULTIPLIER.save();
-        CartographConfig.GLOW_MULTIPLIER.save();
-        CartographConfig.INK_REFILL.save();
-        CartographConfig.PIGMENT_REFILL.save();
-        CartographConfig.GLOW_REFILL.save();
+        if (!allowed(player, OTHER_ACTIONS)) { reply(player, false, "操作过快，请稍后再试"); return; }
+        if (!request.rates().valid()) { reply(player, false, "倍率必须在 0.1–10.0 之间"); return; }
+        CartographConfig.update(request.rates());
         PacketDistributor.sendToPlayer(player, settings(player));
-        reply(player, true, "服务端设置保存成功");
+        reply(player, true, "耗材设置已保存");
+    }
+
+    public static void listAnnotations(ServerPlayer player, String atlasId) {
+        ItemStack atlas = AtlasMapServer.findAtlas(player, atlasId);
+        if (atlas.isEmpty()) return;
+        AtlasWorldData.Entry entry = AtlasWorldData.get(player.serverLevel()).access(atlas);
+        String dim = player.serverLevel().dimension().location().toString();
+        PacketDistributor.sendToPlayer(player, new MapNetwork.Annotations(entry.state().id(), dim, entry.regions(dim), entry.markers(dim)));
+    }
+
+    public static void editRegion(ServerPlayer player, MapNetwork.EditRegion req) {
+        if (!allowed(player, OTHER_ACTIONS)) { reply(player, false, "操作过快，请稍后再试"); return; }
+        ItemStack atlas = AtlasMapServer.findAtlas(player, req.atlasId());
+        if (atlas.isEmpty()) { reply(player, false, "背包中未找到对应地图册"); return; }
+        AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
+        AtlasWorldData.Entry entry = data.access(atlas);
+        String dim = player.serverLevel().dimension().location().toString();
+        NamedRegion existing = req.regionId().isBlank() ? null : entry.getRegion(req.regionId());
+        if (!req.regionId().isBlank() && (existing == null || !existing.dimension().equals(dim))) {
+            reply(player, false, "区域已不存在或不在当前维度"); return;
+        }
+        if (req.delete()) {
+            if (existing == null) { reply(player, false, "未找到要删除的区域"); return; }
+            data.deleteRegion(entry, existing.id());
+        } else {
+            if (existing == null && entry.regionCount() >= NamedRegion.MAX_REGIONS) {
+                reply(player, false, "已达到区域数量上限"); return;
+            }
+            for (NamedRegion.Point point : req.boundary()) {
+                if (!entry.isCovered(dim, Math.floorDiv(point.x(), 128), Math.floorDiv(point.z(), 128))) {
+                    reply(player, false, "区域顶点超出地图册覆盖范围"); return;
+                }
+            }
+            try {
+                NamedRegion region = existing == null
+                        ? NamedRegion.create(dim, req.name(), req.regionType(), req.color(), req.note(), req.boundary())
+                        : new NamedRegion(existing.id(), dim, req.name(), req.regionType(), req.color(), req.note(), req.boundary());
+                data.putRegion(entry, region);
+            } catch (IllegalArgumentException invalid) {
+                reply(player, false, "请检查区域名称和边界，至少三个顶点且边界不能交叉"); return;
+            }
+        }
+        listAnnotations(player, entry.state().id());
+        reply(player, true, req.delete() ? "区域已删除" : "区域已保存");
     }
 
     public static void exportMap(ServerPlayer player, MapNetwork.ExportMap request) {
@@ -137,7 +165,7 @@ public final class AtlasActions {
     }
 
     public static void editMarker(ServerPlayer player, MapNetwork.EditMarker req) {
-        if (!allowed(player)) { reply(player, false, "操作过快，请稍后再试"); return; }
+        if (!allowed(player, OTHER_ACTIONS)) { reply(player, false, "操作过快，请稍后再试"); return; }
         ItemStack atlas = AtlasMapServer.findAtlas(player, req.atlasId());
         if (atlas.isEmpty()) { reply(player, false, "背包中未找到对应地图册"); return; }
         if (Math.abs((long) req.x()) > 30_000_000 || Math.abs((long) req.z()) > 30_000_000) {
@@ -154,7 +182,7 @@ public final class AtlasActions {
             reply(player, false, "标点已不存在，可能已被其他操作删除"); return;
         }
         if (existing != null && (!existing.dimension().equals(dimension)
-                || existing.x() != req.x() || existing.z() != req.z())) {
+                || req.delete() && (existing.x() != req.x() || existing.z() != req.z()))) {
             reply(player, false, "不能修改其他维度或位置的标点"); return;
         }
 
@@ -165,12 +193,13 @@ public final class AtlasActions {
 
         if (req.delete()) {
             if (existing != null) data.deleteMarker(entry, existing.id());
+            listAnnotations(player, entry.state().id());
             reply(player, true, existing != null ? "标点已删除" : "标点已不存在");
             return;
         }
 
-        if (existing == null) {
-            if (entry.markerCount() >= 1024 || entry.markerCountOnPage(dimension, pageX, pageZ) >= 64) {
+        if (existing == null || existing.x() != req.x() || existing.z() != req.z()) {
+            if ((existing == null && entry.markerCount() >= AtlasMarker.MAX_MARKERS) || entry.markerCountOnPage(dimension, pageX, pageZ) >= 64) {
                 reply(player, false, "已达到标点数量上限"); return;
             }
             var key = new SurveyLedger.ChunkKey(dimension,
@@ -184,7 +213,7 @@ public final class AtlasActions {
         AtlasState current = entry.state();
         boolean wasPaid = existing != null && existing.glowEverPaid();
         if (req.glow() && !wasPaid) {
-            AtlasState paid = current.payGlow(CartographConfig.glowCostUnits());
+            AtlasState paid = current.payGlow(CartographConfig.permanent(2) ? 0 : CartographConfig.cost(2));
             if (paid == null) {
                 reply(player, false, "发光墨水不足，请先填入发光墨囊");
                 return;
@@ -192,10 +221,11 @@ public final class AtlasActions {
             data.update(entry, paid, atlas);
             wasPaid = true;
         }
-        int color = current.colorEnabled() ? req.color() : 0;
+        int color = req.color();
         AtlasMarker updated = new AtlasMarker(existing == null ? UUID.randomUUID().toString() : existing.id(),
                 dimension, req.x(), req.z(), req.name(), req.icon(), color, req.glow(), wasPaid);
         data.putMarker(entry, updated, atlas);
+        listAnnotations(player, entry.state().id());
         reply(player, true, existing == null ? "新标点保存成功" : "标点修改成功");
     }
 }
