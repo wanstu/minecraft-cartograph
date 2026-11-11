@@ -301,12 +301,56 @@ public final class MapNetwork {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    /** The atlas and ordinary empty map are consumed server-side without losing the atlas identity. */
-    public record AddPage(String atlasId) implements CustomPacketPayload {
+    /** Place a new paper sheet at this specific map tile, including distant
+     * already-generated parts of a world. No extra paper spent for the same
+     * tile beyond the normal AddPage cost. Server verifies location/ownership. */
+    public record AddPage(String atlasId, int targetPageX, int targetPageZ)
+            implements CustomPacketPayload {
         public static final Type<AddPage> TYPE = new Type<>(id("add_page"));
         public static final StreamCodec<RegistryFriendlyByteBuf, AddPage> CODEC = StreamCodec.of(
-                (buf, v) -> buf.writeUtf(v.atlasId, 64),
-                buf -> new AddPage(buf.readUtf(64)));
+                (buf, v) -> {
+                    buf.writeUtf(v.atlasId, 64);
+                    buf.writeInt(v.targetPageX()); buf.writeInt(v.targetPageZ());
+                },
+                buf -> new AddPage(buf.readUtf(64), buf.readInt(), buf.readInt()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    /** Server-owned paper mask. All native world facts still exist regardless
+     * of these sheet positions or whether the player carries an atlas. */
+    public record PaperSite(int pageX, int pageZ) {}
+    public record PaperCoverage(String atlasId, String dimension, int anchorX, int anchorZ,
+                                int sheetSideBlocks, int legacySheets, List<PaperSite> remoteSheets)
+            implements CustomPacketPayload {
+        public PaperCoverage {
+            if (remoteSheets.size() > 4096 || legacySheets < 1
+                    || !MapSheetCoverage.valid(sheetSideBlocks))
+                throw new IllegalArgumentException("Invalid paper coverage");
+            remoteSheets = List.copyOf(remoteSheets);
+        }
+        public static final Type<PaperCoverage> TYPE = new Type<>(id("paper_coverage"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, PaperCoverage> CODEC = StreamCodec.of(
+                (buf, v) -> {
+                    buf.writeUtf(v.atlasId(), 64); buf.writeUtf(v.dimension(), 128);
+                    buf.writeInt(v.anchorX()); buf.writeInt(v.anchorZ());
+                    buf.writeVarInt(v.sheetSideBlocks()); buf.writeVarInt(v.legacySheets());
+                    buf.writeVarInt(v.remoteSheets().size());
+                    for (PaperSite sheet : v.remoteSheets()) {
+                        buf.writeInt(sheet.pageX()); buf.writeInt(sheet.pageZ());
+                    }
+                },
+                buf -> {
+                    String id = buf.readUtf(64), dimension = buf.readUtf(128);
+                    int ax = buf.readInt(), az = buf.readInt();
+                    int side = buf.readVarInt(), legacy = buf.readVarInt();
+                    int count = buf.readVarInt();
+                    if (count < 0 || count > 4096)
+                        throw new IllegalArgumentException("Too many remote paper sheets");
+                    List<PaperSite> sites = new ArrayList<>(count);
+                    for (int i = 0; i < count; i++)
+                        sites.add(new PaperSite(buf.readInt(), buf.readInt()));
+                    return new PaperCoverage(id, dimension, ax, az, side, legacy, sites);
+                });
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
@@ -471,7 +515,7 @@ public final class MapNetwork {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("16");
+        var registrar = event.registrar("17");
         registrar.playToServer(RequestAnnotations.TYPE, RequestAnnotations.CODEC, (req, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.listAnnotations(player, req.atlasId());
@@ -531,6 +575,10 @@ public final class MapNetwork {
         registrar.playToServer(EditMarker.TYPE, EditMarker.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.editMarker(player, request);
+                }));
+        registrar.playToClient(PaperCoverage.TYPE, PaperCoverage.CODEC, (mask, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.acceptPaperCoverage(mask);
                 }));
         registrar.playToServer(AddPage.TYPE, AddPage.CODEC, (request, ctx) ->
                 ctx.enqueueWork(() -> {

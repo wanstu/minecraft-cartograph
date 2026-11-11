@@ -66,6 +66,7 @@ public final class CartographClient {
     private static String lastDimension = "", lastAtlasId = "", lastWorldNamespace = "";
     private static String cachedWorldIdentity = "", cachedWorldNamespace = "";
     private static MapNetwork.Page coverage;
+    private static MapNetwork.PaperCoverage paperCoverage;
     private static List<NamedRegion> regions = List.of();
     private static List<AtlasMarker> markers = List.of();
     private static MapNetwork.CostSettings settings = new MapNetwork.CostSettings(MapNetwork.MaterialRates.DEFAULT, false);
@@ -74,6 +75,7 @@ public final class CartographClient {
     private static MapNetwork.RefreshProgress refresh =
             new MapNetwork.RefreshProgress(0, 0, 0, 0);
     private static int ticks, textureRevision;
+    private static boolean absentSinceLastAtlas;
 
     private record CacheKey(String atlasId, String dimension, int px, int pz) {}
     private record Entry(MapNetwork.Page page, DynamicTexture texture, ResourceLocation id, float[] light, int updated) {}
@@ -177,9 +179,44 @@ public final class CartographClient {
 
     public static boolean covered(int x, int z) {
         MapNetwork.Page c = coverage();
-        return c == null || c.anchorDimension().equals(dimension())
+        if (c == null) return true; // Bootstrap: ask server for real paper mask.
+        MapNetwork.PaperCoverage p = paperCoverage;
+        if (p != null && p.atlasId().equals(atlasId())
+                && p.dimension().equals(dimension())) {
+            if (MapSheetCoverage.covers(p.anchorX(), p.anchorZ(), x, z,
+                    p.legacySheets(), p.sheetSideBlocks())) return true;
+            for (MapNetwork.PaperSite site : p.remoteSheets())
+                if (MapSheetCoverage.covers(site.pageX(), site.pageZ(),
+                        x, z, 1, p.sheetSideBlocks())) return true;
+            return false;
+        }
+        // For old servers/initial packets, fallback to legacy paper layout.
+        return c.anchorDimension().equals(dimension())
                 && MapSheetCoverage.covers(c.anchorX(), c.anchorZ(), x, z,
                         c.totalPages(), c.sheetSideBlocks());
+    }
+
+    /** Paper layout is metadata. It must not erase saved terrain or the
+     * separately-paid ink/pigment masks when the atlas expands. */
+    public static void acceptPaperCoverage(MapNetwork.PaperCoverage mask) {
+        if (!hasAtlas() || !mask.atlasId().equals(atlasId())) return;
+        MapNetwork.PaperCoverage prior = paperCoverage;
+        paperCoverage = mask;
+        if (prior != null && prior.equals(mask)) return;
+        // Out-of-paper placeholder pages from before expansion have no real
+        // pixels and must be requested again after placing a new sheet.
+        List<CacheKey> unavailable = new ArrayList<>();
+        for (var e : PAGES.entrySet())
+            if (e.getKey().atlasId().equals(mask.atlasId())
+                    && !e.getValue().page().inRange()
+                    && covered(e.getKey().px(), e.getKey().pz()))
+                unavailable.add(e.getKey());
+        for (CacheKey key : unavailable) {
+            release(PAGES.remove(key));
+            QUEUED.remove(key); IN_FLIGHT.remove(key); DISK_LOADING.remove(key);
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof AtlasScreen screen) screen.coverageChanged();
     }
 
     static boolean surveyed(int x, int z) {
@@ -274,7 +311,10 @@ public final class CartographClient {
     static void sendRegion(MapNetwork.EditRegion value) { PacketDistributor.sendToServer(value); }
     static void requestAnnotations() { PacketDistributor.sendToServer(new MapNetwork.RequestAnnotations(atlasId())); }
     static void sendRefill(int slot) { PacketDistributor.sendToServer(new MapNetwork.Refill(atlasId(), slot)); }
-    static void sendAddPage() { PacketDistributor.sendToServer(new MapNetwork.AddPage(atlasId())); }
+    static void sendAddPage(int worldX, int worldZ) {
+        PacketDistributor.sendToServer(new MapNetwork.AddPage(
+                atlasId(), Math.floorDiv(worldX, 128), Math.floorDiv(worldZ, 128)));
+    }
     static List<NamedRegion> regions() { return regions; }
     static List<AtlasMarker> markers() { return markers; }
     public static void acceptAnnotations(MapNetwork.Annotations value) {
@@ -395,6 +435,7 @@ public final class CartographClient {
             lastWorldNamespace = currentWorld;
         }
         if (!hasAtlas()) {
+            absentSinceLastAtlas = true;
             // Server cancels map scans when the item leaves inventory. Drop
             // stale transport jobs, NOT the expensive surveyed pixels and GPU
             // textures. Same atlas re-picked immediately uses local cache.
@@ -414,6 +455,16 @@ public final class CartographClient {
             // transport are invalid across the switch.
             resetAtlasView();
             lastDimension = dim; lastAtlasId = id;
+        }
+        if (absentSinceLastAtlas) {
+            absentSinceLastAtlas = false;
+            // The player may have modified the world while the atlas was on
+            // the ground. Revalidate ONLY already cached viewport pages when
+            // they become visible; no GPU/CPU texture is discarded on pickup.
+            for (CacheKey existing : PAGES.keySet())
+                if (existing.atlasId().equals(atlasId())
+                        && existing.dimension().equals(dimension()))
+                    DISK_RECHECK_ONCE.add(existing);
         }
         while (OPEN.consumeClick()) if (hasAtlas()) open();
         ticks++;
@@ -714,6 +765,7 @@ public final class CartographClient {
     /** Release active atlas metadata/transport, but not paid terrain pixels
      * belonging to other atlas items in this SAME world and dimension. */
     private static void resetAtlasView() {
+        paperCoverage = null;
         QUEUED.clear(); REDRAW.clear(); IN_FLIGHT.clear(); STALE.clear();
         COLOR_QUEUED.clear(); COLOR_IN_FLIGHT.clear(); COLOR_REQUESTED.clear();
         DISK_LOADING.clear();

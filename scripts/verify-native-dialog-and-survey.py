@@ -28,7 +28,7 @@ assert ui.count('super.render(g, mouseX, mouseY, partial);') == 1, 'EditBoxes re
 panel=ui.split('case ATLAS -> {',1)[1].split('case MARKERS -> {',1)[0]
 assert 'sendAddPage' not in panel, 'Extra expand button returned to resource panel'
 materials=ui.split('private void materials(',1)[1].split('private String refillAmount(',1)[0]
-assert 'CartographClient.sendAddPage()' in materials
+assert 'CartographClient.sendAddPage(world(viewX), world(viewZ))' in materials
 for token in (
     'boolean milestone = done;',
     'MAX_SURVEY_NANOS_PER_TICK',

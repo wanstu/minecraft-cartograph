@@ -138,13 +138,15 @@ public final class AtlasScreen extends Screen {
     public void coverageReady() {
         MapNetwork.Page c = CartographClient.coverage();
         if (c == null) return;
-        if (!manuallyMoved && c.anchorDimension().equals(CartographClient.dimension())) {
-            if (c.totalPages() == 1) {
-                zoomPixels = Math.clamp(Math.min(width, height) * minecraft.getWindow().getGuiScale()
-                        * .66 / c.sheetSideBlocks(), .20, 6.0);
-                zoom = zoomPixels / minecraft.getWindow().getGuiScale();
-                goAnchor();
-            } else if (!CartographClient.covered(pageX(viewX), pageX(viewZ))) goAnchor();
+        if (!manuallyMoved && c.anchorDimension().equals(CartographClient.dimension())
+                && c.totalPages() == 1) {
+            zoomPixels = Math.clamp(Math.min(width, height) * minecraft.getWindow().getGuiScale()
+                    * .66 / c.sheetSideBlocks(), .20, 6.0);
+            zoom = zoomPixels / minecraft.getWindow().getGuiScale();
+            // Never teleport the map viewport to the original binding spot.
+            // Travel can be thousands of blocks away; show the real player
+            // position, with a paper-limit explanation if it is uncovered.
+            focus(minecraft.player.getX(), minecraft.player.getZ());
         }
         CartographClient.requestAnnotations();
         reload(false, false);
@@ -159,9 +161,9 @@ public final class AtlasScreen extends Screen {
     }
 
     private void recenter() {
-        if (CartographClient.covered(pageX(minecraft.player.getX()), pageX(minecraft.player.getZ()))) {
-            focus(minecraft.player.getX(), minecraft.player.getZ()); status = "已回到玩家位置";
-        } else goAnchor();
+        focus(minecraft.player.getX(), minecraft.player.getZ());
+        status = CartographClient.covered(pageX(viewX), pageX(viewZ))
+                ? "已回到玩家位置" : "玩家位置未铺设地图纸 · 地图册材料槽可扩页";
     }
 
     private void focus(double x, double z) {
@@ -197,6 +199,23 @@ public final class AtlasScreen extends Screen {
                     if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) != ring || !CartographClient.covered(x, z)) continue;
                     if (CartographClient.queue(x, z, force, cachedOnly) && ++count >= 64) return;
                 }
+    }
+
+    /** Explicit visible map creation, NOT the advanced surveyed-cache
+     * reconciliation action. Reads saved FULL chunks and reveals only the
+     * paper/ink-authorized area. It never generates game world chunks. */
+    private void generateCurrentView() {
+        if (!CartographClient.covered(pageX(viewX), pageX(viewZ))) {
+            toast("当前区域没有地图纸 · 地图册→材料槽→在此铺设", true);
+            return;
+        }
+        if (!CartographClient.state().inkEnabled()) {
+            toast("请先在材料槽投入墨囊 · 底层地形无需重新生成", true);
+            return;
+        }
+        CartographClient.prioritizeViewport();
+        reload(true, false);
+        toast("正在绘制已生成的世界区块；不会创建未生成的地形", false);
     }
 
     @Override public void tick() {
@@ -575,13 +594,14 @@ public final class AtlasScreen extends Screen {
         if (c != null && !c.anchorDimension().equals(CartographClient.dimension()))
             hint = "地图册绑定" + CartographClient.dimensionName(c.anchorDimension());
         else if (c != null && !CartographClient.covered(pageX(viewX), pageX(viewZ)))
-            hint = "超出地图册范围 · 按 Home 定位";
+            hint = "此处尚无地图纸 · 地图册→材料槽→在此处扩页";
         else if (CartographClient.refreshProgress().state() == 1)
             hint = "后台刷新已测绘区块 · " + CartographClient.refreshProgress().done()
                     + " / " + CartographClient.refreshProgress().total();
         else if (CartographClient.awaitingPage())
-            hint = "正在补齐当前视野 · 已缓存 " + CartographClient.cachedCount() + " 瓦片";
-        else if (!CartographClient.state().inkEnabled()) hint = "在地图册材料槽投入墨囊即可揭开地图";
+            hint = "地图生成中 · 待处理 " + CartographClient.queuedCount()
+                    + " 页（缓存 " + CartographClient.cachedCount() + " 页）";
+        else if (!CartographClient.state().inkEnabled()) hint = "地形已生成但未揭开墨水层 · 请投入墨囊";
         else hint = status.isBlank() ? "左键详情 · 右键操作 · 拖动平移 · 滚轮缩放 · Home定位" : status;
         int tw = Math.min(w() - 62, Math.max(font.width(main), font.width(hint)) + 20);
         card(g, 14, h() - 48, tw, 35, 7);
@@ -591,7 +611,7 @@ public final class AtlasScreen extends Screen {
 
     private void renderPanel(GuiGraphics g) {
         int width = Math.min(228, w() - 28), x = w() - width - 14, y = 62;
-        int height = Math.min(h() - y - 60, panel == Panel.ATLAS ? 231 : panel == Panel.INFO ? 184 : 276);
+        int height = Math.min(h() - y - 35, panel == Panel.ATLAS ? 256 : panel == Panel.INFO ? 184 : 276);
         card(g, x, y, width, height, 8);
         String title = switch (panel) {
             case LAYERS -> "地图图层"; case MARKERS -> "我的标点"; case REGIONS -> "区域命名";
@@ -623,7 +643,9 @@ public final class AtlasScreen extends Screen {
                 textRow(g, left, row + 90, inner, "指南针", state.compassInstalled() ? "已装入" : "未装入");
                 progress(g, left, row + 110, inner, "测绘覆盖", c == null ? 0 : c.totalSurveyed(), count, 0xff93ad8b);
                 progress(g, left, row + 136, inner, "彩色覆盖", c == null ? 0 : c.totalColored(), count, 0xffb1a6d2);
-                button(g, left, row + 166, inner, 21, "打开材料槽", true, this::openMaterials);
+                button(g, left, row + 164, inner, 21, "打开材料槽 / 在此铺设地图纸", true, this::openMaterials);
+                button(g, left, row + 193, inner, 21, "生成当前视野的地图", false,
+                        this::generateCurrentView);
             }
             case MARKERS -> {
                 button(g, left, row, inner, 24, "＋ 新增标点", true, () -> openMarker(null, world(viewX), world(viewZ)));
@@ -806,7 +828,7 @@ public final class AtlasScreen extends Screen {
     private int modalW() { return Math.min(486, w() - 24); }
     private int modalH() { return switch (dialog) {
         case SETTINGS -> switch (settingsTab) {
-            case MAP -> 366; case MINI -> 312; case COST -> 381; case CACHE -> 353;
+            case MAP -> 366; case MINI -> 312; case COST -> 381; case CACHE -> 450;
         };
         case MATERIALS -> 366;
         case MARKER -> 291;
@@ -1011,25 +1033,30 @@ public final class AtlasScreen extends Screen {
                 case 1 -> "正在刷新"; case 2 -> "已暂停";
                 case 3 -> "已完成"; case 4 -> "已取消"; default -> "未开始";
             };
-            g.drawString(font, "刷新已测绘区域（无需墨水、纸值或重新解锁）", left, y + 193, GOLD, false);
-            g.drawString(font, shorten("任务：" + stateLabel + " · 已完成 " + progress.done()
+            g.drawString(font, "地图生成（只读取世界已生成的区块）", left, y + 192, GOLD, false);
+            button(g, left, y + 209, inner, 25, "生成 / 补齐当前视野的地图", true,
+                    this::generateCurrentView);
+            g.drawString(font, shorten("纸张控制覆盖范围、墨水控制显示；不依赖玩家探索历史", inner),
+                    left, y + 244, MUTED, false);
+            g.drawString(font, "旧地图地表校验（高级，不是生成地图）", left, y + 270, GOLD, false);
+            g.drawString(font, shorten("校验任务：" + stateLabel + " · 已完成 " + progress.done()
                             + " / " + progress.total() + " 区块", inner),
-                    left, y + 212, CREAM, false);
+                    left, y + 290, CREAM, false);
             int fill = progress.total() == 0 ? 0 :
                     (int) Math.round((inner - 6) * progress.done() / (double) progress.total());
-            rounded(g, left, y + 229, inner, 8, 3, CONTROL);
-            rounded(g, left, y + 229, fill, 8, 3, GOLD);
-            button(g, left, y + 245, inner, 23, "刷新加载全部已测绘地图", false,
+            rounded(g, left, y + 307, inner, 8, 3, CONTROL);
+            rounded(g, left, y + 307, fill, 8, 3, GOLD);
+            button(g, left, y + 322, inner, 23, "重新校验已揭开的区块", false,
                     () -> CartographClient.refreshControl(0));
             int half = (inner - 8) / 2;
             boolean running = progress.state() == 1, paused = progress.state() == 2;
-            button(g, left, y + 273, half, 23, running ? "暂停刷新" : "继续刷新", false,
+            button(g, left, y + 350, half, 23, running ? "暂停校验" : "继续校验", false,
                     running || paused ? () -> CartographClient.refreshControl(running ? 1 : 2) : null);
-            button(g, left + half + 8, y + 273, half, 23, "取消任务", false,
+            button(g, left + half + 8, y + 350, half, 23, "取消任务", false,
                     running || paused ? () -> CartographClient.refreshControl(3) : null);
-            g.drawString(font, shorten("失败 / 缺失 " + progress.failed()
-                            + " · 显示旧缓存，后台并行更新实际世界", inner),
-                    left, y + 304, MUTED, false);
+            g.drawString(font, shorten("异常 " + progress.failed()
+                            + " · 新区域由纸张范围、墨水和自动加载控制", inner),
+                    left, y + 386, MUTED, false);
         }
     }
 
@@ -1106,13 +1133,13 @@ public final class AtlasScreen extends Screen {
         boolean canExpand = minecraft.player.getAbilities().instabuild ||
                 state.paperEnabled() && (rates.permanent(3) || state.paperUnits() >= rates.cost(3));
         button(g, left, y + h - 31, 177, 22,
-                "使用纸值扩充地图册", false,
+                "在当前地图位置铺设地图纸", false,
                 canExpand ? () -> {
                     materialNotice = "正在扩充地图册，等待服务端确认…";
                     materialNoticeError = false;
                     materialPending = true;
                     requestStartedAtTick = ticks;
-                    CartographClient.sendAddPage();
+                    CartographClient.sendAddPage(world(viewX), world(viewZ));
                 } : () -> {
                     materialNotice = "地图纸值不足，先投入上面的空地图";
                     materialNoticeError = true;

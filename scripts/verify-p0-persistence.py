@@ -21,9 +21,11 @@ assert "DISK_LOADING.remove(k)" in client and "QUEUED.put(k, false)" in client
 assert "DISK_RECHECK_ONCE.add(k)" in client
 assert "ClientPageStore.request" in client and "ClientPageStore.save" in client
 assert "DISK_LOADING.clear();" in client
+assert "record PaperCoverage(" in network
+assert "record AddPage(String atlasId, int targetPageX, int targetPageZ)" in network
 assert "record TerrainPatch(" in network
 assert "PIXELS = 16 * 16" in network
-assert 'event.registrar("16")' in network
+assert 'event.registrar("17")' in network
 assert "CartographClient.acceptTerrainPatch(patch)" in network
 assert "private record Changed(String dimension, int cx, int cz)" in server
 assert "new MapNetwork.TerrainPatch(" in server

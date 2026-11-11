@@ -57,8 +57,17 @@ public final class AtlasActions {
         if (!allowed(player, OTHER_ACTIONS)) { reply(player, false, "操作过快，请稍后再试"); return; }
         ItemStack atlas = AtlasMapServer.findAtlas(player, req.atlasId());
         if (atlas.isEmpty()) { reply(player, false, "背包中未找到对应地图册"); return; }
+        if (Math.abs((long) req.targetPageX()) > 234375
+                || Math.abs((long) req.targetPageZ()) > 234375) {
+            reply(player, false, "地图坐标超出世界边界"); return;
+        }
         AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
         AtlasWorldData.Entry entry = data.access(atlas);
+        if (!entry.anchored()) {
+            var at = com.wanstu.cartograph.core.AtlasPage.atBlock(
+                    player.serverLevel().dimension().location().toString(), player.getBlockX(), player.getBlockZ());
+            data.anchor(entry, player.serverLevel().dimension().location().toString(), at.pageX(), at.pageZ());
+        }
         AtlasState current = entry.state();
         if (current.pages() >= AtlasState.MAX_PAGES) {
             reply(player, false, "地图册已达到最大页数"); return;
@@ -70,9 +79,21 @@ public final class AtlasActions {
         } else if (!player.getAbilities().instabuild && !current.paperEnabled()) {
             reply(player, false, "请先投入一张原版空地图以解锁永久地图纸"); return;
         }
+        String dim = player.serverLevel().dimension().location().toString();
+        if (!entry.anchorDimension().equals(dim)) {
+            reply(player, false, "地图册当前绑定其他维度，无法在这里铺设地图纸"); return;
+        }
+        if (entry.remoteSheets().size() >= 4096) {
+            reply(player, false, "地图册远程纸张位置达到上限"); return;
+        }
+        boolean newRegion = !entry.isCovered(dim, req.targetPageX(), req.targetPageZ());
         AtlasState expanded = next.extendOnePage();
+        entry.placeExtraSheet(dim, req.targetPageX(), req.targetPageZ());
         data.update(entry, expanded, atlas);
-        reply(player, true, "已扩充地图范围 · 当前 " + expanded.pages() + " 页");
+        AtlasMapServer.sendPaperCoverage(player, entry);
+        reply(player, true, newRegion
+                ? "已在当前地图视野铺设地图纸 · 新区域正在读取已生成地形"
+                : "已向相邻地区扩充地图纸 · 当前 " + expanded.pages() + " 页");
     }
 
     public static void refill(ServerPlayer player, MapNetwork.Refill req) {

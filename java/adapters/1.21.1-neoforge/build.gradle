@@ -233,6 +233,16 @@ tasks.register('verifyMapCache', JavaExec) {
     dependsOn tasks.named('testClasses')
 }
 
+// Paper permissions must survive long-distance travel and world saves.
+tasks.register('verifyPaperCoverage', JavaExec) {
+    group = 'verification'
+    description = 'Disjoint map paper sheets, retained legacy coverage and NBT persistence'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.wanstu.cartograph.PaperCoverageSelfTest'
+    maxHeapSize = '256m'
+    dependsOn tasks.named('testClasses')
+}
+
 // ModDev adds remapped Minecraft classes to main, not ordinary test source sets.
 sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
 sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath

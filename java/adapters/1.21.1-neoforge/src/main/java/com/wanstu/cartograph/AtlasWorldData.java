@@ -35,6 +35,12 @@ public final class AtlasWorldData extends SavedData {
         private int anchorX, anchorZ;
         // Locked to each atlas when created; legacy records gain the generous default.
         private int sheetSideBlocks = MapSheetCoverage.DEFAULT_BLOCKS;
+        // Legacy pages keep their original spiral positions. New paper sheets
+        // may be placed in the current distant map area, without buying
+        // thousands of intervening empty spiral sheets.
+        public record PaperSite(int pageX, int pageZ) {}
+        private int legacySheets;
+        private final List<PaperSite> remoteSheets = new ArrayList<>();
         private final Map<String, AtlasMarker> markers = new HashMap<>();
         private final Map<String, NamedRegion> namedRegions = new HashMap<>();
         private SurveyLedger ledger = new SurveyLedger();
@@ -45,6 +51,7 @@ public final class AtlasWorldData extends SavedData {
         private Entry(AtlasState state, int side) {
             this.state = state;
             this.sheetSideBlocks = side;
+            this.legacySheets = state.pages();
         }
         public AtlasState state() { return state; }
 
@@ -52,12 +59,30 @@ public final class AtlasWorldData extends SavedData {
         public int anchorX() { return anchorX; }
         public int anchorZ() { return anchorZ; }
         public int sheetSideBlocks() { return sheetSideBlocks; }
+        public int legacySheets() { return legacySheets; }
+        public List<PaperSite> remoteSheets() { return List.copyOf(remoteSheets); }
+        /** New sheets are placed at the actual requested area, not silently
+         * appended 10,000 blocks away to a spiral centered on spawn. */
+        public void placeExtraSheet(String dim, int pageX, int pageZ) {
+            if (!dim.equals(anchorDimension) || legacySheets + remoteSheets.size() >= AtlasState.MAX_PAGES)
+                throw new IllegalArgumentException("Cannot place paper outside atlas world or max capacity");
+            if (isCovered(dim, pageX, pageZ)) {
+                legacySheets++;
+            } else {
+                remoteSheets.add(new PaperSite(pageX, pageZ));
+            }
+        }
         public void setAnchor(String dim, int x, int z) {
             if (!anchored()) { anchorDimension = dim; anchorX = x; anchorZ = z; }
         }
         public boolean isCovered(String dim, int pageX, int pageZ) {
-            return dim.equals(anchorDimension) && MapSheetCoverage.covers(anchorX, anchorZ,
-                    pageX, pageZ, state.pages(), sheetSideBlocks);
+            if (!dim.equals(anchorDimension)) return false;
+            if (MapSheetCoverage.covers(anchorX, anchorZ,
+                    pageX, pageZ, legacySheets, sheetSideBlocks)) return true;
+            for (PaperSite site : remoteSheets)
+                if (MapSheetCoverage.covers(site.pageX(), site.pageZ(),
+                        pageX, pageZ, 1, sheetSideBlocks)) return true;
+            return false;
         }
         public String anchorDimension() { return anchorDimension; }
         public int surveyedCount() { return ledger.surveyedCount(); }
@@ -162,6 +187,14 @@ public final class AtlasWorldData extends SavedData {
             out.putString("anchor_dim", anchorDimension);
             out.putInt("anchor_x", anchorX); out.putInt("anchor_z", anchorZ);
             out.putInt("sheet_side_blocks", sheetSideBlocks);
+            out.putInt("legacy_sheet_count", legacySheets);
+            ListTag sites = new ListTag();
+            for (PaperSite site : remoteSheets) {
+                CompoundTag point = new CompoundTag();
+                point.putInt("x", site.pageX()); point.putInt("z", site.pageZ());
+                sites.add(point);
+            }
+            out.put("remote_paper_sites", sites);
             SurveyLedger.Snapshot masks = ledger.snapshot();
             out.put("survey_mask", saveMask(masks.surveyed()));
             out.put("color_mask", saveMask(masks.colorized()));
@@ -185,6 +218,15 @@ public final class AtlasWorldData extends SavedData {
             Entry entry = new Entry(state, width);
             entry.anchorDimension = tag.getString("anchor_dim");
             entry.anchorX = tag.getInt("anchor_x"); entry.anchorZ = tag.getInt("anchor_z");
+            entry.legacySheets = tag.contains("legacy_sheet_count", Tag.TAG_INT)
+                    ? Math.clamp(tag.getInt("legacy_sheet_count"), 1, state.pages())
+                    : state.pages(); // Existing save: preserve ALL original spiral sheets
+            ListTag sites = tag.getList("remote_paper_sites", Tag.TAG_COMPOUND);
+            for (int i = 0; i < sites.size()
+                    && entry.remoteSheets.size() < state.pages() - entry.legacySheets; i++) {
+                CompoundTag site = sites.getCompound(i);
+                entry.remoteSheets.add(new PaperSite(site.getInt("x"), site.getInt("z")));
+            }
             Set<SurveyLedger.ChunkKey> paid = new HashSet<>(), color = new HashSet<>();
             if (tag.contains("survey_mask", Tag.TAG_LIST)) {
                 loadMask(tag.getList("survey_mask", Tag.TAG_COMPOUND), paid);
@@ -251,6 +293,9 @@ public final class AtlasWorldData extends SavedData {
             setDirty();
         } else if (item.pages() > saved.state.pages()) {
             // Only map-count growth can be mirrored from crafting; credits stay authoritative.
+            // Crafting-origin pages have no remote location: append legacy
+            // spiral slots exactly as old versions did.
+            saved.legacySheets += item.pages() - saved.state.pages();
             AtlasState s = saved.state;
             saved.state = new AtlasState(s.id(), item.pages(), s.inkUnits(), s.pigmentUnits(), s.glowUnits(),
                     s.redDyes(), s.yellowDyes(), s.blueDyes(),

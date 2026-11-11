@@ -96,6 +96,15 @@ public final class AtlasMapServer {
         return ItemStack.EMPTY;
     }
 
+    static void sendPaperCoverage(ServerPlayer player, AtlasWorldData.Entry entry) {
+        String dim = entry.anchorDimension();
+        List<MapNetwork.PaperSite> remote = entry.remoteSheets().stream()
+                .map(s -> new MapNetwork.PaperSite(s.pageX(), s.pageZ())).toList();
+        PacketDistributor.sendToPlayer(player, new MapNetwork.PaperCoverage(
+                entry.state().id(), dim, entry.anchorX(), entry.anchorZ(),
+                entry.sheetSideBlocks(), entry.legacySheets(), remote));
+    }
+
     public static void enqueue(ServerPlayer player, MapNetwork.Request request) {
         if (Math.abs((long) request.pageX()) > 234375 ||
                 Math.abs((long) request.pageZ()) > 234375) return;
@@ -110,6 +119,7 @@ public final class AtlasMapServer {
             var origin = AtlasPage.atBlock(dim, player.getBlockX(), player.getBlockZ());
             data.anchor(entry, dim, origin.pageX(), origin.pageZ());
         }
+        sendPaperCoverage(player, entry);
         if (!entry.isCovered(dim, request.pageX(), request.pageZ())) {
             PacketDistributor.sendToPlayer(player, new MapNetwork.Page(
                     entry.state().id(), dim, request.pageX(), request.pageZ(),
