@@ -52,8 +52,6 @@ public final class WorldSurfaceIndex implements AutoCloseable {
 
     private static final int MAX_CACHED_CHUNKS = 8192;
     private static final int MAX_PENDING_DISK = 256;
-    private static final int CACHE_TTL_LOADED = 60;  // 3s: updates even without dedicated block event
-    private static final int CACHE_TTL_SAVED = 200;  // 10s: saved disk files are read in background
     private static final int CACHE_TTL_ABSENT = 160; // 8s: newly saved chunks become visible
 
     private final ThreadPoolExecutor readers;
@@ -65,6 +63,107 @@ public final class WorldSurfaceIndex implements AutoCloseable {
                 }
             };
     // Accessed exclusively on the Minecraft server thread.
+    /**
+     * World lifecycle notifications are completely atlas-independent:
+     * generation/load event -> bounded deferred sampling of FULL loaded
+     * chunks -> immutable original-surface cache. The event may fire before
+     * FULL promotion; never query the chunk synchronously inside the handler.
+     */
+    private record LoadedNotice(ServerLevel level, int cx, int cz,
+                                boolean newlyGenerated, int attempts) {}
+    private static final int MAX_LOAD_NOTICES = 2048;
+    private final LinkedHashMap<ChunkKey, LoadedNotice> loadNotices = new LinkedHashMap<>();
+
+    public static void chunkLoaded(net.neoforged.neoforge.event.level.ChunkEvent.Load event) {
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        var pos = event.getChunk().getPos();
+        int cx = pos.x, cz = pos.z;
+        boolean newlyGenerated = event.isNewChunk();
+        // NeoForge's event can arrive while promoting a chunk toward FULL.
+        // Handle ONLY server-owned primitive coordinates from an event thread,
+        // and mutate the index's maps strictly on the server tick thread.
+        if (!level.getServer().isSameThread()) {
+            level.getServer().execute(() -> addChunkNotice(level, cx, cz, newlyGenerated, false));
+            return;
+        }
+        addChunkNotice(level, cx, cz, newlyGenerated, false);
+    }
+
+    /** Source-world event: independent of maps and players. */
+    private static void addChunkNotice(ServerLevel level, int cx, int cz,
+                                      boolean newlyGenerated, boolean fromSave) {
+        WorldSurfaceIndex index = of(level);
+        if (index.closed) return;
+        if (fromSave) index.worldSavedEvents++;
+        else index.worldLoadedEvents++;
+        ChunkKey key = new ChunkKey(level.dimension().location().toString(), cx, cz);
+        if (index.loadNotices.size() >= MAX_LOAD_NOTICES && !index.loadNotices.containsKey(key)) {
+            ChunkKey oldest = index.loadNotices.keySet().iterator().next();
+            index.loadNotices.remove(oldest);
+        }
+        LoadedNotice old = index.loadNotices.get(key);
+        index.loadNotices.put(key, new LoadedNotice(level, cx, cz,
+                newlyGenerated || old != null && old.newlyGenerated(), 0));
+    }
+
+    /** A chunk saved by vanilla or another mod may have changed without a
+     * block place/break event. The save hook also observes only WORLD state,
+     * never player position or item presence. */
+    public static void chunkSaved(net.neoforged.neoforge.event.level.ChunkDataEvent.Save event) {
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        var pos = event.getChunk().getPos();
+        int cx = pos.x, cz = pos.z;
+        if (!level.getServer().isSameThread())
+            level.getServer().execute(() -> addChunkNotice(level, cx, cz, false, true));
+        else addChunkNotice(level, cx, cz, false, true);
+    }
+
+    private void drainLoadedWorldChunks() {
+        long deadline = System.nanoTime() + 1_200_000L;
+        int completed = 0, candidates = 0;
+        var it = loadNotices.entrySet().iterator();
+        while (it.hasNext() && completed < 5 && candidates < 18
+                && System.nanoTime() < deadline) {
+            var entry = it.next();
+            candidates++;
+            LoadedNotice next = entry.getValue();
+            // getChunkNow never synchronously generates/loads world chunks.
+            if (next.level().getChunkSource().getChunkNow(next.cx(), next.cz()) == null) {
+                if (next.attempts() >= 80) it.remove();
+                else entry.setValue(new LoadedNotice(next.level(), next.cx(), next.cz(),
+                        next.newlyGenerated(), next.attempts() + 1));
+                continue;
+            }
+            SurfaceSampler.SurfaceTile tile =
+                    SurfaceSampler.loaded(next.level(), next.cx(), next.cz()).orElse(null);
+            if (tile == null) {
+                if (next.attempts() >= 80) it.remove();
+                else entry.setValue(new LoadedNotice(next.level(), next.cx(), next.cz(),
+                        next.newlyGenerated(), next.attempts() + 1));
+                continue;
+            }
+            Cached previous = chunks.get(entry.getKey());
+            boolean changed = next.newlyGenerated()
+                    || previous != null && (previous.status != State.READY
+                    || !SurfaceDiskStore.equal(previous.snapshot.tile(), tile));
+            chunks.put(entry.getKey(), new Cached(State.READY,
+                    new Snapshot(Source.LOADED, tile, ++revision), tick));
+            it.remove();
+            completed++;
+            eventSnapshots++;
+            if (changed) {
+                changedSnapshots++;
+                // Only the optional VISIBLE map page is notified via server
+                // dispatch; original world data was already sampled globally.
+                if (next.newlyGenerated())
+                    AtlasMapServer.markWholePageChanged(next.level(),
+                            Math.floorDiv(next.cx(), 8), Math.floorDiv(next.cz(), 8));
+                else
+                    AtlasMapServer.markSurfaceChanged(next.level(), next.cx(), next.cz());
+            }
+        }
+    }
+
     private final Set<ChunkKey> inFlight = new HashSet<>();
     private final Map<ChunkKey, Long> dirtyUntilTick = new HashMap<>();
     private final Set<ChunkKey> refreshing = new HashSet<>();
@@ -72,6 +171,7 @@ public final class WorldSurfaceIndex implements AutoCloseable {
     private final ConcurrentLinkedQueue<Completed> completed = new ConcurrentLinkedQueue<>();
     private long tick, revision;
     private long cacheHits, launched, received, dropped;
+    private long worldLoadedEvents, worldSavedEvents, eventSnapshots, changedSnapshots;
     private long totalReadNanos;
     private boolean closed;
 
@@ -179,8 +279,7 @@ public final class WorldSurfaceIndex implements AutoCloseable {
         LevelChunk loaded = level.getChunkSource().getChunkNow(cx, cz);
         if (loaded != null) {
             if (old != null && old.status == State.READY
-                    && old.snapshot.source() == Source.LOADED
-                    && tick - old.tick < CACHE_TTL_LOADED) {
+                    && old.snapshot.source() == Source.LOADED) {
                 cacheHits++;
                 return Lookup.ready(old.snapshot);
             }
@@ -202,8 +301,8 @@ public final class WorldSurfaceIndex implements AutoCloseable {
         // async revalidation, so the map never blanks on every refresh.
         if (old != null && old.status == State.READY
                 && old.snapshot.source() == Source.SAVED) {
-            if (tick - old.tick >= CACHE_TTL_SAVED && !inFlight.contains(key))
-                submitDisk(key, SurfaceSampler.request(level, cx, cz));
+            // Real world events and explicit refresh invalidate this value;
+            // never re-read the same MCA region every 10 seconds.
             cacheHits++;
             return Lookup.ready(old.snapshot);
         }
@@ -278,18 +377,24 @@ public final class WorldSurfaceIndex implements AutoCloseable {
                 chunks.put(next.key(), new Cached(State.READY, snapshot, tick));
             }
         }
-        if (tick % 600 == 0 && (launched > 0 || dropped > 0)) {
+        if (tick % 600 == 0 && (launched > 0 || dropped > 0
+                || worldLoadedEvents > 0 || worldSavedEvents > 0)) {
             LOG.info("Surface cache: chunks={} pending={} queue={} scheduled={} done={} " +
-                            "hits={} rejected={} avg_read_ms={}",
+                            "hits={} rejected={} avg_read_ms={} world_loaded={} world_saved={} " +
+                            "world_snapshots={} true_surface_changes={}",
                     chunks.size(), inFlight.size(), readers.getQueue().size(),
                     launched, received, cacheHits, dropped,
-                    received == 0 ? 0.0 : (totalReadNanos / 1_000_000.0 / received));
+                    received == 0 ? 0.0 : (totalReadNanos / 1_000_000.0 / received),
+                    worldLoadedEvents, worldSavedEvents, eventSnapshots, changedSnapshots);
         }
     }
 
     public static void tick(ServerTickEvent.Post event) {
         WorldSurfaceIndex existing = INSTANCES.get(event.getServer());
-        if (existing != null) existing.drain();
+        if (existing != null) {
+            existing.drain();
+            existing.drainLoadedWorldChunks();
+        }
     }
 
     public static void serverStopped(ServerStoppedEvent event) {
@@ -312,5 +417,6 @@ public final class WorldSurfaceIndex implements AutoCloseable {
         dirtyUntilTick.clear();
         refreshing.clear();
         chunks.clear();
+        loadNotices.clear();
     }
 }

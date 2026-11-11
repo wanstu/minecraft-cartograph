@@ -45,6 +45,8 @@ public final class CartographMod {
         SERIALIZERS.register(modBus);
         modBus.addListener(this::creativeTab);
         modBus.addListener(MapNetwork::register);
+        NeoForge.EVENT_BUS.addListener(WorldSurfaceIndex::chunkLoaded);
+        NeoForge.EVENT_BUS.addListener(WorldSurfaceIndex::chunkSaved);
         NeoForge.EVENT_BUS.addListener(WorldSurfaceIndex::tick);
         NeoForge.EVENT_BUS.addListener(WorldSurfaceIndex::serverStopped);
         NeoForge.EVENT_BUS.addListener(this::blockBroken);

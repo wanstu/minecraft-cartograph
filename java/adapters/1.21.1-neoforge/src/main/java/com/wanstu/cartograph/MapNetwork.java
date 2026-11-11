@@ -20,6 +20,43 @@ import java.util.List;
 public final class MapNetwork {
     private MapNetwork() {}
 
+    /** Client requests ONLY a possessed page; server chooses original samples
+     * and pays color in its authoritative ledger. No client supplied pixels. */
+    public record RequestColorPage(String atlasId, int pageX, int pageZ)
+            implements CustomPacketPayload {
+        public static final Type<RequestColorPage> TYPE = new Type<>(id("request_color_page"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, RequestColorPage> CODEC = StreamCodec.of(
+                (b, v) -> { b.writeUtf(v.atlasId(), 64); b.writeInt(v.pageX()); b.writeInt(v.pageZ()); },
+                b -> new RequestColorPage(b.readUtf(64), b.readInt(), b.readInt()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    /** One page's authorized newly colored 16x16 chunks, without any geometry.
+     * pixels contains bitCount(mask)*256 raw material palette IDs, ordered by
+     * ascending chunk index. Mask contains ONLY ink-authorized cells. Empty
+     * deltas are valid terminal acknowledgements to release bounded queues. */
+    public record ColorDelta(String atlasId, String dimension, int pageX, int pageZ,
+                             long chunkMask, byte[] pixels, int pigmentUnits, int totalColored)
+            implements CustomPacketPayload {
+        public ColorDelta {
+            if (pixels.length != Long.bitCount(chunkMask) * 256
+                    || pixels.length > Page.PIXELS || pigmentUnits < 0 || totalColored < 0)
+                throw new IllegalArgumentException("Invalid authorized color delta");
+        }
+        public static final Type<ColorDelta> TYPE = new Type<>(id("color_delta"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, ColorDelta> CODEC = StreamCodec.of(
+                (b, v) -> {
+                    b.writeUtf(v.atlasId(), 64); b.writeUtf(v.dimension(), 128);
+                    b.writeInt(v.pageX()); b.writeInt(v.pageZ()); b.writeLong(v.chunkMask());
+                    b.writeByteArray(v.pixels()); b.writeVarInt(v.pigmentUnits());
+                    b.writeVarInt(v.totalColored());
+                },
+                b -> new ColorDelta(b.readUtf(64), b.readUtf(128),
+                        b.readInt(), b.readInt(), b.readLong(),
+                        b.readByteArray(Page.PIXELS), b.readVarInt(), b.readVarInt()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     /** Notification of a world edit; client keeps old pixels until refreshed. */
     /** Admin-adjustable I/O workers and bounded main-thread scan budget. */
     public record PerformanceSettings(int workers, int budgetMs, boolean editable)
@@ -417,7 +454,8 @@ public final class MapNetwork {
 
     /** A server-confirmed operation result, never a speculative client toast. */
     /** Survey changes need cached tile authorization to refresh; paper/compass do not. */
-    public record Feedback(boolean ok, String message, boolean surveyChanged) implements CustomPacketPayload {
+    public record Feedback(boolean ok, String message, boolean surveyChanged,
+                           boolean colorChanged) implements CustomPacketPayload {
         public static final Type<Feedback> TYPE =
                 new Type<>(ResourceLocation.fromNamespaceAndPath(CartographMod.MOD_ID, "feedback"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Feedback> CODEC = StreamCodec.of(
@@ -425,13 +463,15 @@ public final class MapNetwork {
                     buf.writeBoolean(value.ok);
                     buf.writeUtf(value.message, 160);
                     buf.writeBoolean(value.surveyChanged);
+                    buf.writeBoolean(value.colorChanged);
                 },
-                buf -> new Feedback(buf.readBoolean(), buf.readUtf(160), buf.readBoolean()));
+                buf -> new Feedback(buf.readBoolean(), buf.readUtf(160),
+                        buf.readBoolean(), buf.readBoolean()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("15");
+        var registrar = event.registrar("16");
         registrar.playToServer(RequestAnnotations.TYPE, RequestAnnotations.CODEC, (req, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer player) AtlasActions.listAnnotations(player, req.atlasId());
@@ -447,6 +487,16 @@ public final class MapNetwork {
         registrar.playToClient(InvalidatePage.TYPE, InvalidatePage.CODEC, (item, ctx) ->
                 ctx.enqueueWork(() -> {
                     if (FMLEnvironment.dist == Dist.CLIENT) CartographClient.invalidatePage(item);
+                }));
+        registrar.playToServer(RequestColorPage.TYPE, RequestColorPage.CODEC, (request, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (ctx.player() instanceof ServerPlayer player)
+                        AtlasMapServer.enqueueColor(player, request);
+                }));
+        registrar.playToClient(ColorDelta.TYPE, ColorDelta.CODEC, (delta, ctx) ->
+                ctx.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT)
+                        CartographClient.acceptColorDelta(delta);
                 }));
         registrar.playToClient(TerrainPatch.TYPE, TerrainPatch.CODEC, (patch, ctx) ->
                 ctx.enqueueWork(() -> {

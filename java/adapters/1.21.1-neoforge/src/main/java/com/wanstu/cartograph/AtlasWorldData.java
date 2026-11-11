@@ -121,6 +121,18 @@ public final class AtlasWorldData extends SavedData {
             return result.firstSurvey() || result.firstColor();
         }
 
+        /** Dye-only reconciliation: no ink use, no terrain rescan and no
+         * ability to create survey entitlement. Valid only for generated
+         * chunks inside a verified paper page. */
+        private boolean colorize(SurveyLedger.ChunkKey key) {
+            SurveyLedger.Result result = ledger.colorize(key, true, true,
+                    state.colorEnabled(), state.pigmentUnits(),
+                    CartographConfig.cost(1), CartographConfig.permanent(1));
+            if (result.pigmentCostUnits() > 0)
+                state = state.payPigment(result.pigmentCostUnits());
+            return result.firstColor();
+        }
+
         private static ListTag saveMask(Set<SurveyLedger.ChunkKey> keys) {
             ListTag out = new ListTag();
             for (SurveyLedger.ChunkKey key : keys) {
@@ -264,6 +276,16 @@ public final class AtlasWorldData extends SavedData {
             item.set(CartographMod.ATLAS_STATE.get(), entry.state());
             setDirty();
         }
+    }
+
+    /** Persist a newly paid color bit exactly once. */
+    public boolean colorize(Entry entry, SurveyLedger.ChunkKey key, ItemStack item) {
+        boolean changed = entry.colorize(key);
+        if (changed) {
+            item.set(CartographMod.ATLAS_STATE.get(), entry.state());
+            setDirty();
+        }
+        return changed;
     }
 
     public void putMarker(Entry entry, AtlasMarker marker, ItemStack atlas) {

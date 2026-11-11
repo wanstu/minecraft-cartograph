@@ -197,6 +197,15 @@ tasks.named('jar', Jar) {
 
 // Repeatable synthetic load and real compressed cache I/O pressure, without
 // Minecraft rendering. Explicitly bounded to 512MB Java heap for dadm.
+tasks.register('verifyColorDelta', JavaExec) {
+    group = 'verification'
+    description = 'Pigment-only 16x16 patch, independent ledger and unchanged legacy-v5 cache'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.wanstu.cartograph.ColorDeltaSelfTest'
+    maxHeapSize = '256m'
+    dependsOn tasks.named('testClasses')
+}
+
 tasks.register('verifyLayers', JavaExec) {
     group = 'verification'
     description = 'All 8 permission combinations: paper/ink/pigment, color-first, mask persistence'

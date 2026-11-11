@@ -19,7 +19,23 @@ assert 'if (!direct && existing.state() != WorldSurfaceIndex.State.READY)' in mo
 assert 'PENDING.size() >= MAX_PENDING' in monitor
 assert 'System.nanoTime() < deadline' in monitor and 'processed < 4' in monitor
 assert 'NEIGHBOR_RECHECK_TICKS = 120' in monitor
-assert 'noPaintBudget' in client and 'SURFACE_RECHECK_TICKS' in client
+assert 'DISK_RECHECK_ONCE' in client and 'SURFACE_RECHECK_TICKS' not in client
+assert 'WorldSurfaceIndex::chunkLoaded' in mod
+assert 'WorldSurfaceIndex::chunkSaved' in mod
+world=read('WorldSurfaceIndex.java')
+assert 'public static void chunkLoaded(' in world and 'public static void chunkSaved(' in world
+assert 'getChunkSource().getChunkNow(' in world
+assert 'level.getServer().isSameThread()' in world
+assert 'AtlasMapServer.markSurfaceChanged(next.level(), next.cx(), next.cz())' in world
+assert 'AtlasMapServer.markWholePageChanged(next.level(),' in world
+assert 'CACHE_TTL_LOADED' not in world and 'CACHE_TTL_SAVED' not in world
+assert 'PAGES.clear();' not in world and 'currentAtlas(' not in world
+assert 'Set<CacheKey> VISIBLE_GPU' in client
+assert 'VISIBLE_GPU.contains(e.getKey())' in client
+assert 'pinVisiblePages(visiblePages)' in screen
+assert 'tickExploration(' not in atlas
+
+assert 'tickExploration(' not in atlas
 assert 'if (page.complete() && page.inRange()' in client
 assert 'page.painted() < 1' not in page
 assert 'boolean milestone = done;' in atlas

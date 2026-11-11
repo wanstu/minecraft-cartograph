@@ -26,7 +26,13 @@ public final class AtlasActions {
     }
 
     public static void reply(ServerPlayer player, boolean ok, String message, boolean surveyChanged) {
-        PacketDistributor.sendToPlayer(player, new MapNetwork.Feedback(ok, message, surveyChanged));
+        reply(player, ok, message, surveyChanged, false);
+    }
+
+    public static void reply(ServerPlayer player, boolean ok, String message,
+                             boolean surveyChanged, boolean colorChanged) {
+        PacketDistributor.sendToPlayer(player,
+                new MapNetwork.Feedback(ok, message, surveyChanged, colorChanged));
     }
 
     private static boolean allowed(ServerPlayer player, int action) {
@@ -138,7 +144,12 @@ public final class AtlasActions {
             case 6 -> "空地图投入成功 · 地图纸值 " + next.paperUnits() / 10.0;
             default -> "地图册资源更新成功";
         };
-        reply(player, true, completed, slot == 0 || slot >= 2 && slot <= 4);
+        // A single red/yellow/blue dye alone is not a complete pigment
+        // bundle. Schedule expensive color reconciliation only once a
+        // complete RGB set has actually increased available color units.
+        boolean pigmentAdded = slot >= 2 && slot <= 4
+                && next.pigmentUnits() > state.pigmentUnits();
+        reply(player, true, completed, slot == 0, pigmentAdded);
     }
 
     public static boolean mayConfigure(ServerPlayer player) {

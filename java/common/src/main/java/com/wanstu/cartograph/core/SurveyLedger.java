@@ -54,6 +54,22 @@ public final class SurveyLedger {
                 surveyed.contains(key), colorized.contains(key));
     }
 
+    /**
+     * Dye can be purchased independently of survey ink. Re-coloring a known
+     * world chunk must never debit ink or create a surveyed permission.
+     */
+    public Result colorize(ChunkKey key, boolean generated, boolean pageCovered,
+                           boolean colorUnlocked, int pigmentAvailable,
+                           int pigmentCost, boolean permanentColor) {
+        if (pigmentCost < 1) throw new IllegalArgumentException("Cost must be positive");
+        boolean firstColor = generated && pageCovered && colorUnlocked
+                && (permanentColor || pigmentAvailable >= pigmentCost)
+                && colorized.add(key);
+        return new Result(false, firstColor, 0,
+                firstColor && !permanentColor ? pigmentCost : 0,
+                surveyed.contains(key), colorized.contains(key));
+    }
+
     public int surveyedCount() { return surveyed.size(); }
     public int colorizedCount() { return colorized.size(); }
 

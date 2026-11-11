@@ -215,9 +215,12 @@ public final class AtlasScreen extends Screen {
         }
         if (ticks % 10 == 0 && CartographClient.queuedCount() < 48)
             reload(false, false);
+        if (ticks % 10 == 0) CartographClient.queueColorVisible(
+                leftPage(), rightPage(), topPage(), bottomPage());
     }
 
-    public void feedback(boolean ok, String text, boolean surveyChanged) {
+    public void feedback(boolean ok, String text, boolean surveyChanged,
+                         boolean colorChanged) {
         toast(text, !ok);
         if (dialog == Dialog.MATERIALS) {
             materialPending = false;
@@ -238,6 +241,8 @@ public final class AtlasScreen extends Screen {
         // refreshing visible tiles, but keep their old GPU textures until replaced.
         if (surveyChanged) reload(true, false);
         else {
+            // Dye-only changes are handled by 16x16 color deltas. Do NOT
+            // force 64-chunk terrain scans just to change the color mask.
             // Marker, paper, compass and settings feedback only change UI
             // metadata; they must not rescan a paid 128x128 terrain tile.
             reload(false, false);
@@ -310,6 +315,7 @@ public final class AtlasScreen extends Screen {
         // split, image and icon layers; no duplicate full-cache passes/frame.
         List<MapNetwork.Page> visiblePages = CartographClient.visiblePages(
                 leftPage(), rightPage(), topPage(), bottomPage());
+        CartographClient.pinVisiblePages(visiblePages);
         if (cfg.style == Style.PIXEL && pixelView == PixelView.SPLIT) {
             int divider = (int) (split * width);
             mapTiles(g, Style.ORIGINAL, 0, divider, visiblePages);

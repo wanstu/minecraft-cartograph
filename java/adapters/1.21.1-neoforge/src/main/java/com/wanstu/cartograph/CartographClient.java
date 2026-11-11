@@ -38,16 +38,30 @@ public final class CartographClient {
     // zoom without evicting tiles that are still visible on the screen.
     private static final int CACHE_LIMIT = 1400;
     private static final int GPU_TEXTURE_LIMIT = 140;
+    // High-zoom map view may contain hundreds of pages. Previously GPU LRU
+    // evicted visible textures every frame at 140, causing a moving sea of
+    // paper holes while waiting for the 2-uploads/tick budget. Pin precisely
+    // the page textures currently visible; they remain bounded by CACHE_LIMIT.
+    private static final Set<CacheKey> VISIBLE_GPU = new LinkedHashSet<>();
     private static final int MAX_PARALLEL_PAGES = 4;
-    private static final int SURFACE_RECHECK_TICKS = 12000; // 10 min for fully drawn tiles
     private static final int DISK_READ_GRACE_TICKS = 16; // 0.8 seconds, never blocks render/tick
     private static final int DISK_VALIDATION_DELAY_TICKS = 200; // show cached terrain first
     private static final LinkedHashMap<CacheKey, Integer> DISK_LOADING = new LinkedHashMap<>();
+    // Each restored disk image gets ONE server validation after becoming
+    // visible, not another timer every 30s or 10min. Ongoing changes arrive
+    // from the WORLD chunk lifecycle and genuine mutation notifications.
+    private static final Set<CacheKey> DISK_RECHECK_ONCE = new LinkedHashSet<>();
     private static final LinkedHashMap<CacheKey, Entry> PAGES = new LinkedHashMap<>(32, 0.75f, true);
     private static final LinkedHashMap<CacheKey, Boolean> QUEUED = new LinkedHashMap<>();
     private static final Set<CacheKey> REDRAW = new LinkedHashSet<>();
     private static final LinkedHashMap<CacheKey, Integer> IN_FLIGHT = new LinkedHashMap<>();
     private static final Set<CacheKey> STALE = new LinkedHashSet<>();
+    // Only a dye refill activates this lane. It never forces terrain reload.
+    private static final Set<String> COLOR_REFILL_ATLASES = new LinkedHashSet<>();
+    private static final Set<CacheKey> COLOR_REQUESTED = new LinkedHashSet<>();
+    private static final Set<CacheKey> COLOR_QUEUED = new LinkedHashSet<>();
+    private static final LinkedHashMap<CacheKey, Integer> COLOR_IN_FLIGHT = new LinkedHashMap<>();
+
     private static ItemStack previousAtlas = ItemStack.EMPTY;
     private static String lastDimension = "", lastAtlasId = "", lastWorldNamespace = "";
     private static String cachedWorldIdentity = "", cachedWorldNamespace = "";
@@ -183,17 +197,6 @@ public final class CartographClient {
      * after a manual pan or zoom, so newly visible tiles jump to the front. */
     static void prioritizeViewport() { QUEUED.clear(); }
 
-    /**
-     * Scanning cadence depends on the survey layer, not image existence:
-     * an incomplete page still needs regular checks while ink remains,
-     * but an empty page with no paint budget is stable until refill.
-     */
-    private static int recheckInterval(MapNetwork.Page page) {
-        boolean noPaintBudget = page.complete() && page.inkUnits() == 0
-                && page.painted() == 0 && page.surveyedChunks() == 0;
-        return page.painted() >= 64 || noPaintBudget ? SURFACE_RECHECK_TICKS : 600;
-    }
-
     public static boolean queue(int x, int z, boolean force) { return queue(x, z, force, false); }
 
     /** Return whether a NEW tile request was queued, so visible missing tiles
@@ -230,19 +233,17 @@ public final class CartographClient {
             DISK_LOADING.remove(key);
         }
         if (!force && entry != null) {
-            // Fully drawn map tiles need no continual re-reading. Partially
-            // drawn tiles can gain world chunks and are rechecked sooner.
-            // An atlas with ZERO survey ink cannot paint anything until its
-            // owner refills it. Re-reading the same 64 source chunks every
-            // 30 seconds (or sooner after harmless world updates) wastes CPU.
-            // Real terrain edits still arrive via InvalidatePage, and refill
-            // feedback explicitly forces a new survey request.
-            if (ticks - entry.updated() < recheckInterval(entry.page())) return false;
+            if (!DISK_RECHECK_ONCE.contains(key)
+                    || ticks - entry.updated() < DISK_VALIDATION_DELAY_TICKS)
+                return false;
         }
         if (IN_FLIGHT.containsKey(key)) return false;
         if (QUEUED.size() >= CACHE_LIMIT && !QUEUED.containsKey(key)) return false;
         boolean first = !QUEUED.containsKey(key);
         QUEUED.merge(key, cachedOnly, (before, after) -> before && after);
+        // When a saved display image is restored, validate it just ONCE.
+        // Newly generated/updated chunks notify the client independently.
+        if (first && entry != null) DISK_RECHECK_ONCE.remove(key);
         return first;
     }
 
@@ -283,7 +284,78 @@ public final class CartographClient {
         }
     }
 
+    /** Recolor only tiles already present in RAM. Further pan/zoom will
+     * discover other cached pages and schedule their own small color deltas. */
+    static void colorRefilled() {
+        String id = atlasId();
+        if (id.isBlank()) return;
+        COLOR_REFILL_ATLASES.add(id);
+        COLOR_REQUESTED.removeIf(k -> k.atlasId().equals(id));
+        COLOR_QUEUED.removeIf(k -> k.atlasId().equals(id));
+    }
+
+    static void queueColorVisible(int x0, int x1, int z0, int z1) {
+        if (!COLOR_REFILL_ATLASES.contains(atlasId())) return;
+        int budget = 64;
+        for (var entry : PAGES.entrySet()) {
+            if (budget == 0) break;
+            CacheKey k = entry.getKey();
+            if (!k.atlasId().equals(atlasId()) || !k.dimension().equals(dimension())
+                    || k.px() < x0 || k.px() > x1 || k.pz() < z0 || k.pz() > z1) continue;
+            MapNetwork.Page page = entry.getValue().page();
+            if (!page.complete() || !page.inRange()
+                    || (page.surveyedChunks() != 0
+                        && (page.surveyedChunks() & ~page.coloredChunks()) == 0)
+                    || COLOR_REQUESTED.contains(k) || COLOR_IN_FLIGHT.containsKey(k)
+                    || IN_FLIGHT.containsKey(k)) continue;
+            COLOR_REQUESTED.add(k);
+            COLOR_QUEUED.add(k);
+            budget--;
+        }
+    }
+
+    static void acceptColorDelta(MapNetwork.ColorDelta delta) {
+        if (!hasAtlas() || !delta.atlasId().equals(atlasId())
+                || !delta.dimension().equals(dimension())) return;
+        CacheKey k = new CacheKey(delta.atlasId(), delta.dimension(),
+                delta.pageX(), delta.pageZ());
+        COLOR_IN_FLIGHT.remove(k);
+        if (IN_FLIGHT.containsKey(k)) {
+            // A full-page survey racing the pigment change can overwrite its
+            // newly colored cells. Wait for that server response, then request
+            // one fresh color delta instead of uploading a stale texture.
+            COLOR_REQUESTED.remove(k);
+            return;
+        }
+        Entry before = PAGES.get(k);
+        if (before == null) return;
+        MapNetwork.Page recolored = ColorPatchApplier.apply(before.page(), delta);
+        if (recolored == null) return;
+        boolean pixelsChanged = !Arrays.equals(
+                recolored.pixels(), before.page().pixels());
+        boolean bitsChanged = recolored.coloredChunks() != before.page().coloredChunks();
+        boolean changed = bitsChanged || pixelsChanged
+                || recolored.pigmentUnits() != before.page().pigmentUnits()
+                || recolored.totalColored() != before.page().totalColored();
+        if (!changed) return;
+        PAGES.put(k, new Entry(recolored, before.texture(), before.id(),
+                before.light(), before.updated()));
+        if (bitsChanged || pixelsChanged) REDRAW.add(k);
+        ClientPageStore.save(Minecraft.getInstance().gameDirectory.toPath(), diskKey(k), recolored);
+    }
+
     static void redrawMaps() { REDRAW.addAll(PAGES.keySet()); }
+    /** Called from AtlasScreen.renderMap after calculating its visible pages.
+     * No terrain scan or network packet is generated; only protects GPU
+     * textures currently required on screen from the LRU trimmer. */
+    static void pinVisiblePages(List<MapNetwork.Page> visible) {
+        VISIBLE_GPU.clear();
+        String atlas = atlasId(), dim = dimension();
+        for (MapNetwork.Page page : visible)
+            if (page.atlasId().equals(atlas) && page.dimension().equals(dim))
+                VISIBLE_GPU.add(new CacheKey(atlas, dim, page.pageX(), page.pageZ()));
+    }
+
     static List<MapNetwork.Page> cachedPages() {
         return visiblePages(Integer.MIN_VALUE, Integer.MAX_VALUE,
                 Integer.MIN_VALUE, Integer.MAX_VALUE);
@@ -365,10 +437,10 @@ public final class CartographClient {
                 // CPU pixels are immediately available. GPU upload follows the
                 // 2-tiles/tick budget without blocking world rendering.
                 // Persisted image is visible immediately. Background
-                // revalidation follows after 10 seconds so offline edits are
-                // eventually reconciled, without racing the disk read.
-                PAGES.put(k, new Entry(cached.page(), null, null, null,
-                        ticks - recheckInterval(cached.page()) + DISK_VALIDATION_DELAY_TICKS));
+                // One-time verification after initial disk restore (not a
+                // periodic rescan of old pixels every 30s or 10 minutes).
+                PAGES.put(k, new Entry(cached.page(), null, null, null, ticks));
+                DISK_RECHECK_ONCE.add(k);
                 REDRAW.add(k);
                 QUEUED.remove(k);
                 textureRevision++;
@@ -379,6 +451,14 @@ public final class CartographClient {
                 // it must not retry disk reading or remain blank forever.
                 QUEUED.put(k, false);
             }
+        }
+        Iterator<java.util.Map.Entry<CacheKey, Integer>> colors = COLOR_IN_FLIGHT.entrySet().iterator();
+        while (colors.hasNext()) {
+            var request = colors.next();
+            if (ticks - request.getValue() < 800) continue;
+            CacheKey expired = request.getKey();
+            colors.remove();
+            COLOR_REQUESTED.remove(expired); // stale ACK: allow bounded retry
         }
         Iterator<java.util.Map.Entry<CacheKey, Integer>> active = IN_FLIGHT.entrySet().iterator();
         while (active.hasNext()) {
@@ -413,6 +493,21 @@ public final class CartographClient {
                 }
             }
         }
+        if (ticks % 2 == 0) {
+            while (COLOR_IN_FLIGHT.size() < MAX_PARALLEL_PAGES && !COLOR_QUEUED.isEmpty()) {
+                CacheKey next = COLOR_QUEUED.iterator().next();
+                COLOR_QUEUED.remove(next);
+                if (!next.atlasId().equals(atlasId()) || !next.dimension().equals(dimension())
+                        || !covered(next.px(), next.pz())) continue;
+                if (IN_FLIGHT.containsKey(next)) {
+                    COLOR_REQUESTED.remove(next);
+                    continue;
+                }
+                COLOR_IN_FLIGHT.put(next, ticks);
+                PacketDistributor.sendToServer(new MapNetwork.RequestColorPage(
+                        next.atlasId(), next.px(), next.pz()));
+            }
+        }
         trimGpuCache(mc);
     }
 
@@ -420,6 +515,9 @@ public final class CartographClient {
      * Returning to a previously visited area reconstructs texture locally,
      * without network packets or rescanning any saved chunks. */
     private static void trimGpuCache(Minecraft mc) {
+        // Pin scope only exists while a large map screen is actively
+        // displayed; outside it we release extras to the normal 140 limit.
+        if (!(mc.screen instanceof AtlasScreen)) VISIBLE_GPU.clear();
         int loadedTextures = 0;
         for (Entry e : PAGES.values()) if (e.texture() != null) loadedTextures++;
         if (loadedTextures <= GPU_TEXTURE_LIMIT) return;
@@ -427,7 +525,7 @@ public final class CartographClient {
         for (var e : PAGES.entrySet()) {
             if (loadedTextures <= GPU_TEXTURE_LIMIT) break;
             if (e.getValue().texture() == null) continue;
-            if (REDRAW.contains(e.getKey())) continue;
+            if (REDRAW.contains(e.getKey()) || VISIBLE_GPU.contains(e.getKey())) continue;
             toRelease.add(e.getKey()); loadedTextures--;
         }
         for (CacheKey k : toRelease) {
@@ -484,8 +582,10 @@ public final class CartographClient {
 
     public static void acceptFeedback(MapNetwork.Feedback result) {
         Minecraft mc = Minecraft.getInstance();
+        if (result.ok() && result.colorChanged()) colorRefilled();
         if (mc.screen instanceof AtlasScreen screen)
-            screen.feedback(result.ok(), result.message(), result.surveyChanged());
+            screen.feedback(result.ok(), result.message(),
+                    result.surveyChanged(), result.colorChanged());
         else if (mc.player != null) mc.player.displayClientMessage(Component.literal(result.message()), true);
     }
 
@@ -615,6 +715,7 @@ public final class CartographClient {
      * belonging to other atlas items in this SAME world and dimension. */
     private static void resetAtlasView() {
         QUEUED.clear(); REDRAW.clear(); IN_FLIGHT.clear(); STALE.clear();
+        COLOR_QUEUED.clear(); COLOR_IN_FLIGHT.clear(); COLOR_REQUESTED.clear();
         DISK_LOADING.clear();
         coverage = null; regions = List.of(); markers = List.of(); previousAtlas = ItemStack.EMPTY;
         textureRevision++;
@@ -629,9 +730,12 @@ public final class CartographClient {
     public static void clear() {
         for (Entry e : PAGES.values()) release(e);
         PAGES.clear();
+        VISIBLE_GPU.clear();
+        DISK_RECHECK_ONCE.clear();
         resetAtlasView();
         lastAtlasId = ""; lastDimension = ""; lastWorldNamespace = "";
         cachedWorldIdentity = ""; cachedWorldNamespace = "";
+        COLOR_REFILL_ATLASES.clear();
     }
 
     private static void hideAtlasDuringHudEditing(

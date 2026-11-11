@@ -48,6 +48,12 @@ public final class AtlasMapServer {
     // Manual "refresh all surveyed" retains its full-page reconciliation,
     // because it may have updated many chunks on the same page.
     private static final Map<ChangedPage, Integer> WHOLE_PAGES = new HashMap<>();
+    // Explicit dye refills use a separate, bounded COLOR-only lane. They
+    // must not queue a full page raster or resurvey/repay existing ink.
+    private static final Map<UUID, Map<PageKey, ColorPending>> COLOR_PENDING = new HashMap<>();
+    private static final ArrayDeque<ColorPending> COLOR_ORDER = new ArrayDeque<>();
+    private static final int MAX_COLOR_JOBS_GLOBAL = 128;
+
     private static final Map<UUID, Long> LAST_DIAGNOSTIC = new HashMap<>();
     private static int ticks;
 
@@ -127,6 +133,109 @@ public final class AtlasMapServer {
                 request.pageX(), request.pageZ(), dim, request.cachedOnly());
         slots.put(page, next);
         ORDER.addLast(next);
+    }
+
+    public static void enqueueColor(ServerPlayer player, MapNetwork.RequestColorPage request) {
+        if (request.atlasId().isBlank()
+                || Math.abs((long) request.pageX()) > 234375
+                || Math.abs((long) request.pageZ()) > 234375) return;
+        ItemStack atlas = findAtlas(player, request.atlasId());
+        if (atlas.isEmpty()) return;
+        String dim = player.serverLevel().dimension().location().toString();
+        AtlasWorldData.Entry entry = AtlasWorldData.get(player.serverLevel()).access(atlas);
+        if (!entry.isCovered(dim, request.pageX(), request.pageZ())) return;
+        Map<PageKey, ColorPending> slots =
+                COLOR_PENDING.computeIfAbsent(player.getUUID(), ignore -> new HashMap<>());
+        PageKey key = new PageKey(dim, request.pageX(), request.pageZ());
+        if (slots.containsKey(key) || slots.size() >= MAX_PAGES_PER_VIEWER
+                || COLOR_ORDER.size() >= MAX_COLOR_JOBS_GLOBAL) return;
+        ColorPending work = new ColorPending(player.getUUID(), request.atlasId(), dim,
+                request.pageX(), request.pageZ());
+        slots.put(key, work);
+        COLOR_ORDER.addLast(work);
+    }
+
+    private static void finishColor(ColorPending work) {
+        Map<PageKey, ColorPending> slots = COLOR_PENDING.get(work.viewer);
+        if (slots != null) {
+            slots.remove(new PageKey(work.dimension, work.pageX, work.pageZ));
+            if (slots.isEmpty()) COLOR_PENDING.remove(work.viewer);
+        }
+    }
+
+    /**
+     * Pigment-only work: reuse the original cached SurfaceTile first. On cold
+     * cache, inspect asynchronously (without loading/generating chunks).
+     * No full native MapNetwork.Page is constructed or transmitted.
+     */
+    private static void tickColor(MinecraftServer server) {
+        int n = Math.min(COLOR_ORDER.size(), 24);
+        long deadline = System.nanoTime() + 2_000_000L;
+        for (int i = 0; i < n && System.nanoTime() < deadline; i++) {
+            ColorPending work = COLOR_ORDER.removeFirst();
+            ServerPlayer player = server.getPlayerList().getPlayer(work.viewer);
+            if (player == null || !player.serverLevel().dimension().location().toString()
+                    .equals(work.dimension)) {
+                finishColor(work);
+                continue;
+            }
+            ItemStack atlas = findAtlas(player, work.atlasId);
+            if (atlas.isEmpty()) {
+                finishColor(work);
+                continue;
+            }
+            AtlasWorldData data = AtlasWorldData.get(player.serverLevel());
+            AtlasWorldData.Entry entry = data.access(atlas);
+            if (!entry.isCovered(work.dimension, work.pageX, work.pageZ)) {
+                finishColor(work);
+                continue;
+            }
+            int index = work.next, cx = work.pageX * 8 + index % 8,
+                    cz = work.pageZ * 8 + index / 8;
+            WorldSurfaceIndex indexer = WorldSurfaceIndex.of(player.serverLevel());
+            WorldSurfaceIndex.Lookup tile = indexer.cached(player.serverLevel(), cx, cz);
+            if (tile.state() != WorldSurfaceIndex.State.READY) {
+                // The saved-terrain path is async; this request never forces
+                // synchronous I/O or generates missing world terrain.
+                tile = indexer.inspect(player.serverLevel(), cx, cz);
+            }
+            if (tile.state() == WorldSurfaceIndex.State.PENDING) {
+                COLOR_ORDER.addLast(work);
+                continue;
+            }
+            if (tile.state() == WorldSurfaceIndex.State.READY) {
+                var key = new SurveyLedger.ChunkKey(work.dimension, cx, cz);
+                // Independent color permission. This can be purchased before
+                // ink, but raw color bytes only go to paid survey chunks.
+                data.colorize(entry, key, atlas);
+                if (entry.paid(key) && entry.isColored(key)) {
+                    work.pixels[index] = tile.snapshot().tile().colors().clone();
+                    work.mask |= 1L << index;
+                }
+            }
+            work.next++;
+            if (work.next >= 64) {
+                // For all 64 paid colored chunks the compact packet carries
+                // at most 16 KiB; at lower pigment coverage it is far smaller
+                // than a full page of pixels/heights/features/metadata.
+                byte[] raw = new byte[Long.bitCount(work.mask) * 256];
+                int offset = 0;
+                for (int bit = 0; bit < 64; bit++) {
+                    if ((work.mask & 1L << bit) == 0) continue;
+                    System.arraycopy(work.pixels[bit], 0, raw, offset, 256);
+                    offset += 256;
+                }
+                PacketDistributor.sendToPlayer(player,
+                        new MapNetwork.ColorDelta(work.atlasId, work.dimension,
+                                work.pageX, work.pageZ, work.mask, raw,
+                                entry.state().pigmentUnits(), entry.coloredCount()));
+                LOG.debug("Cartograph color delta completed: dimension={} page=({}, {}) "
+                                + "colored_chunks={}/64 color_bytes={} pigment_units={} total_colored={}",
+                        work.dimension, work.pageX, work.pageZ, Long.bitCount(work.mask),
+                        raw.length, entry.state().pigmentUnits(), entry.coloredCount());
+                finishColor(work);
+            } else COLOR_ORDER.addLast(work);
+        }
     }
 
     static void markSurfaceChanged(net.minecraft.server.level.ServerLevel level, int cx, int cz) {
@@ -240,6 +349,8 @@ public final class AtlasMapServer {
     public static void stopped(net.neoforged.neoforge.event.server.ServerStoppedEvent event) {
         PENDING.clear();
         ORDER.clear();
+        COLOR_PENDING.clear();
+        COLOR_ORDER.clear();
         CHANGED.clear();
         WHOLE_PAGES.clear();
         LAST_DIAGNOSTIC.clear();
@@ -250,6 +361,7 @@ public final class AtlasMapServer {
         MinecraftServer server = event.getServer();
         ticks++;
         sendChangedPages(server);
+        tickColor(server);
         if (ticks % 600 == 0)
             LAST_DIAGNOSTIC.keySet().removeIf(id -> server.getPlayerList().getPlayer(id) == null);
         // A handful of completed snapshots per tick makes initial 512x512
@@ -389,6 +501,20 @@ public final class AtlasMapServer {
                 }
                 finish(task);
             } else ORDER.addLast(task);
+        }
+    }
+
+    private static final class ColorPending {
+        final UUID viewer;
+        final String atlasId, dimension;
+        final int pageX, pageZ;
+        final byte[][] pixels = new byte[64][];
+        int next;
+        long mask;
+
+        ColorPending(UUID viewer, String atlasId, String dimension, int pageX, int pageZ) {
+            this.viewer = viewer; this.atlasId = atlasId; this.dimension = dimension;
+            this.pageX = pageX; this.pageZ = pageZ;
         }
     }
 
