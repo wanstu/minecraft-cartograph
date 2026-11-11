@@ -20,19 +20,42 @@ final class ClientPageStore {
     record Loaded(Key key, MapNetwork.Page page) {}
     private static final int MAGIC = 0x43545035; // CTP5
     private static final int MAX_PENDING = 192;
+    // Visibility is best-effort; a local page is NOT an authorization grant.
+    // The source of truth remains the world SavedData + real surface index.
+    private static final int MAX_ATTEMPTED = 8192;
+    // Matches the CPU tile cache: one entire 1400-page cache can be flushed
+    // without discarding its most recent local images under disk backpressure.
+    private static final int MAX_DIRTY_PAGES = 1400;
     private static final AtomicInteger THREADS = new AtomicInteger();
-    private static final ExecutorService IO = Executors.newFixedThreadPool(2, job -> {
-        Thread t = new Thread(job, "cartograph-client-page-" + THREADS.incrementAndGet());
+    private static final ExecutorService READ_IO = Executors.newFixedThreadPool(2, job -> {
+        Thread t = new Thread(job, "cartograph-client-page-read-" + THREADS.incrementAndGet());
         t.setDaemon(true);
         return t;
     });
+    private record Write(Path root, MapNetwork.Page page) {}
+    private static final BoundedCoalescingQueue<Key,Write> WRITES =
+            new BoundedCoalescingQueue<>(MAX_DIRTY_PAGES);
     private static final Set<Key> attempted = ConcurrentHashMap.newKeySet();
     private static final Set<Key> pending = ConcurrentHashMap.newKeySet();
     private static final Queue<Loaded> received = new ConcurrentLinkedQueue<>();
-    private static final ConcurrentMap<Key, Long> latestWrite = new ConcurrentHashMap<>();
-    private static final java.util.concurrent.atomic.AtomicLong writeId = new java.util.concurrent.atomic.AtomicLong();
-    private static final Object[] WRITE_LOCKS = new Object[64];
-    static { for (int i = 0; i < WRITE_LOCKS.length; i++) WRITE_LOCKS[i] = new Object(); }
+    static {
+        for (int i = 0; i < 2; i++) {
+            Thread writer = new Thread(() -> {
+                while (!Thread.currentThread().isInterrupted()) {
+                    BoundedCoalescingQueue.Work<Key,Write> task;
+                    try { task = WRITES.take(); }
+                    catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    try { write(file(task.value().root(), task.key()), task.value().page()); }
+                    finally { WRITES.done(task.key()); }
+                }
+            }, "cartograph-client-page-write-" + (i + 1));
+            writer.setDaemon(true);
+            writer.start();
+        }
+    }
     private ClientPageStore() {}
 
     static String namespace(String identity) {
@@ -51,9 +74,15 @@ final class ClientPageStore {
                 .resolve("p." + k.x + "." + k.z + ".gz");
     }
 
-    static void request(Path gameRoot, Key key) {
-        if (pending.size() >= MAX_PENDING || !attempted.add(key) || !pending.add(key)) return;
-        IO.execute(() -> {
+    /** Return TRUE only when a real async disk request was scheduled. */
+    static boolean request(Path gameRoot, Key key) {
+        if (pending.size() >= MAX_PENDING || pending.contains(key)) return false;
+        // Prevent one multi-million-block session from retaining every disk
+        // lookup key forever, while still suppressing common rapid retries.
+        if (attempted.size() >= MAX_ATTEMPTED) attempted.clear();
+        if (!attempted.add(key)) return false;
+        if (!pending.add(key)) return false;
+        READ_IO.execute(() -> {
             MapNetwork.Page page = null;
             try { page = read(file(gameRoot, key), key); }
             finally {
@@ -61,24 +90,26 @@ final class ClientPageStore {
                 pending.remove(key);
             }
         });
+        return true;
     }
 
+    static boolean isPending(Key key) { return pending.contains(key); }
+    static boolean readsAtCapacity() { return pending.size() >= MAX_PENDING; }
+
     static Loaded poll() { return received.poll(); }
+
+    static BoundedCoalescingQueue.Stats writeStats() { return WRITES.stats(); }
+    static int pendingReads() { return pending.size(); }
 
     static void save(Path gameRoot, Key key, MapNetwork.Page page) {
         // Persist negative/blank scan results too. An explored world with no
         // ink is a valid completed observation, not a cache miss to rediscover
         // every launch. The server remains authoritative for all credits.
         if (!page.complete() || !page.inRange()) return;
-        long token = writeId.incrementAndGet();
-        latestWrite.put(key, token);
-        IO.execute(() -> {
-            Object lock = WRITE_LOCKS[Math.floorMod(key.hashCode(), WRITE_LOCKS.length)];
-            synchronized (lock) {
-                // An older disk-writing task may not replace a newer refresh.
-                if (Objects.equals(latestWrite.get(key), token)) write(file(gameRoot, key), page);
-            }
-        });
+        // No unbounded executor queue. Store the latest requested snapshot
+        // once per key and return immediately to the render thread. Workers
+        // serialize per key, and keep writes isolated to their world root.
+        WRITES.offer(key, new Write(gameRoot, page));
     }
 
     static void reset() {

@@ -195,6 +195,26 @@ tasks.named('jar', Jar) {
     archiveFileName = "Cartograph-${mod_version}-mc${minecraft_version}-neoforge.jar"
 }
 
+// Repeatable synthetic load and real compressed cache I/O pressure, without
+// Minecraft rendering. Explicitly bounded to 512MB Java heap for dadm.
+tasks.register('verifyLayers', JavaExec) {
+    group = 'verification'
+    description = 'All 8 permission combinations: paper/ink/pigment, color-first, mask persistence'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.wanstu.cartograph.LayerPolicySelfTest'
+    maxHeapSize = '256m'
+    dependsOn tasks.named('testClasses')
+}
+
+tasks.register('verifyCacheStress', JavaExec) {
+    group = 'verification'
+    description = '30k coalesced key updates and 4096 actual GZIP writes, multi-world and multi-atlas'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.wanstu.cartograph.CacheStressSelfTest'
+    maxHeapSize = '512m'
+    dependsOn tasks.named('testClasses')
+}
+
 // Pure verification of persistent world/client cache formats. No world or GPU is needed.
 tasks.register('verifyMapCache', JavaExec) {
     group = 'verification'

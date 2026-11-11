@@ -2,6 +2,7 @@ package com.wanstu.cartograph;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import com.wanstu.cartograph.core.AtlasPage;
+import com.wanstu.cartograph.core.AtlasLayers;
 import com.wanstu.cartograph.core.TerrainRelief;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.texture.DynamicTexture;
@@ -31,11 +32,22 @@ final class PixelPageTexture {
         boolean surface = page.heights().length == SIDE * SIDE;
         NativeImage image = new NativeImage(WIDTH, HEIGHT, true);
         try {
+            // Resolve all three permissions ONCE per 16x16 chunk rather than
+            // building three render targets or testing three masks per pixel.
+            AtlasLayers.Visibility[] chunks = new AtlasLayers.Visibility[64];
+            for (int i = 0; i < chunks.length; i++)
+                chunks[i] = AtlasLayers.compose(page.inRange(),
+                        page.surveyedChunks(), page.coloredChunks(), i);
             for (int z = 0; z < SIDE; z++) for (int x = 0; x < SIDE; x++) {
                 int i = z * SIDE + x;
-                int packed = Byte.toUnsignedInt(page.pixels()[i]);
                 int chunk = (z / 16) * AtlasPage.CHUNKS_PER_SIDE + x / 16;
-                boolean colored = (page.coloredChunks() & (1L << chunk)) != 0;
+                AtlasLayers.Visibility permission = chunks[chunk];
+                // Never expose raw color values for an unsurveyed area, even
+                // if an obsolete client cache contains nonzero pixels there.
+                int packed = permission == AtlasLayers.Visibility.NO_PAPER
+                        || permission == AtlasLayers.Visibility.BLANK_PAPER
+                        ? 0 : Byte.toUnsignedInt(page.pixels()[i]);
+                boolean colored = permission == AtlasLayers.Visibility.COLOR;
                 int depth = surface ? Byte.toUnsignedInt(page.waterDepths()[i]) : 0;
                 int height = surface ? page.heights()[i] : TerrainRelief.UNKNOWN_HEIGHT;
                 int feature = Byte.toUnsignedInt(page.features()[i]);

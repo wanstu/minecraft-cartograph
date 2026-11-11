@@ -49,7 +49,8 @@ public final class CartographClient {
     private static final LinkedHashMap<CacheKey, Integer> IN_FLIGHT = new LinkedHashMap<>();
     private static final Set<CacheKey> STALE = new LinkedHashSet<>();
     private static ItemStack previousAtlas = ItemStack.EMPTY;
-    private static String lastDimension = "", lastAtlasId = "";
+    private static String lastDimension = "", lastAtlasId = "", lastWorldNamespace = "";
+    private static String cachedWorldIdentity = "", cachedWorldNamespace = "";
     private static MapNetwork.Page coverage;
     private static List<NamedRegion> regions = List.of();
     private static List<AtlasMarker> markers = List.of();
@@ -128,7 +129,11 @@ public final class CartographClient {
             key = "remote:" + mc.getCurrentServer().ip;
         else
             key = "unknown:" + (mc.level == null ? "" : mc.level.dimension().location());
-        return ClientPageStore.namespace(key);
+        if (!key.equals(cachedWorldIdentity)) {
+            cachedWorldIdentity = key;
+            cachedWorldNamespace = ClientPageStore.namespace(key);
+        }
+        return cachedWorldNamespace;
     }
     private static ClientPageStore.Key diskKey(CacheKey k) {
         return new ClientPageStore.Key(worldNamespace(), k.atlasId(), k.dimension(), k.px(), k.pz());
@@ -204,9 +209,18 @@ public final class CartographClient {
             // missing file cannot make the map wait indefinitely.
             Integer started = DISK_LOADING.get(key);
             if (started == null && DISK_LOADING.size() < CACHE_LIMIT) {
-                DISK_LOADING.put(key, ticks);
-                ClientPageStore.request(Minecraft.getInstance().gameDirectory.toPath(), diskKey(key));
-                return false;
+                ClientPageStore.Key disk = diskKey(key);
+                if (ClientPageStore.request(Minecraft.getInstance().gameDirectory.toPath(), disk)) {
+                    DISK_LOADING.put(key, ticks);
+                    // IMPORTANT for zoomed-out 1024-page maps: disk reads
+                    // count toward the viewport's 64 new jobs per pass too.
+                    // Without this, a frame could request EVERY visible tile.
+                    return true;
+                }
+                if (ClientPageStore.isPending(disk) || ClientPageStore.readsAtCapacity())
+                    return true; // budget saturated: retry on next viewport tick
+                // Already attempted and no longer in flight: fall back to the
+                // server, which verifies any existing survey entitlement.
             }
             if (started != null && ticks - started < DISK_READ_GRACE_TICKS) return false;
             DISK_LOADING.remove(key);
@@ -271,11 +285,23 @@ public final class CartographClient {
 
     static void redrawMaps() { REDRAW.addAll(PAGES.keySet()); }
     static List<MapNetwork.Page> cachedPages() {
+        return visiblePages(Integer.MIN_VALUE, Integer.MAX_VALUE,
+                Integer.MIN_VALUE, Integer.MAX_VALUE);
+    }
+
+    /** One bounded pass through the LRU cache per rendered frame. A 1024-page
+     * atlas at 0.2x zoom must not build and iterate the entire page collection
+     * again for split layers and map labels. */
+    static List<MapNetwork.Page> visiblePages(int x0, int x1, int z0, int z1) {
         String atlas = atlasId(), dim = dimension();
         List<MapNetwork.Page> result = new ArrayList<>();
-        for (var e : PAGES.entrySet())
-            if (e.getKey().atlasId.equals(atlas) && e.getKey().dimension.equals(dim) && e.getValue().page().inRange())
+        for (var e : PAGES.entrySet()) {
+            CacheKey key = e.getKey();
+            if (key.px() >= x0 && key.px() <= x1 && key.pz() >= z0 && key.pz() <= z1
+                    && key.atlasId().equals(atlas) && key.dimension().equals(dim)
+                    && e.getValue().page().inRange())
                 result.add(e.getValue().page());
+        }
         return result;
     }
 
@@ -286,13 +312,15 @@ public final class CartographClient {
             return;
         }
         String dim = dimension();
-        // Dropping the atlas for a moment must not erase the paid map already
-        // in memory. Keep pages bound to their atlas ID, idle while no atlas is
-        // held/in inventory, then reuse them when the same item is picked up.
-        // World/dimension changes are still a hard boundary.
-        if (!lastDimension.equals(dim)) {
+        String currentWorld = worldNamespace();
+        // All atlas IDs are scoped to this world. Even a copied item carrying
+        // the SAME atlas ID in another save must never reuse its CPU/GPU pixels.
+        // A fast server/world transition need not expose a null player tick.
+        // Item changes within one world are NOT a hard boundary.
+        if (!lastDimension.equals(dim) || !lastWorldNamespace.equals(currentWorld)) {
             clear();
             lastDimension = dim;
+            lastWorldNamespace = currentWorld;
         }
         if (!hasAtlas()) {
             // Server cancels map scans when the item leaves inventory. Drop
@@ -308,7 +336,11 @@ public final class CartographClient {
         }
         String id = atlasId();
         if (!lastAtlasId.equals(id)) {
-            clear();
+            // Switching between atlas items in the SAME world should keep
+            // each atlas's paid CPU raster and bounded GPU textures. The cache
+            // keys already include atlas ID; only session metadata and active
+            // transport are invalid across the switch.
+            resetAtlasView();
             lastDimension = dim; lastAtlasId = id;
         }
         while (OPEN.consumeClick()) if (hasAtlas()) open();
@@ -579,17 +611,27 @@ public final class CartographClient {
         }
     }
 
-    public static void clear() {
-        for (Entry e : PAGES.values()) release(e);
-        PAGES.clear(); QUEUED.clear(); REDRAW.clear(); IN_FLIGHT.clear(); STALE.clear();
+    /** Release active atlas metadata/transport, but not paid terrain pixels
+     * belonging to other atlas items in this SAME world and dimension. */
+    private static void resetAtlasView() {
+        QUEUED.clear(); REDRAW.clear(); IN_FLIGHT.clear(); STALE.clear();
         DISK_LOADING.clear();
         coverage = null; regions = List.of(); markers = List.of(); previousAtlas = ItemStack.EMPTY;
-        lastAtlasId = ""; lastDimension = ""; textureRevision++;
+        textureRevision++;
         settings = new MapNetwork.CostSettings(MapNetwork.MaterialRates.DEFAULT, false);
         performance = new MapNetwork.PerformanceSettings(4, 4, false);
         refresh = new MapNetwork.RefreshProgress(0, 0, 0, 0);
         AtlasHud.clear();
         ClientPageStore.reset();
+    }
+
+    /** Hard boundary on world/dimension change or disconnect. */
+    public static void clear() {
+        for (Entry e : PAGES.values()) release(e);
+        PAGES.clear();
+        resetAtlasView();
+        lastAtlasId = ""; lastDimension = ""; lastWorldNamespace = "";
+        cachedWorldIdentity = ""; cachedWorldNamespace = "";
     }
 
     private static void hideAtlasDuringHudEditing(

@@ -306,14 +306,19 @@ public final class AtlasScreen extends Screen {
 
     private void renderMap(GuiGraphics g, int mx, int my) {
         g.fill(0, 0, width, height, BACKGROUND);
+        // Calculate visible tiles ONCE. Use the same snapshot for comparison
+        // split, image and icon layers; no duplicate full-cache passes/frame.
+        List<MapNetwork.Page> visiblePages = CartographClient.visiblePages(
+                leftPage(), rightPage(), topPage(), bottomPage());
         if (cfg.style == Style.PIXEL && pixelView == PixelView.SPLIT) {
             int divider = (int) (split * width);
-            mapTiles(g, Style.ORIGINAL, 0, divider);
-            mapTiles(g, Style.PIXEL, divider, width);
-        } else mapTiles(g, cfg.style == Style.PIXEL && pixelView == PixelView.PREVIOUS ? Style.ORIGINAL : cfg.style, 0, width);
+            mapTiles(g, Style.ORIGINAL, 0, divider, visiblePages);
+            mapTiles(g, Style.PIXEL, divider, width, visiblePages);
+        } else mapTiles(g, cfg.style == Style.PIXEL && pixelView == PixelView.PREVIOUS
+                ? Style.ORIGINAL : cfg.style, 0, width, visiblePages);
         // Under a modal, glyphs and player labels must not render on top of
         // the dimmer: skip the map annotation pass entirely.
-        if (dialog == Dialog.NONE) drawMapLabels(g);
+        if (dialog == Dialog.NONE) drawMapLabels(g, visiblePages);
         if (dialog == Dialog.NONE && selection != null) {
             int sx = (int) screenX(selection.x()), sy = (int) screenZ(selection.z());
             g.renderOutline(sx - 5, sy - 5, 11, 11, GOLD);
@@ -330,13 +335,12 @@ public final class AtlasScreen extends Screen {
         }
     }
 
-    private void mapTiles(GuiGraphics g, Style style, int start, int end) {
+    private void mapTiles(GuiGraphics g, Style style, int start, int end,
+                          List<MapNetwork.Page> visiblePages) {
         if (start >= end) return;
         g.enableScissor(start, 0, end, height);
-        int x0 = leftPage(), x1 = rightPage(), z0 = topPage(), z1 = bottomPage();
-        for (MapNetwork.Page page : CartographClient.cachedPages()) {
+        for (MapNetwork.Page page : visiblePages) {
             int x = page.pageX(), z = page.pageZ();
-            if (x < x0 || x > x1 || z < z0 || z > z1) continue;
             ResourceLocation texture = CartographClient.texture(x, z);
             g.pose().pushPose();
             g.pose().translate(screenX(x * 128.0), screenZ(z * 128.0), 0);
@@ -348,7 +352,7 @@ public final class AtlasScreen extends Screen {
         g.disableScissor();
     }
 
-    private void drawMapLabels(GuiGraphics g) {
+    private void drawMapLabels(GuiGraphics g, List<MapNetwork.Page> visiblePages) {
         g.enableScissor(0, 0, width, height);
         for (NamedRegion region : CartographClient.regions()) {
             Point pos = region.labelPosition();
@@ -366,7 +370,7 @@ public final class AtlasScreen extends Screen {
                 g.pose().popPose();
             }
         }
-        for (MapNetwork.Page page : CartographClient.cachedPages()) {
+        for (MapNetwork.Page page : visiblePages) {
             if (cfg.layer(WAYPOINTS)) for (AtlasMarker m : page.markers())
                 if (CartographClient.surveyed(m.x(), m.z()))
                     mapIcon(g, m.x(), m.z(), markerGlyph(m.icon()), m.name(), m.color(), m.glowing());

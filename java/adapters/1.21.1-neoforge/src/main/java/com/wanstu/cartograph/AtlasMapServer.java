@@ -1,6 +1,7 @@
 package com.wanstu.cartograph;
 
 import com.wanstu.cartograph.core.AtlasPage;
+import com.wanstu.cartograph.core.AtlasLayers;
 import com.wanstu.cartograph.core.SurveyLedger;
 import com.wanstu.cartograph.core.TerrainRelief;
 import net.minecraft.server.MinecraftServer;
@@ -200,7 +201,10 @@ public final class AtlasMapServer {
                 AtlasWorldData.Entry atlasData = AtlasWorldData.get(level).access(atlas);
                 if (!atlasData.isCovered(changed.dimension(), px, pz)) continue;
                 var key = new SurveyLedger.ChunkKey(changed.dimension(), changed.cx(), changed.cz());
-                if (!atlasData.paid(key)) continue;
+                AtlasLayers.Visibility visible = AtlasLayers.compose(
+                        true, atlasData.paid(key), atlasData.isColored(key));
+                if (visible != AtlasLayers.Visibility.GRAYSCALE
+                        && visible != AtlasLayers.Visibility.COLOR) continue;
                 if (updated.state() != WorldSurfaceIndex.State.READY) {
                     // Previously surveyed terrain was removed / is no longer
                     // a valid FULL chunk. Only this exceptional case falls
@@ -212,7 +216,7 @@ public final class AtlasMapServer {
                 }
                 SurfaceSampler.SurfaceTile tile = updated.snapshot().tile();
                 byte[] pixels = tile.colors().clone();
-                if (!atlasData.isColored(key))
+                if (visible == AtlasLayers.Visibility.GRAYSCALE)
                     for (int i = 0; i < pixels.length; i++)
                         pixels[i] = SurfacePalette.graySample(tile.colors()[i], tile.waterDepths()[i]);
                 PacketDistributor.sendToPlayer(viewer, new MapNetwork.TerrainPatch(
@@ -314,16 +318,22 @@ public final class AtlasMapServer {
                 task.generated++;
                 SurfaceSampler.SurfaceTile tile = lookup.snapshot().tile();
                 data.reveal(entry, key, atlas);
-                boolean color = entry.isColored(key);
-                if (color) task.coloredChunks |= 1L << index;
-                if (entry.paid(key)) {
+                // Paper permission was checked in enqueue/tick. Survey
+                // and pigment remain independent world-aligned masks.
+                boolean colorUnlocked = entry.isColored(key);
+                if (colorUnlocked) task.coloredChunks |= 1L << index;
+                AtlasLayers.Visibility visibility = AtlasLayers.compose(
+                        true, entry.paid(key), colorUnlocked);
+                if (visibility == AtlasLayers.Visibility.COLOR
+                        || visibility == AtlasLayers.Visibility.GRAYSCALE) {
                     task.surveyedChunks |= 1L << index;
                     task.painted++;
                     int x = index % 8, z = index / 8;
                     for (int localZ = 0; localZ < 16; localZ++) {
                         int source = localZ * 16;
                         int destination = (z * 16 + localZ) * AtlasPage.SIDE_BLOCKS + x * 16;
-                        if (color) System.arraycopy(tile.colors(), source, task.pixels, destination, 16);
+                        if (visibility == AtlasLayers.Visibility.COLOR)
+                            System.arraycopy(tile.colors(), source, task.pixels, destination, 16);
                         else for (int lx = 0; lx < 16; lx++)
                             task.pixels[destination + lx] =
                                     SurfacePalette.graySample(tile.colors()[source + lx], tile.waterDepths()[source + lx]);
