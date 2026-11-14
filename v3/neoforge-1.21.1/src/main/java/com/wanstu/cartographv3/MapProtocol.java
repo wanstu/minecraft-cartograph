@@ -14,6 +14,14 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 public final class MapProtocol {
     private MapProtocol() {}
 
+    public record StructureHit(
+            String structureId, int startChunkX, int startChunkZ, int x, int z) {
+        public StructureHit {
+            if (structureId == null || structureId.isBlank() || structureId.length() > 256)
+                throw new IllegalArgumentException("Invalid structure id");
+        }
+    }
+
     public record RequestWorldInfo() implements CustomPacketPayload {
         public static final Type<RequestWorldInfo> TYPE = new Type<>(
                 ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "request_world_info"));
@@ -81,7 +89,8 @@ public final class MapProtocol {
             int[] biomeIds,
             short[] surfaceHeights,
             short[] reliefHeights,
-            byte[] waterDepths) implements CustomPacketPayload {
+            byte[] waterDepths,
+            java.util.List<StructureHit> structures) implements CustomPacketPayload {
 
         public Tile {
             if (dimension == null || dimension.isBlank() || dimension.length() > 128)
@@ -99,23 +108,31 @@ public final class MapProtocol {
             surfaceHeights = surfaceHeights.clone();
             reliefHeights = reliefHeights.clone();
             waterDepths = waterDepths.clone();
+            structures = structures == null ? java.util.List.of() : java.util.List.copyOf(structures);
         }
 
         static Tile status(String dimension, int chunkX, int chunkZ,
-                           boolean present, boolean changed, boolean retry) {
+                           boolean present, boolean changed, boolean retry,
+                           java.util.List<StructureHit> structures) {
             return new Tile(
                     dimension, chunkX, chunkZ, present, changed, retry,
-                    new int[0], new int[0], new short[0], new short[0], new byte[0]);
+                    new int[0], new int[0], new short[0], new short[0], new byte[0],
+                    structures);
         }
 
         static Tile changed(SurfaceTile tile) {
+            return changed(tile, java.util.List.of());
+        }
+
+        static Tile changed(SurfaceTile tile, java.util.List<StructureHit> structures) {
             if (!tile.hasSurfaceFacts())
                 throw new IllegalArgumentException("Changed tile has no surface facts");
             return new Tile(
                     tile.key().dimension(), tile.key().x(), tile.key().z(),
                     true, true, false,
                     tile.stateIds(), tile.biomeIds(),
-                    tile.surfaceHeights(), tile.reliefHeights(), tile.waterDepths());
+                    tile.surfaceHeights(), tile.reliefHeights(), tile.waterDepths(),
+                    structures);
         }
 
         @Override public int[] stateIds() { return stateIds.clone(); }
@@ -136,6 +153,14 @@ public final class MapProtocol {
                             buf.writeBoolean(value.present());
                             buf.writeBoolean(value.changed());
                             buf.writeBoolean(value.retry());
+                            buf.writeVarInt(value.structures.size());
+                            for (StructureHit hit : value.structures) {
+                                buf.writeUtf(hit.structureId(), 256);
+                                buf.writeInt(hit.startChunkX());
+                                buf.writeInt(hit.startChunkZ());
+                                buf.writeInt(hit.x());
+                                buf.writeInt(hit.z());
+                            }
                             if (!value.present() || !value.changed()) return;
 
                             int[] states = value.stateIds;
@@ -158,8 +183,18 @@ public final class MapProtocol {
                             boolean present = buf.readBoolean();
                             boolean changed = buf.readBoolean();
                             boolean retry = buf.readBoolean();
+                            int structureCount = buf.readVarInt();
+                            if (structureCount < 0 || structureCount > 256)
+                                throw new IllegalArgumentException("Invalid structure count");
+                            java.util.List<StructureHit> structures = new java.util.ArrayList<>(structureCount);
+                            for (int i = 0; i < structureCount; i++) {
+                                structures.add(new StructureHit(
+                                        buf.readUtf(256), buf.readInt(), buf.readInt(),
+                                        buf.readInt(), buf.readInt()));
+                            }
                             if (!present || !changed) {
-                                return Tile.status(dimension, x, z, present, changed, retry);
+                                return Tile.status(
+                                        dimension, x, z, present, changed, retry, structures);
                             }
 
                             int[] states = new int[SurfaceTile.PIXELS];
@@ -176,7 +211,7 @@ public final class MapProtocol {
                             }
                             return new Tile(
                                     dimension, x, z, true, true, retry,
-                                    states, biomes, surface, relief, water);
+                                    states, biomes, surface, relief, water, structures);
                         });
 
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -187,7 +222,7 @@ public final class MapProtocol {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("6");
+        var registrar = event.registrar("7");
         registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
@@ -221,8 +256,21 @@ public final class MapProtocol {
                             request.dimension(), request.chunkX(), request.chunkZ());
                     LiveSurfaceUpdates.watch(player, watchedKey);
 
-                    SurfaceService.request(player.serverLevel(), request.chunkX(), request.chunkZ())
-                            .whenComplete((surface, error) -> player.server.execute(() -> {
+                    var surfaceFuture = SurfaceService.request(
+                            player.serverLevel(), request.chunkX(), request.chunkZ());
+                    var structureFuture = StructureDiscovery.request(
+                            player.serverLevel(), request.chunkX(), request.chunkZ());
+                    surfaceFuture.thenCombine(
+                                    structureFuture,
+                                    (surface, structures) -> new java.util.AbstractMap.SimpleImmutableEntry<>(
+                                            surface, structures))
+                            .whenComplete((combined, error) -> player.server.execute(() -> {
+                                var surface = combined == null
+                                        ? java.util.Optional.<SurfaceTile>empty()
+                                        : combined.getKey();
+                                var structures = combined == null
+                                        ? java.util.List.<StructureHit>of()
+                                        : combined.getValue();
                                 if (!player.isAlive() || player.serverLevel() == null) return;
                                 if (!player.serverLevel().dimension().location().toString()
                                         .equals(request.dimension())) return;
@@ -232,7 +280,7 @@ public final class MapProtocol {
                                                     request.dimension(), request.chunkX(),
                                                     request.chunkZ(),
                                                     request.hasKnownFingerprint(),
-                                                    false, true));
+                                                    false, true, java.util.List.of()));
                                     return;
                                 }
                                 if (surface == null || surface.isEmpty()) {
@@ -240,7 +288,7 @@ public final class MapProtocol {
                                             Tile.status(
                                                     request.dimension(), request.chunkX(),
                                                     request.chunkZ(),
-                                                    false, false, false));
+                                                    false, false, false, structures));
                                     return;
                                 }
                                 SurfaceTile tile = surface.get();
@@ -251,8 +299,8 @@ public final class MapProtocol {
                                                 ? Tile.status(
                                                         tile.key().dimension(),
                                                         tile.key().x(), tile.key().z(),
-                                                        true, false, false)
-                                                : Tile.changed(tile));
+                                                        true, false, false, structures)
+                                                : Tile.changed(tile, structures));
                             }));
                 }));
 

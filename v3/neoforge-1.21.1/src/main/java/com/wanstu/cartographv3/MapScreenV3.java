@@ -10,6 +10,7 @@ import org.lwjgl.glfw.GLFW;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 public final class MapScreenV3 extends Screen {
     private static final org.slf4j.Logger LOG =
@@ -18,28 +19,31 @@ public final class MapScreenV3 extends Screen {
     private static final int MENU_W = 28;
     private static final int MENU_H = 22;
     private static final int MENU_MARGIN = 8;
-    private static final int MENU_PANEL_W = 112;
+    private static final int MENU_PANEL_W = 126;
     private static final int MENU_PANEL_H = 28;
 
-    private static final int SETTINGS_W = 360;
-    private static final int SETTINGS_H = 220;
-    private static final int SETTINGS_TAB_W = 88;
+    private static final int SETTINGS_TAB_W = 118;
 
-    private static final int CONTEXT_W = 92;
+    private static final int CONTEXT_W = 108;
     private static final int CONTEXT_H = 26;
 
-    private static final int HUD_MARGIN = 8;
-    private static final int ZOOM_HUD_W = 230;
-    private static final int ZOOM_HUD_H = 26;
-    private static final int LOCATE_HUD_SIZE = 30;
+    private static final int HUD_MARGIN = 6;
+    private static final int ZOOM_HUD_W = 82;
+    private static final int ZOOM_HUD_H = 16;
+    private static final int LOCATE_HUD_SIZE = 12;
 
-    private static final float Z_MARKER = 100.0f;
+    private static final int MAX_REQUESTS_PER_PASS = 2048;
+
+    private static final float Z_MAP_MARKERS = 80.0f;
+    private static final float Z_PLAYER = 100.0f;
     private static final float Z_HUD = 200.0f;
     private static final float Z_MENU = 300.0f;
     private static final float Z_CONTEXT = 340.0f;
     private static final float Z_SETTINGS = 400.0f;
+    private static final float Z_MARKER_OVERLAY = 500.0f;
 
     private static final double[] ZOOM_LEVELS = {
+            0.0625, 0.0833333333, 0.1, 0.125, 0.1666666667, 0.2, 0.25, 0.3333333333,
             0.5, 0.625, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0,
             4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0,
             32.0, 40.0, 48.0, 64.0
@@ -58,6 +62,10 @@ public final class MapScreenV3 extends Screen {
     private int lastRequestMaxChunkX = Integer.MIN_VALUE;
     private int lastRequestMinChunkZ = Integer.MIN_VALUE;
     private int lastRequestMaxChunkZ = Integer.MIN_VALUE;
+    private int requestCenterChunkX = Integer.MIN_VALUE;
+    private int requestCenterChunkZ = Integer.MIN_VALUE;
+    private int requestRing;
+    private int requestRingOffset;
     private int requestTicks;
 
     private boolean menuExpanded;
@@ -71,6 +79,7 @@ public final class MapScreenV3 extends Screen {
     private final MapUiControls.Select<MapUiSettings.MarkerType> markerTypeSelect;
     private final MapUiControls.ColorInput markerColorInput;
     private final MapUiControls.Slider markerSizeSlider;
+    private final MapUiControls.Checkbox structureLayerCheckbox;
 
     private final MapUiControls.Table collapsedMenuTable;
     private final MapUiControls.Table expandedMenuTable;
@@ -87,6 +96,7 @@ public final class MapScreenV3 extends Screen {
     private final MapUiControls.Table settingsTabsTable;
     private final MapUiControls.P emptyTabText;
     private final MapUiControls.Icon settingsCloseIcon;
+    private final MapMarkerUi markerUi = new MapMarkerUi();
     private SettingsTab settingsTab = SettingsTab.PLAYER;
 
     public MapScreenV3() {
@@ -102,6 +112,9 @@ public final class MapScreenV3 extends Screen {
                 86, MapUiSettings.markerColor(), MapUiSettings::setMarkerColor);
         markerSizeSlider = new MapUiControls.Slider(
                 126, 6, 32, MapUiSettings.markerSize(), MapUiSettings::setMarkerSize);
+        structureLayerCheckbox = new MapUiControls.Checkbox(
+                "结构图标层", MapUiSettings.structureLayerEnabled(),
+                MapUiSettings::setStructureLayerEnabled);
 
         var menuIcon = new MapUiControls.Icon(18, MapUiControls.IconType.MENU);
         collapsedMenuTable = new MapUiControls.Table(MENU_W)
@@ -115,46 +128,58 @@ public final class MapScreenV3 extends Screen {
                     contextOpen = false;
                 }, menuIcon));
 
+        var markerListLabel = new MapUiControls.Span("自定义标点");
         var settingsLabel = new MapUiControls.Span("设置");
         expandedMenuTable = new MapUiControls.Table(MENU_PANEL_W)
                 .background(0xee20252b)
                 .hoverBackground(0xff343b43)
-                .padding(12);
+                .padding(10);
         expandedMenuTable.addRow(new MapUiControls.Table.Row(
                 MENU_PANEL_H, true, () -> {
+                    closeSettings();
+                    markerUi.openManager();
+                    menuExpanded = false;
+                    contextOpen = false;
+                }, markerListLabel));
+        expandedMenuTable.addRow(new MapUiControls.Table.Row(
+                MENU_PANEL_H, true, () -> {
+                    markerUi.closeOverlay();
                     settingsOpen = true;
                     menuExpanded = false;
                     contextOpen = false;
                 }, settingsLabel));
 
+        var addMarkerLabel = new MapUiControls.Span("增加标点");
         var teleportLabel = new MapUiControls.Span("传送");
         contextMenuTable = new MapUiControls.Table(CONTEXT_W)
                 .background(0xf21f242a)
                 .hoverBackground(0xff343c45)
-                .padding(12);
+                .padding(10);
+        contextMenuTable.addRow(new MapUiControls.Table.Row(
+                CONTEXT_H, true, this::addContextMarker, addMarkerLabel));
         contextMenuTable.addRow(new MapUiControls.Table.Row(
                 CONTEXT_H, true, this::teleportToContext, teleportLabel));
 
         zoomLabel = new MapUiControls.Span(formatZoom(zoom));
         zoomLabel.setCentered(true);
         zoomSlider = new MapUiControls.Slider(
-                140, 0, ZOOM_LEVELS.length - 1, nearestZoomIndex(zoom),
+                46, 0, ZOOM_LEVELS.length - 1, nearestZoomIndex(zoom),
                 this::setZoomFromSlider);
         zoomHudTable = new MapUiControls.Table(ZOOM_HUD_W)
                 .background(0xd92b3036)
                 .hoverBackground(0xd92b3036)
                 .border(0xff3d464f)
-                .padding(8)
-                .columnGap(8);
+                .padding(3)
+                .columnGap(3);
         zoomHudTable.addRow(new MapUiControls.Table.Row(
                 ZOOM_HUD_H, false, () -> {}, zoomSlider, zoomLabel));
 
-        var locateIcon = new MapUiControls.Icon(18, MapUiControls.IconType.LOCATE);
+        var locateIcon = new MapUiControls.Icon(8, MapUiControls.IconType.LOCATE);
         locateHudTable = new MapUiControls.Table(LOCATE_HUD_SIZE)
                 .background(0xd92b3036)
                 .hoverBackground(0xff414a53)
                 .border(0xff3d464f)
-                .padding(6);
+                .padding(1);
         locateHudTable.addRow(new MapUiControls.Table.Row(
                 LOCATE_HUD_SIZE, true, this::centerOnPlayer, locateIcon));
 
@@ -206,7 +231,7 @@ public final class MapScreenV3 extends Screen {
     }
 
     private void requestVisible(boolean force) {
-        if (minecraft.level == null) return;
+        if (minecraft.level == null || MapClientCache.worldId() == null) return;
         String dim = dimension();
 
         double halfBlocksX = width / (2.0 * zoom);
@@ -215,34 +240,84 @@ public final class MapScreenV3 extends Screen {
         int maxChunkX = Math.floorDiv((int) Math.floor(centerX + halfBlocksX), 16) + 1;
         int minChunkZ = Math.floorDiv((int) Math.floor(centerZ - halfBlocksZ), 16) - 1;
         int maxChunkZ = Math.floorDiv((int) Math.floor(centerZ + halfBlocksZ), 16) + 1;
-
-        if (!force
-                && minChunkX == lastRequestMinChunkX
-                && maxChunkX == lastRequestMaxChunkX
-                && minChunkZ == lastRequestMinChunkZ
-                && maxChunkZ == lastRequestMaxChunkZ) {
-            return;
-        }
-
-        lastRequestMinChunkX = minChunkX;
-        lastRequestMaxChunkX = maxChunkX;
-        lastRequestMinChunkZ = minChunkZ;
-        lastRequestMaxChunkZ = maxChunkZ;
-
-        List<ChunkKey> visible = new ArrayList<>();
-        for (int z = minChunkZ; z <= maxChunkZ; z++) {
-            for (int x = minChunkX; x <= maxChunkX; x++) {
-                ChunkKey key = new ChunkKey(dim, x, z);
-                if (MapClientCache.needsRequest(key)) visible.add(key);
-            }
-        }
-
         int centerChunkX = Math.floorDiv((int) Math.floor(centerX), 16);
         int centerChunkZ = Math.floorDiv((int) Math.floor(centerZ), 16);
-        visible.sort(Comparator.comparingInt(key ->
-                Math.abs(key.x() - centerChunkX) + Math.abs(key.z() - centerChunkZ)));
 
-        for (ChunkKey key : visible) MapClientCache.request(key);
+        boolean viewportChanged =
+                minChunkX != lastRequestMinChunkX
+                        || maxChunkX != lastRequestMaxChunkX
+                        || minChunkZ != lastRequestMinChunkZ
+                        || maxChunkZ != lastRequestMaxChunkZ
+                        || centerChunkX != requestCenterChunkX
+                        || centerChunkZ != requestCenterChunkZ;
+
+        if (!force && !viewportChanged) return;
+
+        if (viewportChanged) {
+            lastRequestMinChunkX = minChunkX;
+            lastRequestMaxChunkX = maxChunkX;
+            lastRequestMinChunkZ = minChunkZ;
+            lastRequestMaxChunkZ = maxChunkZ;
+            requestCenterChunkX = centerChunkX;
+            requestCenterChunkZ = centerChunkZ;
+            requestRing = 0;
+            requestRingOffset = 0;
+        }
+
+        int maxRadius = Math.max(
+                Math.max(Math.abs(minChunkX - centerChunkX), Math.abs(maxChunkX - centerChunkX)),
+                Math.max(Math.abs(minChunkZ - centerChunkZ), Math.abs(maxChunkZ - centerChunkZ)));
+        int requested = 0;
+        int scanned = 0;
+        int scanBudget = MAX_REQUESTS_PER_PASS * 8;
+
+        while (requested < MAX_REQUESTS_PER_PASS
+                && scanned < scanBudget
+                && requestRing <= maxRadius) {
+            int dx;
+            int dz;
+
+            if (requestRing == 0) {
+                dx = 0;
+                dz = 0;
+                requestRing = 1;
+                requestRingOffset = 0;
+            } else {
+                int r = requestRing;
+                int side = r * 2;
+                int perimeter = r * 8;
+                int p = requestRingOffset++;
+
+                if (p < side) {
+                    dx = -r + p;
+                    dz = -r;
+                } else if (p < side * 2) {
+                    dx = r;
+                    dz = -r + (p - side);
+                } else if (p < side * 3) {
+                    dx = r - (p - side * 2);
+                    dz = r;
+                } else {
+                    dx = -r;
+                    dz = r - (p - side * 3);
+                }
+
+                if (requestRingOffset >= perimeter) {
+                    requestRing++;
+                    requestRingOffset = 0;
+                }
+            }
+
+            scanned++;
+            int x = centerChunkX + dx;
+            int z = centerChunkZ + dz;
+            if (x < minChunkX || x > maxChunkX || z < minChunkZ || z > maxChunkZ) continue;
+
+            ChunkKey key = new ChunkKey(dim, x, z);
+            if (!MapClientCache.needsRequest(key)) continue;
+            MapClientCache.request(key);
+            requested++;
+        }
     }
 
     @Override
@@ -251,7 +326,13 @@ public final class MapScreenV3 extends Screen {
         if (minecraft.level != null) {
             regionTextures.render(
                     graphics, dimension(), centerX, centerZ, zoom, width, height);
-            withLayer(graphics, Z_MARKER, () -> renderPlayerMarker(graphics));
+            if (MapUiSettings.structureLayerEnabled()) {
+                withLayer(graphics, Z_MAP_MARKERS, () ->
+                        markerUi.renderLayer(
+                                graphics, font, dimension(), centerX, centerZ, zoom,
+                                width, height, mouseX, mouseY));
+            }
+            withLayer(graphics, Z_PLAYER, () -> renderPlayerMarker(graphics));
         }
 
         withLayer(graphics, Z_HUD, () -> renderBottomHud(graphics, mouseX, mouseY));
@@ -261,6 +342,10 @@ public final class MapScreenV3 extends Screen {
         }
         if (settingsOpen) {
             withLayer(graphics, Z_SETTINGS, () -> renderSettings(graphics, mouseX, mouseY));
+        }
+        if (markerUi.overlayOpen()) {
+            withLayer(graphics, Z_MARKER_OVERLAY, () ->
+                    markerUi.renderOverlay(graphics, font, width, height, mouseX, mouseY));
         }
     }
 
@@ -347,64 +432,65 @@ public final class MapScreenV3 extends Screen {
     }
 
     private void renderSettings(GuiGraphics graphics, int mouseX, int mouseY) {
-        int x = width - MENU_MARGIN - SETTINGS_W;
-        int y = MENU_MARGIN + MENU_H + 4;
+        int topH = 38;
 
-        graphics.fill(x, y, x + SETTINGS_W, y + SETTINGS_H, 0xf21d2228);
-        graphics.fill(x, y, x + SETTINGS_W, y + 30, 0xff2d343c);
-        graphics.fill(x, y + 30, x + SETTINGS_TAB_W, y + SETTINGS_H, 0xff1f252b);
-        graphics.fill(x + SETTINGS_TAB_W, y + 30, x + SETTINGS_W, y + SETTINGS_H, 0xff22282e);
+        graphics.fill(0, 0, width, height, 0xff181d22);
+        graphics.fill(0, 0, width, topH, 0xff2d343c);
+        graphics.fill(0, topH, SETTINGS_TAB_W, height, 0xff20262c);
+        graphics.fill(SETTINGS_TAB_W, topH, width, height, 0xff22282e);
 
-        graphics.drawString(font, "设置", x + 12, y + 10, 0xffffffff, false);
-        settingsCloseIcon.setBounds(x + SETTINGS_W - 26, y + 7, 16, 16);
+        graphics.drawString(font, "设置", 16, 14, 0xffffffff, false);
+        settingsCloseIcon.setBounds(width - 28, 10, 16, 16);
         settingsCloseIcon.render(graphics, font, mouseX, mouseY);
 
         layoutSettingsTabs();
         updateSettingsTabStyle();
         settingsTabsTable.render(graphics, font, mouseX, mouseY);
-        int activeTabY = y + 40 + settingsTab.ordinal() * 30;
-        graphics.fill(x + 6, activeTabY + 4, x + 9, activeTabY + 26, 0xffffd166);
+        int activeTabY = 54 + settingsTab.ordinal() * 34;
+        graphics.fill(8, activeTabY + 3, 11, activeTabY + 27, 0xffffd166);
 
-        int contentX = x + SETTINGS_TAB_W + 18;
-        int contentY = y + 44;
-        int contentRight = x + SETTINGS_W - 16;
+        int contentX = SETTINGS_TAB_W + 28;
+        int contentY = 58;
+        int contentRight = width - 28;
 
         if (settingsTab == SettingsTab.PLAYER) {
             graphics.drawString(font, "玩家图标", contentX, contentY, 0xfff0f3f5, false);
-            graphics.fill(contentX, contentY + 16, contentRight, contentY + 17, 0xff39424a);
+            graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
 
             layoutSettingsControls();
             markerTypeSelect.setValue(MapUiSettings.markerType());
             markerColorInput.setValue(MapUiSettings.markerColor());
             markerSizeSlider.setValue(MapUiSettings.markerSize());
 
-            int row1 = contentY + 30;
-            int row2 = contentY + 66;
-            int row3 = contentY + 102;
+            int row1 = contentY + 38;
+            int row2 = contentY + 78;
+            int row3 = contentY + 118;
 
             graphics.drawString(font, "图标类型", contentX, row1 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "图标颜色", contentX, row2 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "图标大小", contentX, row3 + 6, 0xffd8dde2, false);
             graphics.drawString(font, MapUiSettings.markerSize() + " px",
-                    contentRight - 34, row3 + 6, 0xffb8c0c7, false);
+                    contentX + 350, row3 + 6, 0xffb8c0c7, false);
 
             markerSizeSlider.render(graphics, font, mouseX, mouseY);
             markerTypeSelect.render(graphics, font, mouseX, mouseY);
             markerColorInput.render(graphics, font, mouseX, mouseY);
+        } else if (settingsTab == SettingsTab.MAP) {
+            graphics.drawString(font, "地图", contentX, contentY, 0xfff0f3f5, false);
+            graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
+            structureLayerCheckbox.setBounds(contentX, contentY + 38, 180, 22);
+            structureLayerCheckbox.render(graphics, font, mouseX, mouseY);
         } else {
-            String title = settingsTab == SettingsTab.MAP ? "地图" : "操作";
-            graphics.drawString(font, title, contentX, contentY, 0xfff0f3f5, false);
-            graphics.fill(contentX, contentY + 16, contentRight, contentY + 17, 0xff39424a);
-            emptyTabText.setBounds(contentX, contentY + 32,
-                    contentRight - contentX, 60);
+            graphics.drawString(font, "操作", contentX, contentY, 0xfff0f3f5, false);
+            graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
+            emptyTabText.setBounds(contentX, contentY + 38,
+                    Math.max(120, contentRight - contentX), 80);
             emptyTabText.render(graphics, font, mouseX, mouseY);
         }
     }
 
     private void layoutSettingsTabs() {
-        int x = width - MENU_MARGIN - SETTINGS_W;
-        int y = MENU_MARGIN + MENU_H + 4;
-        settingsTabsTable.setBounds(x + 6, y + 40, SETTINGS_TAB_W - 12, 90);
+        settingsTabsTable.setBounds(8, 54, SETTINGS_TAB_W - 16, 102);
     }
 
     private void updateSettingsTabStyle() {
@@ -420,20 +506,24 @@ public final class MapScreenV3 extends Screen {
     }
 
     private void layoutSettingsControls() {
-        int x = width - MENU_MARGIN - SETTINGS_W;
-        int y = MENU_MARGIN + MENU_H + 4;
-        int contentX = x + SETTINGS_TAB_W + 18;
-        int contentY = y + 44;
-        int controlX = x + SETTINGS_W - 166;
+        int contentX = SETTINGS_TAB_W + 28;
+        int contentY = 58;
+        int controlX = Math.min(width - 230, contentX + 180);
+        int controlW = Math.max(150, Math.min(220, width - controlX - 28));
 
-        markerTypeSelect.setBounds(controlX, contentY + 30, 150, 22);
-        markerColorInput.setBounds(controlX, contentY + 66, 150, 22);
-        markerSizeSlider.setBounds(controlX, contentY + 102, 118, 18);
+        markerTypeSelect.setBounds(controlX, contentY + 38, controlW, 22);
+        markerColorInput.setBounds(controlX, contentY + 78, controlW, 22);
+        markerSizeSlider.setBounds(controlX, contentY + 118, Math.min(180, controlW), 18);
     }
 
     private void renderContextMenu(GuiGraphics graphics, int mouseX, int mouseY) {
         contextMenuTable.setBounds(contextX, contextY, CONTEXT_W, CONTEXT_H);
         contextMenuTable.render(graphics, font, mouseX, mouseY);
+    }
+
+    private void addContextMarker() {
+        markerUi.openCreate(dimension(), contextBlockX, contextBlockZ);
+        contextOpen = false;
     }
 
     private void teleportToContext() {
@@ -447,15 +537,39 @@ public final class MapScreenV3 extends Screen {
         int mx = (int) mouseX;
         int my = (int) mouseY;
 
+        if (markerUi.overlayOpen()) {
+            return markerUi.mouseClicked(mouseX, mouseY, button, width, height);
+        }
+
         layoutMenuTables();
         layoutBottomHud();
 
+        if (settingsOpen) {
+            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                return handleSettingsClick(mx, my);
+            }
+            return true;
+        }
+
         if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
-            if (settingsOpen) return true;
             if (collapsedMenuTable.contains(mouseX, mouseY)
                     || (menuExpanded && expandedMenuTable.contains(mouseX, mouseY))
                     || zoomHudTable.contains(mouseX, mouseY)
                     || locateHudTable.contains(mouseX, mouseY)) {
+                return true;
+            }
+
+            Optional<MapMarkerStore.Marker> marker =
+                    MapUiSettings.structureLayerEnabled()
+                            ? markerUi.markerAt(
+                                    dimension(), centerX, centerZ, zoom,
+                                    width, height, mouseX, mouseY)
+                            : Optional.empty();
+            if (marker.isPresent()) {
+                markerUi.openEdit(marker.get());
+                contextOpen = false;
+                menuExpanded = false;
+                dragging = false;
                 return true;
             }
 
@@ -464,7 +578,7 @@ public final class MapScreenV3 extends Screen {
             contextBlockX = (int) Math.floor(worldX);
             contextBlockZ = (int) Math.floor(worldZ);
             contextX = Math.max(4, Math.min(width - CONTEXT_W - 4, mx));
-            contextY = Math.max(4, Math.min(height - CONTEXT_H - 4, my));
+            contextY = Math.max(4, Math.min(height - CONTEXT_H * 2 - 4, my));
             contextOpen = true;
             menuExpanded = false;
             dragging = false;
@@ -474,9 +588,6 @@ public final class MapScreenV3 extends Screen {
         if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             return super.mouseClicked(mouseX, mouseY, button);
         }
-
-        // Highest visual layer gets the first chance to consume input.
-        if (settingsOpen) return handleSettingsClick(mx, my);
 
         if (contextOpen) {
             if (contextMenuTable.mouseClicked(mouseX, mouseY, button)) return true;
@@ -494,28 +605,34 @@ public final class MapScreenV3 extends Screen {
     }
 
     private boolean handleSettingsClick(int mouseX, int mouseY) {
-        int x = width - MENU_MARGIN - SETTINGS_W;
-        int y = MENU_MARGIN + MENU_H + 4;
-
         layoutSettingsTabs();
-        settingsCloseIcon.setBounds(x + SETTINGS_W - 26, y + 7, 16, 16);
+        settingsCloseIcon.setBounds(width - 28, 10, 16, 16);
 
         if (settingsTab == SettingsTab.PLAYER) {
             layoutSettingsControls();
 
-            // Popups intentionally get input before panel bounds, because they can
-            // extend beyond the normal content rectangle.
-            if (markerColorInput.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+            if (markerColorInput.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
                 markerTypeSelect.closePopup();
                 return true;
             }
-            if (markerTypeSelect.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+            if (markerTypeSelect.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
                 markerColorInput.closePopup();
                 return true;
             }
-            if (markerSizeSlider.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+            if (markerSizeSlider.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
                 markerTypeSelect.closePopup();
                 markerColorInput.closePopup();
+                return true;
+            }
+        } else if (settingsTab == SettingsTab.MAP) {
+            int contentX = SETTINGS_TAB_W + 28;
+            int contentY = 58;
+            structureLayerCheckbox.setBounds(contentX, contentY + 38, 180, 22);
+            if (structureLayerCheckbox.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
                 return true;
             }
         }
@@ -525,14 +642,11 @@ public final class MapScreenV3 extends Screen {
             return true;
         }
 
-        if (settingsTabsTable.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+        if (settingsTabsTable.mouseClicked(
+                mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
             return true;
         }
 
-        if (!inside(mouseX, mouseY, x, y, SETTINGS_W, SETTINGS_H)) {
-            closeSettings();
-            return true;
-        }
         return true;
     }
 
@@ -544,6 +658,10 @@ public final class MapScreenV3 extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (markerUi.overlayOpen()) {
+            return markerUi.mouseReleased(mouseX, mouseY, button);
+        }
+
         if (settingsOpen && settingsTab == SettingsTab.PLAYER) {
             if (markerColorInput.mouseReleased(mouseX, mouseY, button)) return true;
             if (markerSizeSlider.mouseReleased(mouseX, mouseY, button)) return true;
@@ -563,10 +681,16 @@ public final class MapScreenV3 extends Screen {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button,
                                 double dragX, double dragY) {
+        if (markerUi.overlayOpen()) {
+            return markerUi.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        }
+
         if (settingsOpen) {
             if (settingsTab == SettingsTab.PLAYER) {
-                if (markerColorInput.mouseDragged(mouseX, mouseY, button, dragX, dragY)) return true;
-                if (markerSizeSlider.mouseDragged(mouseX, mouseY, button, dragX, dragY)) return true;
+                if (markerColorInput.mouseDragged(
+                        mouseX, mouseY, button, dragX, dragY)) return true;
+                if (markerSizeSlider.mouseDragged(
+                        mouseX, mouseY, button, dragX, dragY)) return true;
             }
             return true;
         }
@@ -589,6 +713,9 @@ public final class MapScreenV3 extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY,
                                  double scrollX, double scrollY) {
+        if (markerUi.overlayOpen()) {
+            return markerUi.mouseScrolled(scrollY, width, height);
+        }
         if (settingsOpen || contextOpen) return true;
         if (scrollY == 0) return true;
 
@@ -607,6 +734,11 @@ public final class MapScreenV3 extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (markerUi.overlayOpen()
+                && markerUi.keyPressed(keyCode, scanCode, modifiers)) {
+            return true;
+        }
+
         if (settingsOpen && settingsTab == SettingsTab.PLAYER
                 && markerColorInput.keyPressed(keyCode, scanCode, modifiers)) {
             return true;
@@ -632,6 +764,10 @@ public final class MapScreenV3 extends Screen {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        if (markerUi.overlayOpen()
+                && markerUi.charTyped(codePoint, modifiers)) {
+            return true;
+        }
         if (settingsOpen && settingsTab == SettingsTab.PLAYER
                 && markerColorInput.charTyped(codePoint, modifiers)) {
             return true;
@@ -678,7 +814,14 @@ public final class MapScreenV3 extends Screen {
     }
 
     private static String formatZoom(double value) {
-        return Math.round(value * 100.0) + "%";
+        double percent = value * 100.0;
+        if (percent < 10.0) {
+            return String.format(java.util.Locale.ROOT, "%.2f%%", percent);
+        }
+        if (Math.abs(percent - Math.rint(percent)) > 0.001) {
+            return String.format(java.util.Locale.ROOT, "%.1f%%", percent);
+        }
+        return Math.round(percent) + "%";
     }
 
     private static void withLayer(GuiGraphics graphics, float z, Runnable render) {

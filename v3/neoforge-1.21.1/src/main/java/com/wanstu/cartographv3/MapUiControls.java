@@ -142,10 +142,16 @@ final class MapUiControls {
         private String text;
         private int color = 0xffedf1f4;
         private boolean centered;
+        private Runnable onClick;
 
         Span(String text) {
+            this(text, null);
+        }
+
+        Span(String text, Runnable onClick) {
             super(80, 18);
             this.text = text == null ? "" : text;
+            this.onClick = onClick;
         }
 
         void setText(String next) {
@@ -169,7 +175,25 @@ final class MapUiControls {
             }
             int tx = centered ? x + Math.max(0, (width - font.width(shown)) / 2) : x;
             int ty = y + Math.max(0, (height - font.lineHeight) / 2);
-            graphics.drawString(font, shown, tx, ty, enabled ? color : 0xff7f878e, false);
+            int drawColor = enabled ? color : 0xff7f878e;
+            if (onClick != null && contains(mouseX, mouseY)) {
+                int r = (drawColor >>> 16) & 255;
+                int g = (drawColor >>> 8) & 255;
+                int b = drawColor & 255;
+                r = Math.min(255, r + 24);
+                g = Math.min(255, g + 24);
+                b = Math.min(255, b + 24);
+                drawColor = 0xff000000 | (r << 16) | (g << 8) | b;
+            }
+            graphics.drawString(font, shown, tx, ty, drawColor, false);
+        }
+
+        @Override
+        boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (onClick == null || button != GLFW.GLFW_MOUSE_BUTTON_LEFT
+                    || !enabled || !contains(mouseX, mouseY)) return false;
+            onClick.run();
+            return true;
         }
     }
 

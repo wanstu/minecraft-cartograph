@@ -119,6 +119,7 @@ final class MapRegionTextureCache implements AutoCloseable {
                 RegionKey key = new RegionKey(dimension, regionX, regionZ);
                 RegionTexture region = regions.get(key);
                 if (region == null) {
+                    if (!MapClientCache.hasTilesInRegion(dimension, regionX, regionZ)) continue;
                     region = new RegionTexture(dimension, regionX, regionZ);
                     regions.put(key, region);
                 }

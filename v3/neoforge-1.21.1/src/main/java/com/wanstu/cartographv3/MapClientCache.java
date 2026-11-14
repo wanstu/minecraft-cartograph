@@ -12,6 +12,8 @@ public final class MapClientCache {
     private static final Set<ChunkKey> PENDING = new HashSet<>();
     private static final Map<ChunkKey, Integer> MISSING_AT = new HashMap<>();
     private static final Map<ChunkKey, Long> VALIDATED_SESSION = new HashMap<>();
+    private record RegionKey(String dimension, int x, int z) {}
+    private static final Map<RegionKey, Integer> REGION_TILE_COUNTS = new HashMap<>();
     private static ClientLevel world;
     private static java.util.UUID worldId;
     private static boolean worldInfoRequested;
@@ -33,6 +35,7 @@ public final class MapClientCache {
         PENDING.clear();
         MISSING_AT.clear();
         VALIDATED_SESSION.clear();
+        REGION_TILE_COUNTS.clear();
         mapSession = 0L;
         tileRevision++;
         ticks = 0;
@@ -40,6 +43,7 @@ public final class MapClientCache {
         received = 0;
         validated = 0;
         SatelliteSurfaceRenderer.beginMapSession();
+        MapMarkerStore.ensureWorld(null);
         if (level != null) requestWorldInfo();
     }
 
@@ -91,7 +95,7 @@ public final class MapClientCache {
         java.util.Optional<SurfaceTile> disk = PersistentTileStore.load(worldId, key);
         if (disk.isPresent()) {
             SurfaceTile restoredTile = disk.get();
-            TILES.put(key, restoredTile);
+            if (TILES.put(key, restoredTile) == null) addRegionTile(key);
             tileRevision++;
             int restored = TILES.size();
             if (restored == 1 || restored % 64 == 0)
@@ -121,12 +125,15 @@ public final class MapClientCache {
                 PENDING.clear();
                 MISSING_AT.clear();
                 VALIDATED_SESSION.clear();
+                REGION_TILE_COUNTS.clear();
                 tileRevision++;
             }
             worldId = next;
+            MapMarkerStore.ensureWorld(worldId);
             LOG.info("V3_WORLD_ID world={} dimension={}", worldId, current);
         } catch (IllegalArgumentException invalid) {
             worldId = null;
+            MapMarkerStore.ensureWorld(null);
             worldInfoRequested = false;
         }
     }
@@ -137,13 +144,20 @@ public final class MapClientCache {
         if (!current.equals(packet.dimension())) return;
         ChunkKey key = new ChunkKey(packet.dimension(), packet.chunkX(), packet.chunkZ());
         PENDING.remove(key);
+        if (worldId != null && packet.structures() != null && !packet.structures().isEmpty()) {
+            MapMarkerStore.ensureWorld(worldId);
+            MapMarkerStore.acceptAutomatic(packet.dimension(), packet.structures());
+        }
         if (packet.retry()) {
             return;
         }
         if (!packet.present()) {
             MISSING_AT.put(key, ticks);
             VALIDATED_SESSION.put(key, mapSession);
-            if (TILES.remove(key) != null) tileRevision++;
+            if (TILES.remove(key) != null) {
+                removeRegionTile(key);
+                tileRevision++;
+            }
             if (worldId != null) PersistentTileStore.delete(worldId, key);
             return;
         }
@@ -162,7 +176,7 @@ public final class MapClientCache {
                         packet.stateIds(), packet.biomeIds(),
                         packet.surfaceHeights(), packet.reliefHeights(), packet.waterDepths()));
         VALIDATED_SESSION.put(key, mapSession);
-        TILES.put(key, tile);
+        if (TILES.put(key, tile) == null) addRegionTile(key);
         tileRevision++;
         if (worldId != null) PersistentTileStore.save(worldId, tile);
         received++;
@@ -176,5 +190,24 @@ public final class MapClientCache {
 
     public static int cachedCount() { return TILES.size(); }
     public static int pendingCount() { return PENDING.size(); }
+    static java.util.UUID worldId() { return worldId; }
+
+    static boolean hasTilesInRegion(String dimension, int regionX, int regionZ) {
+        return REGION_TILE_COUNTS.getOrDefault(
+                new RegionKey(dimension, regionX, regionZ), 0) > 0;
+    }
+
+    private static void addRegionTile(ChunkKey key) {
+        RegionKey region = new RegionKey(
+                key.dimension(), Math.floorDiv(key.x(), 16), Math.floorDiv(key.z(), 16));
+        REGION_TILE_COUNTS.merge(region, 1, Integer::sum);
+    }
+
+    private static void removeRegionTile(ChunkKey key) {
+        RegionKey region = new RegionKey(
+                key.dimension(), Math.floorDiv(key.x(), 16), Math.floorDiv(key.z(), 16));
+        REGION_TILE_COUNTS.computeIfPresent(region, (ignored, count) -> count <= 1 ? null : count - 1);
+    }
+
     static long tileRevision() { return tileRevision; }
 }

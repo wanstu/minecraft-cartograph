@@ -20,6 +20,7 @@ final class MapUiSettings {
     private static MarkerType markerType = MarkerType.ARROW;
     private static int markerColor = DEFAULT_COLOR;
     private static int markerSize = DEFAULT_SIZE;
+    private static boolean structureLayerEnabled = true;
 
     private MapUiSettings() {}
 
@@ -38,6 +39,11 @@ final class MapUiSettings {
         return markerSize;
     }
 
+    static synchronized boolean structureLayerEnabled() {
+        ensureLoaded();
+        return structureLayerEnabled;
+    }
+
     static synchronized void setMarkerType(MarkerType next) {
         ensureLoaded();
         markerType = next == null ? MarkerType.ARROW : next;
@@ -53,6 +59,12 @@ final class MapUiSettings {
     static synchronized void setMarkerSize(int size) {
         ensureLoaded();
         markerSize = Math.max(6, Math.min(32, size));
+        save();
+    }
+
+    static synchronized void setStructureLayerEnabled(boolean enabled) {
+        ensureLoaded();
+        structureLayerEnabled = enabled;
         save();
     }
 
@@ -85,6 +97,8 @@ final class MapUiSettings {
             } catch (NumberFormatException ignored) {
                 markerSize = DEFAULT_SIZE;
             }
+            structureLayerEnabled = Boolean.parseBoolean(
+                    props.getProperty("structureLayerEnabled", "true"));
         } catch (IOException ignored) {}
     }
 
@@ -93,6 +107,7 @@ final class MapUiSettings {
         props.setProperty("markerType", markerType.name());
         props.setProperty("markerColor", Integer.toString(markerColor));
         props.setProperty("markerSize", Integer.toString(markerSize));
+        props.setProperty("structureLayerEnabled", Boolean.toString(structureLayerEnabled));
 
         Path path = path();
         try {
