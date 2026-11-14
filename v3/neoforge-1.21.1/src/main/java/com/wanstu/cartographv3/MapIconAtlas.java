@@ -30,11 +30,6 @@ final class MapIconAtlas {
         }
     }
 
-    private static final ResourceLocation PLAYER_ARROW =
-            texture("player/arrow_mono");
-    private static final ResourceLocation PLAYER_CROSS =
-            texture("player/cross_mono");
-
     private MapIconAtlas() {}
 
     static void drawUi(
@@ -44,40 +39,55 @@ final class MapIconAtlas {
     }
 
     static void drawPlayerArrow(
-            GuiGraphics graphics, int centerX, int centerY, int size, int rgb) {
-        draw(graphics, PLAYER_ARROW, centerX, centerY, size + 3, 0x101317, 0.95f);
-        draw(graphics, PLAYER_ARROW, centerX, centerY, size, rgb, 1.0f);
+            GuiGraphics graphics, int centerX, int centerY, int size,
+            int primary, int accent, int line) {
+        drawChannels(
+                graphics, "player/arrow",
+                centerX, centerY, size,
+                primary, accent, line);
     }
 
     static void drawPlayerCross(
-            GuiGraphics graphics, int centerX, int centerY, int size, int rgb) {
-        draw(graphics, PLAYER_CROSS, centerX, centerY, size + 3, 0x101317, 0.95f);
-        draw(graphics, PLAYER_CROSS, centerX, centerY, size, rgb, 1.0f);
+            GuiGraphics graphics, int centerX, int centerY, int size,
+            int primary, int accent, int line) {
+        drawChannels(
+                graphics, "player/cross",
+                centerX, centerY, size,
+                primary, accent, line);
     }
 
     static void drawMarker(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
-            int centerX, int centerY, int size, int rgb,
-            boolean hovered, boolean htmlPalette) {
-        String base = "marker/" + icon.name().toLowerCase(Locale.ROOT);
-        ResourceLocation texture = texture(base + (htmlPalette ? "" : "_mono"));
-
-        if (hovered) {
-            ResourceLocation halo = texture(base + "_mono");
-            draw(graphics, halo, centerX, centerY, size + 4, 0xffffff, 0.72f);
-        }
-
-        if (htmlPalette) {
-            draw(graphics, texture, centerX, centerY, size, 0xffffff, 1.0f);
-        } else {
-            draw(graphics, texture, centerX, centerY, size, rgb, 1.0f);
-        }
+            int centerX, int centerY, int size,
+            int primary, int accent, int line,
+            boolean hovered) {
+        int drawSize = hovered ? size + 1 : size;
+        drawChannels(
+                graphics,
+                "marker/" + icon.name().toLowerCase(Locale.ROOT),
+                centerX, centerY, drawSize,
+                primary, accent, line);
     }
 
-    static void drawMarker(
+    static void drawMarkerPreview(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
-            int centerX, int centerY, int size, int rgb, boolean hovered) {
-        drawMarker(graphics, icon, centerX, centerY, size, rgb, hovered, false);
+            int centerX, int centerY, int size) {
+        drawMarker(
+                graphics, icon, centerX, centerY, size,
+                MapMarkerStore.DEFAULT_PRIMARY_COLOR,
+                MapMarkerStore.DEFAULT_ACCENT_COLOR,
+                MapMarkerStore.DEFAULT_LINE_COLOR,
+                false);
+    }
+
+    private static void drawChannels(
+            GuiGraphics graphics, String base,
+            int centerX, int centerY, int size,
+            int primary, int accent, int line) {
+        draw(graphics, texture(base + "_base"), centerX, centerY, size, 0xffffff, 1.0f);
+        draw(graphics, texture(base + "_primary"), centerX, centerY, size, primary, 1.0f);
+        draw(graphics, texture(base + "_accent"), centerX, centerY, size, accent, 1.0f);
+        draw(graphics, texture(base + "_line"), centerX, centerY, size, line, 1.0f);
     }
 
     private static void draw(

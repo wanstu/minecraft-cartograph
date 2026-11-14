@@ -646,6 +646,120 @@ final class MapUiControls {
         }
     }
 
+    static final class PlayerMarkerTypeSelect extends Control {
+        private final Consumer<MapUiSettings.MarkerType> onChange;
+        private MapUiSettings.MarkerType value;
+        private boolean open;
+
+        PlayerMarkerTypeSelect(
+                int width,
+                MapUiSettings.MarkerType initial,
+                Consumer<MapUiSettings.MarkerType> onChange) {
+            super(width, 22);
+            this.value = initial == null ? MapUiSettings.MarkerType.ARROW : initial;
+            this.onChange = onChange == null ? next -> {} : onChange;
+        }
+
+        MapUiSettings.MarkerType value() { return value; }
+
+        void setValue(MapUiSettings.MarkerType next) {
+            if (next != null) value = next;
+        }
+
+        @Override
+        void render(GuiGraphics graphics, Font font, int mouseX, int mouseY) {
+            if (!visible) return;
+            boolean hover = contains(mouseX, mouseY);
+            graphics.fill(x, y, x + width, y + height,
+                    hover ? 0xff3a424b : 0xff2b3239);
+            drawType(graphics, value, x + 14, y + height / 2, 14);
+            graphics.drawString(font, label(value), x + 28, y + 7, 0xffffffff, false);
+
+            int cx = x + width - 10;
+            graphics.fill(cx - 3, y + 9, cx + 4, y + 10, 0xffdbe1e6);
+            graphics.fill(cx - 2, y + 10, cx + 3, y + 11, 0xffdbe1e6);
+            graphics.fill(cx - 1, y + 11, cx + 2, y + 12, 0xffdbe1e6);
+
+            if (!open) return;
+
+            int oy = popupY();
+            graphics.pose().pushPose();
+            graphics.pose().translate(0.0f, 0.0f, 125.0f);
+            MapUiSettings.MarkerType[] values = MapUiSettings.MarkerType.values();
+            for (int i = 0; i < values.length; i++) {
+                int itemY = oy + i * height;
+                boolean itemHover = mouseX >= x && mouseX < x + width
+                        && mouseY >= itemY && mouseY < itemY + height;
+                graphics.fill(x, itemY, x + width, itemY + height,
+                        itemHover ? 0xff3e4751 : 0xf52a3036);
+                drawType(graphics, values[i], x + 14, itemY + height / 2, 14);
+                graphics.drawString(font, label(values[i]), x + 28, itemY + 7,
+                        values[i] == value ? 0xffffd166 : 0xffedf1f4, false);
+            }
+            graphics.pose().popPose();
+        }
+
+        @Override
+        boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT || !enabled) return false;
+            if (open) {
+                int oy = popupY();
+                MapUiSettings.MarkerType[] values = MapUiSettings.MarkerType.values();
+                for (int i = 0; i < values.length; i++) {
+                    int itemY = oy + i * height;
+                    if (mouseX >= x && mouseX < x + width
+                            && mouseY >= itemY && mouseY < itemY + height) {
+                        value = values[i];
+                        onChange.accept(value);
+                        open = false;
+                        return true;
+                    }
+                }
+                if (contains(mouseX, mouseY)) {
+                    open = false;
+                    return true;
+                }
+                open = false;
+                return false;
+            }
+            if (contains(mouseX, mouseY)) {
+                open = true;
+                return true;
+            }
+            return false;
+        }
+
+        @Override void closePopup() { open = false; }
+        @Override boolean popupOpen() { return open; }
+
+        private int popupY() {
+            int screenH = Minecraft.getInstance().getWindow().getGuiScaledHeight();
+            int popupH = MapUiSettings.MarkerType.values().length * height;
+            int desired = y + height + 2;
+            return Math.max(2, Math.min(desired, screenH - popupH - 2));
+        }
+
+        private static String label(MapUiSettings.MarkerType type) {
+            return type == MapUiSettings.MarkerType.CROSS ? "十字" : "箭头";
+        }
+
+        private static void drawType(
+                GuiGraphics graphics,
+                MapUiSettings.MarkerType type,
+                int cx, int cy, int size) {
+            int primary = MapUiSettings.markerPrimaryColor();
+            int accent = MapUiSettings.markerColor();
+            int line = MapUiSettings.markerLineColor();
+            if (type == MapUiSettings.MarkerType.CROSS) {
+                MapIconAtlas.drawPlayerCross(
+                        graphics, cx, cy, size, primary, accent, line);
+            } else {
+                MapIconAtlas.drawPlayerArrow(
+                        graphics, cx, cy, size, primary, accent, line);
+            }
+        }
+    }
+
     static final class MarkerIconSelect extends Control {
         private static final int COLUMNS = 8;
         private static final int CELL = 26;
@@ -677,9 +791,8 @@ final class MapUiControls {
             graphics.fill(
                     x, y, x + width, y + height,
                     hover ? 0xff3a424b : 0xff2b3239);
-            MapIconAtlas.drawMarker(
-                    graphics, value, x + 13, y + height / 2, 14,
-                    0xe7edf2, false, true);
+            MapIconAtlas.drawMarkerPreview(
+                    graphics, value, x + 13, y + height / 2, 14);
             graphics.drawString(
                     font, value.label, x + 27, y + 7,
                     0xffffffff, false);
@@ -719,12 +832,10 @@ final class MapUiControls {
                             cellX + CELL - 1, cellY + CELL - 1,
                             selected ? 0xff39434b : 0xff2d353d);
                 }
-                MapIconAtlas.drawMarker(
+                MapIconAtlas.drawMarkerPreview(
                         graphics, icons[i],
                         cellX + CELL / 2, cellY + CELL / 2,
-                        16,
-                        selected ? 0xffd166 : cellHover ? 0xffffff : 0xcfd6dc,
-                        false, true);
+                        16);
             }
 
             int labelY = py + popupH - LABEL_H;
@@ -741,30 +852,44 @@ final class MapUiControls {
         @Override
         boolean mouseClicked(double mouseX, double mouseY, int button) {
             if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT || !enabled) return false;
-            if (contains(mouseX, mouseY)) {
-                open = !open;
-                return true;
-            }
-            if (!open) return false;
 
-            int[] bounds = popupBounds();
-            int px = bounds[0];
-            int py = bounds[1];
-            int gridH = bounds[3] - LABEL_H;
-            if (inside(mouseX, mouseY, px, py, bounds[2], gridH)) {
-                int col = ((int) mouseX - px) / CELL;
-                int row = ((int) mouseY - py) / CELL;
-                int index = row * COLUMNS + col;
-                MapMarkerStore.Icon[] icons = MapMarkerStore.Icon.values();
-                if (col >= 0 && col < COLUMNS && index >= 0 && index < icons.length) {
-                    value = icons[index];
-                    onChange.accept(value);
+            // When the popup is clamped upward it can overlap the closed
+            // control. The popup is visually on top, so it must get the click
+            // first; otherwise cells in the overlap only toggle the control.
+            if (open) {
+                int[] bounds = popupBounds();
+                int px = bounds[0];
+                int py = bounds[1];
+                int gridH = bounds[3] - LABEL_H;
+                if (inside(mouseX, mouseY, px, py, bounds[2], gridH)) {
+                    int col = ((int) mouseX - px) / CELL;
+                    int row = ((int) mouseY - py) / CELL;
+                    int index = row * COLUMNS + col;
+                    MapMarkerStore.Icon[] icons = MapMarkerStore.Icon.values();
+                    if (col >= 0 && col < COLUMNS
+                            && index >= 0 && index < icons.length) {
+                        value = icons[index];
+                        onChange.accept(value);
+                        open = false;
+                        return true;
+                    }
+                    return true;
+                }
+                if (inside(mouseX, mouseY, px, py, bounds[2], bounds[3])) {
+                    return true;
+                }
+                if (contains(mouseX, mouseY)) {
                     open = false;
                     return true;
                 }
+                open = false;
+                return false;
             }
-            if (inside(mouseX, mouseY, px, py, bounds[2], bounds[3])) return true;
-            open = false;
+
+            if (contains(mouseX, mouseY)) {
+                open = true;
+                return true;
+            }
             return false;
         }
 

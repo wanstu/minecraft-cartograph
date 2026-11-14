@@ -18,6 +18,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class MapMarkerStore {
+    static final int DEFAULT_PRIMARY_COLOR = 0xe8eef5;
+    static final int DEFAULT_ACCENT_COLOR = 0xf2bd45;
+    static final int DEFAULT_LINE_COLOR = 0xb8c3cc;
+
     enum Origin { CUSTOM, AUTO }
 
     enum Icon {
@@ -76,7 +80,10 @@ final class MapMarkerStore {
         int z;
         String name;
         Icon icon;
+        // Kept as "color" for backward compatibility: this is the accent channel.
         int color;
+        Integer primaryColor;
+        Integer lineColor;
         String description;
         Origin origin;
         String autoKey;
@@ -93,6 +100,8 @@ final class MapMarkerStore {
             next.name = name;
             next.icon = icon;
             next.color = color;
+            next.primaryColor = primaryColor;
+            next.lineColor = lineColor;
             next.description = description;
             next.origin = origin;
             next.autoKey = autoKey;
@@ -105,6 +114,13 @@ final class MapMarkerStore {
         UUID uuid() { return UUID.fromString(id); }
         boolean isAuto() { return origin == Origin.AUTO; }
         boolean appearsAsCustom() { return origin == Origin.CUSTOM || modifiedAuto; }
+        int primary() {
+            return primaryColor == null ? DEFAULT_PRIMARY_COLOR : primaryColor & 0x00ffffff;
+        }
+        int accent() { return color & 0x00ffffff; }
+        int line() {
+            return lineColor == null ? DEFAULT_LINE_COLOR : lineColor & 0x00ffffff;
+        }
     }
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -149,7 +165,9 @@ final class MapMarkerStore {
 
     static synchronized Marker createCustom(
             String dimension, int x, int z,
-            String name, Icon icon, int color, String description) {
+            String name, Icon icon,
+            int primaryColor, int accentColor, int lineColor,
+            String description) {
         Marker marker = new Marker();
         UUID id = UUID.randomUUID();
         marker.id = id.toString();
@@ -158,7 +176,9 @@ final class MapMarkerStore {
         marker.z = z;
         marker.name = normalizeName(name, "标点");
         marker.icon = icon == null ? Icon.PIN : icon;
-        marker.color = color & 0x00ffffff;
+        marker.primaryColor = primaryColor & 0x00ffffff;
+        marker.color = accentColor & 0x00ffffff;
+        marker.lineColor = lineColor & 0x00ffffff;
         marker.description = normalizeDescription(description);
         marker.origin = Origin.CUSTOM;
         marker.autoKey = null;
@@ -191,7 +211,9 @@ final class MapMarkerStore {
                         marker.z = hit.z();
                         marker.name = nextName;
                         marker.icon = nextIcon;
+                        marker.primaryColor = DEFAULT_PRIMARY_COLOR;
                         marker.color = defaultStructureColor(hit.structureId());
+                        marker.lineColor = DEFAULT_LINE_COLOR;
                         marker.description = defaultStructureDescription(hit.structureId());
                         marker.structureId = hit.structureId();
                         changed = true;
@@ -208,7 +230,9 @@ final class MapMarkerStore {
             marker.z = hit.z();
             marker.name = defaultStructureName(hit.structureId());
             marker.icon = defaultStructureIcon(hit.structureId());
+            marker.primaryColor = DEFAULT_PRIMARY_COLOR;
             marker.color = defaultStructureColor(hit.structureId());
+            marker.lineColor = DEFAULT_LINE_COLOR;
             marker.description = defaultStructureDescription(hit.structureId());
             marker.origin = Origin.AUTO;
             marker.autoKey = autoKey;
@@ -263,12 +287,16 @@ final class MapMarkerStore {
     }
 
     static synchronized void update(
-            UUID id, String name, Icon icon, int color, String description) {
+            UUID id, String name, Icon icon,
+            int primaryColor, int accentColor, int lineColor,
+            String description) {
         Marker marker = MARKERS.get(id);
         if (marker == null) return;
         marker.name = normalizeName(name, marker.name);
         marker.icon = icon == null ? marker.icon : icon;
-        marker.color = color & 0x00ffffff;
+        marker.primaryColor = primaryColor & 0x00ffffff;
+        marker.color = accentColor & 0x00ffffff;
+        marker.lineColor = lineColor & 0x00ffffff;
         marker.description = normalizeDescription(description);
         if (marker.origin == Origin.AUTO) marker.modifiedAuto = true;
         marker.deleted = false;
@@ -294,7 +322,9 @@ final class MapMarkerStore {
         if (marker == null || marker.origin != Origin.AUTO) return;
         marker.name = defaultStructureName(marker.structureId);
         marker.icon = defaultStructureIcon(marker.structureId);
+        marker.primaryColor = DEFAULT_PRIMARY_COLOR;
         marker.color = defaultStructureColor(marker.structureId);
+        marker.lineColor = DEFAULT_LINE_COLOR;
         marker.description = defaultStructureDescription(marker.structureId);
         marker.modifiedAuto = false;
         marker.deleted = false;
@@ -305,6 +335,11 @@ final class MapMarkerStore {
         if (marker == null || marker.id == null || marker.dimension == null || marker.origin == null) return false;
         try { UUID.fromString(marker.id); } catch (IllegalArgumentException invalid) { return false; }
         if (marker.icon == null) marker.icon = Icon.PIN;
+        if (marker.primaryColor == null) marker.primaryColor = DEFAULT_PRIMARY_COLOR;
+        if (marker.lineColor == null) marker.lineColor = DEFAULT_LINE_COLOR;
+        marker.color &= 0x00ffffff;
+        marker.primaryColor &= 0x00ffffff;
+        marker.lineColor &= 0x00ffffff;
         marker.name = normalizeName(marker.name, "标点");
         marker.description = normalizeDescription(marker.description);
         return true;
@@ -385,7 +420,7 @@ final class MapMarkerStore {
     }
 
     static int defaultStructureColor(String id) {
-        return 0xf0c54a;
+        return DEFAULT_ACCENT_COLOR;
     }
 
     static String defaultStructureDescription(String id) {

@@ -14,13 +14,16 @@ final class MapMarkerUi {
     private record EditorLayout(
             int x, int y, int w, int h,
             int labelX, int controlX, int controlW,
-            int nameY, int iconY, int colorY,
+            int nameY, int iconY,
+            int primaryColorY, int accentColorY, int lineColorY,
             int descriptionY, int descriptionH,
             int locationY, int buttonY, int buttonH) {}
 
     private final MapUiControls.Input nameInput;
     private final MapUiControls.MarkerIconSelect iconSelect;
-    private final MapUiControls.ColorInput colorInput;
+    private final MapUiControls.ColorInput primaryColorInput;
+    private final MapUiControls.ColorInput accentColorInput;
+    private final MapUiControls.ColorInput lineColorInput;
     private final MapUiControls.TextArea descriptionInput;
 
     private boolean editorOpen;
@@ -38,7 +41,11 @@ final class MapMarkerUi {
         nameInput = new MapUiControls.Input(220, "", 64, value -> {});
         iconSelect = new MapUiControls.MarkerIconSelect(
                 180, MapMarkerStore.Icon.PIN, value -> {});
-        colorInput = new MapUiControls.ColorInput(160, 0xe53935, value -> {});
+        primaryColorInput = new MapUiControls.ColorInput(
+                160, MapMarkerStore.DEFAULT_PRIMARY_COLOR, value -> {});
+        accentColorInput = new MapUiControls.ColorInput(160, 0xe53935, value -> {});
+        lineColorInput = new MapUiControls.ColorInput(
+                160, MapMarkerStore.DEFAULT_LINE_COLOR, value -> {});
         descriptionInput = new MapUiControls.TextArea(300, 82, "", 512, value -> {});
     }
 
@@ -61,7 +68,9 @@ final class MapMarkerUi {
         editorZ = z;
         nameInput.setValue("");
         iconSelect.setValue(MapMarkerStore.Icon.PIN);
-        colorInput.setValue(0xe53935);
+        primaryColorInput.setValue(MapMarkerStore.DEFAULT_PRIMARY_COLOR);
+        accentColorInput.setValue(0xe53935);
+        lineColorInput.setValue(MapMarkerStore.DEFAULT_LINE_COLOR);
         descriptionInput.setValue("");
         editorOpen = true;
         managerOpen = false;
@@ -75,7 +84,9 @@ final class MapMarkerUi {
         editorZ = marker.z;
         nameInput.setValue(marker.name);
         iconSelect.setValue(marker.icon);
-        colorInput.setValue(marker.color);
+        primaryColorInput.setValue(marker.primary());
+        accentColorInput.setValue(marker.accent());
+        lineColorInput.setValue(marker.line());
         descriptionInput.setValue(marker.description);
         editorOpen = true;
         managerOpen = false;
@@ -92,7 +103,9 @@ final class MapMarkerUi {
         editorOpen = false;
         managerOpen = false;
         iconSelect.closePopup();
-        colorInput.closePopup();
+        primaryColorInput.closePopup();
+        accentColorInput.closePopup();
+        lineColorInput.closePopup();
     }
 
     Optional<MapMarkerStore.Marker> markerAt(
@@ -147,8 +160,9 @@ final class MapMarkerUi {
             boolean hovered = Math.abs(mouseX - sx) <= hoverRadius
                     && Math.abs(mouseY - sy) <= hoverRadius;
             drawMarkerIcon(
-                    graphics, marker.icon, sx, sy, marker.color, hovered, iconSize,
-                    marker.origin == MapMarkerStore.Origin.AUTO && !marker.modifiedAuto);
+                    graphics, marker.icon, sx, sy,
+                    marker.primary(), marker.accent(), marker.line(),
+                    hovered, iconSize);
             iconRects.add(new int[] {
                     sx - iconSize / 2 - 2,
                     sy - iconSize / 2 - 2,
@@ -241,21 +255,30 @@ final class MapMarkerUi {
 
         graphics.drawString(font, "名字", l.labelX(), l.nameY() + 7, 0xffdbe1e6, false);
         graphics.drawString(font, "图标", l.labelX(), l.iconY() + 7, 0xffdbe1e6, false);
-        graphics.drawString(font, "颜色", l.labelX(), l.colorY() + 7, 0xffdbe1e6, false);
+        graphics.drawString(font, "主色", l.labelX(), l.primaryColorY() + 7, 0xffdbe1e6, false);
+        graphics.drawString(font, "辅色", l.labelX(), l.accentColorY() + 7, 0xffdbe1e6, false);
+        graphics.drawString(font, "线条色", l.labelX(), l.lineColorY() + 7, 0xffdbe1e6, false);
         graphics.drawString(font, "简介", l.labelX(), l.descriptionY() + 7, 0xffdbe1e6, false);
         graphics.drawString(font, "位置  " + editorX + ", " + editorZ,
                 l.labelX(), l.locationY(), 0xff8f989f, false);
 
         nameInput.setBounds(l.controlX(), l.nameY(), l.controlW(), 22);
-        iconSelect.setBounds(l.controlX(), l.iconY(), Math.min(180, l.controlW()), 22);
-        colorInput.setBounds(l.controlX(), l.colorY(), Math.min(180, l.controlW()), 22);
+        iconSelect.setBounds(l.controlX(), l.iconY(), Math.min(220, l.controlW()), 22);
+        primaryColorInput.setBounds(
+                l.controlX(), l.primaryColorY(), Math.min(220, l.controlW()), 22);
+        accentColorInput.setBounds(
+                l.controlX(), l.accentColorY(), Math.min(220, l.controlW()), 22);
+        lineColorInput.setBounds(
+                l.controlX(), l.lineColorY(), Math.min(220, l.controlW()), 22);
         descriptionInput.setBounds(
                 l.controlX(), l.descriptionY(), l.controlW(), l.descriptionH());
 
         nameInput.render(graphics, font, mouseX, mouseY);
         descriptionInput.render(graphics, font, mouseX, mouseY);
         iconSelect.render(graphics, font, mouseX, mouseY);
-        colorInput.render(graphics, font, mouseX, mouseY);
+        primaryColorInput.render(graphics, font, mouseX, mouseY);
+        accentColorInput.render(graphics, font, mouseX, mouseY);
+        lineColorInput.render(graphics, font, mouseX, mouseY);
 
         int saveW = 52;
         int cancelW = 52;
@@ -341,8 +364,8 @@ final class MapMarkerUi {
             drawMarkerIcon(
                     graphics, marker.icon,
                     contentX + 16, y + 18,
-                    marker.color, false, 18,
-                    marker.origin == MapMarkerStore.Origin.AUTO && !marker.modifiedAuto);
+                    marker.primary(), marker.accent(), marker.line(),
+                    false, 18);
             graphics.drawString(
                     font, marker.name,
                     contentX + 32, y + 7,
@@ -386,14 +409,18 @@ final class MapMarkerUi {
 
     boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (!editorOpen) return overlayOpen();
-        if (colorInput.mouseDragged(mouseX, mouseY, button, dragX, dragY)) return true;
+        if (primaryColorInput.mouseDragged(mouseX, mouseY, button, dragX, dragY)) return true;
+        if (accentColorInput.mouseDragged(mouseX, mouseY, button, dragX, dragY)) return true;
+        if (lineColorInput.mouseDragged(mouseX, mouseY, button, dragX, dragY)) return true;
         if (descriptionInput.mouseDragged(mouseX, mouseY, button, dragX, dragY)) return true;
         return true;
     }
 
     boolean mouseReleased(double mouseX, double mouseY, int button) {
         if (!editorOpen) return overlayOpen();
-        if (colorInput.mouseReleased(mouseX, mouseY, button)) return true;
+        if (primaryColorInput.mouseReleased(mouseX, mouseY, button)) return true;
+        if (accentColorInput.mouseReleased(mouseX, mouseY, button)) return true;
+        if (lineColorInput.mouseReleased(mouseX, mouseY, button)) return true;
         return true;
     }
 
@@ -412,7 +439,9 @@ final class MapMarkerUi {
             if (editorOpen) {
                 editorOpen = false;
                 iconSelect.closePopup();
-                colorInput.closePopup();
+                primaryColorInput.closePopup();
+                accentColorInput.closePopup();
+                lineColorInput.closePopup();
             } else {
                 managerOpen = false;
             }
@@ -421,7 +450,9 @@ final class MapMarkerUi {
         if (editorOpen) {
             if (nameInput.keyPressed(keyCode, scanCode, modifiers)) return true;
             if (descriptionInput.keyPressed(keyCode, scanCode, modifiers)) return true;
-            if (colorInput.keyPressed(keyCode, scanCode, modifiers)) return true;
+            if (primaryColorInput.keyPressed(keyCode, scanCode, modifiers)) return true;
+            if (accentColorInput.keyPressed(keyCode, scanCode, modifiers)) return true;
+            if (lineColorInput.keyPressed(keyCode, scanCode, modifiers)) return true;
         }
         return true;
     }
@@ -430,19 +461,62 @@ final class MapMarkerUi {
         if (!editorOpen) return overlayOpen();
         if (nameInput.charTyped(codePoint, modifiers)) return true;
         if (descriptionInput.charTyped(codePoint, modifiers)) return true;
-        if (colorInput.charTyped(codePoint, modifiers)) return true;
+        if (primaryColorInput.charTyped(codePoint, modifiers)) return true;
+        if (accentColorInput.charTyped(codePoint, modifiers)) return true;
+        if (lineColorInput.charTyped(codePoint, modifiers)) return true;
         return true;
     }
 
     private boolean editorMouseClicked(double mouseX, double mouseY, int width, int height) {
         EditorLayout l = editorLayout(width, height);
 
-        if (colorInput.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+        // Open popups get first chance to consume the click. This prevents a
+        // color picker behind the icon grid from stealing icon-cell clicks.
+        if (iconSelect.popupOpen()) {
+            if (iconSelect.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
             iconSelect.closePopup();
+        }
+        if (primaryColorInput.popupOpen()) {
+            if (primaryColorInput.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
+            primaryColorInput.closePopup();
+        }
+        if (accentColorInput.popupOpen()) {
+            if (accentColorInput.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
+            accentColorInput.closePopup();
+        }
+        if (lineColorInput.popupOpen()) {
+            if (lineColorInput.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
+            lineColorInput.closePopup();
+        }
+
+        if (iconSelect.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+            primaryColorInput.closePopup();
+            accentColorInput.closePopup();
+            lineColorInput.closePopup();
             return true;
         }
-        if (iconSelect.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
-            colorInput.closePopup();
+        if (primaryColorInput.mouseClicked(
+                mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+            iconSelect.closePopup();
+            accentColorInput.closePopup();
+            lineColorInput.closePopup();
+            return true;
+        }
+        if (accentColorInput.mouseClicked(
+                mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+            iconSelect.closePopup();
+            primaryColorInput.closePopup();
+            lineColorInput.closePopup();
+            return true;
+        }
+        if (lineColorInput.mouseClicked(
+                mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+            iconSelect.closePopup();
+            primaryColorInput.closePopup();
+            accentColorInput.closePopup();
             return true;
         }
         if (nameInput.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
@@ -558,40 +632,47 @@ final class MapMarkerUi {
     private void saveEditor() {
         String name = nameInput.value();
         MapMarkerStore.Icon icon = iconSelect.value();
-        int color = colorInput.value();
+        int primary = primaryColorInput.value();
+        int accent = accentColorInput.value();
+        int line = lineColorInput.value();
         String description = descriptionInput.value();
         if (editingId == null) {
             MapMarkerStore.createCustom(
                     editorDimension, editorX, editorZ,
-                    name, icon, color, description);
+                    name, icon, primary, accent, line, description);
         } else {
-            MapMarkerStore.update(editingId, name, icon, color, description);
+            MapMarkerStore.update(
+                    editingId, name, icon, primary, accent, line, description);
         }
         editorOpen = false;
         iconSelect.closePopup();
-        colorInput.closePopup();
+        primaryColorInput.closePopup();
+        accentColorInput.closePopup();
+        lineColorInput.closePopup();
     }
 
     private static EditorLayout editorLayout(int width, int height) {
         int margin = 6;
-        int panelW = Math.max(1, Math.min(520, width - margin * 2));
-        int panelH = Math.max(1, Math.min(350, height - margin * 2));
+        int panelW = Math.max(1, Math.min(560, width - margin * 2));
+        int panelH = Math.max(1, Math.min(410, height - margin * 2));
         int x = Math.max(0, (width - panelW) / 2);
         int y = Math.max(0, (height - panelH) / 2);
 
-        boolean compact = panelH < 280;
+        boolean compact = panelH < 340;
         int headerH = compact ? 26 : 34;
-        int horizontalPad = panelW < 340 ? 12 : 20;
-        int labelW = panelW < 340 ? 48 : 82;
+        int horizontalPad = panelW < 360 ? 12 : 20;
+        int labelW = panelW < 360 ? 48 : 82;
         int labelX = x + horizontalPad;
         int controlX = labelX + labelW;
         int controlW = Math.max(64, x + panelW - horizontalPad - controlX);
 
-        int gap = compact ? 24 : 34;
+        int gap = compact ? 24 : 30;
         int nameY = y + headerH + 8;
         int iconY = nameY + gap;
-        int colorY = iconY + gap;
-        int descriptionY = colorY + gap;
+        int primaryColorY = iconY + gap;
+        int accentColorY = primaryColorY + gap;
+        int lineColorY = accentColorY + gap;
+        int descriptionY = lineColorY + gap;
 
         int buttonH = compact ? 20 : 24;
         int buttonY = y + panelH - buttonH - 8;
@@ -601,7 +682,8 @@ final class MapMarkerUi {
         return new EditorLayout(
                 x, y, panelW, panelH,
                 labelX, controlX, controlW,
-                nameY, iconY, colorY,
+                nameY, iconY,
+                primaryColorY, accentColorY, lineColorY,
                 descriptionY, descriptionH,
                 locationY, buttonY, buttonH);
     }
@@ -615,12 +697,12 @@ final class MapMarkerUi {
 
     private static void drawMarkerIcon(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
-            int x, int y, int rgb, boolean hovered, int size,
-            boolean htmlPalette) {
+            int x, int y,
+            int primary, int accent, int line,
+            boolean hovered, int size) {
         MapIconAtlas.drawMarker(
-                graphics, icon, x, y,
-                hovered ? size + 2 : size,
-                rgb, hovered, htmlPalette);
+                graphics, icon, x, y, size,
+                primary, accent, line, hovered);
     }
 
     private static boolean overlaps(List<int[]> occupied, int[] rect) {

@@ -13,14 +13,18 @@ import java.util.Properties;
 final class MapUiSettings {
     enum MarkerType { ARROW, CROSS }
 
+    private static final int DEFAULT_PRIMARY_COLOR = MapMarkerStore.DEFAULT_PRIMARY_COLOR;
     private static final int DEFAULT_COLOR = 0xe53935;
+    private static final int DEFAULT_LINE_COLOR = MapMarkerStore.DEFAULT_LINE_COLOR;
     private static final int DEFAULT_SIZE = 12;
     private static final int DEFAULT_REQUEST_BATCH = 64;
     private static final int DEFAULT_LIVE_SCAN_INTERVAL = 10;
 
     private static boolean loaded;
     private static MarkerType markerType = MarkerType.ARROW;
+    private static int markerPrimaryColor = DEFAULT_PRIMARY_COLOR;
     private static int markerColor = DEFAULT_COLOR;
+    private static int markerLineColor = DEFAULT_LINE_COLOR;
     private static int markerSize = DEFAULT_SIZE;
     private static boolean markerLayerEnabled = true;
     private static boolean structureLayerEnabled = true;
@@ -34,9 +38,19 @@ final class MapUiSettings {
         return markerType;
     }
 
+    static synchronized int markerPrimaryColor() {
+        ensureLoaded();
+        return markerPrimaryColor;
+    }
+
     static synchronized int markerColor() {
         ensureLoaded();
         return markerColor;
+    }
+
+    static synchronized int markerLineColor() {
+        ensureLoaded();
+        return markerLineColor;
     }
 
     static synchronized int markerSize() {
@@ -70,9 +84,21 @@ final class MapUiSettings {
         save();
     }
 
+    static synchronized void setMarkerPrimaryColor(int rgb) {
+        ensureLoaded();
+        markerPrimaryColor = rgb & 0x00ffffff;
+        save();
+    }
+
     static synchronized void setMarkerColor(int rgb) {
         ensureLoaded();
         markerColor = rgb & 0x00ffffff;
+        save();
+    }
+
+    static synchronized void setMarkerLineColor(int rgb) {
+        ensureLoaded();
+        markerLineColor = rgb & 0x00ffffff;
         save();
     }
 
@@ -122,11 +148,29 @@ final class MapUiSettings {
                 markerType = MarkerType.ARROW;
             }
             try {
+                markerPrimaryColor = Integer.parseInt(
+                        props.getProperty(
+                                "markerPrimaryColor",
+                                Integer.toString(DEFAULT_PRIMARY_COLOR)))
+                        & 0x00ffffff;
+            } catch (NumberFormatException ignored) {
+                markerPrimaryColor = DEFAULT_PRIMARY_COLOR;
+            }
+            try {
                 markerColor = Integer.parseInt(
                         props.getProperty("markerColor", Integer.toString(DEFAULT_COLOR)))
                         & 0x00ffffff;
             } catch (NumberFormatException ignored) {
                 markerColor = DEFAULT_COLOR;
+            }
+            try {
+                markerLineColor = Integer.parseInt(
+                        props.getProperty(
+                                "markerLineColor",
+                                Integer.toString(DEFAULT_LINE_COLOR)))
+                        & 0x00ffffff;
+            } catch (NumberFormatException ignored) {
+                markerLineColor = DEFAULT_LINE_COLOR;
             }
             try {
                 markerSize = Math.max(6, Math.min(32,
@@ -159,7 +203,9 @@ final class MapUiSettings {
     private static void save() {
         Properties props = new Properties();
         props.setProperty("markerType", markerType.name());
+        props.setProperty("markerPrimaryColor", Integer.toString(markerPrimaryColor));
         props.setProperty("markerColor", Integer.toString(markerColor));
+        props.setProperty("markerLineColor", Integer.toString(markerLineColor));
         props.setProperty("markerSize", Integer.toString(markerSize));
         props.setProperty("markerLayerEnabled", Boolean.toString(markerLayerEnabled));
         props.setProperty("structureLayerEnabled", Boolean.toString(structureLayerEnabled));

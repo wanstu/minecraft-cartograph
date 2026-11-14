@@ -132,6 +132,68 @@ MONO_STYLE = (STYLE_COMMON
     .replace("CURRENT_ACCENT", "#ffffff"))
 
 
+SEMANTIC = ".stroke,.thin,.fill,.soft,.gold,.blue,.green,.brown,.purple,.water,.sand,.stone"
+
+BASE_STYLE = f"""
+{SEMANTIC} {{ opacity:0 !important; }}
+"""
+
+PRIMARY_STYLE = f"""
+svg * {{ opacity:0 !important; }}
+.fill {{
+  opacity:1 !important;
+  fill:#ffffff !important;
+  stroke:none !important;
+}}
+.soft {{
+  opacity:.18 !important;
+  fill:#ffffff !important;
+  stroke:none !important;
+}}
+"""
+
+ACCENT_STYLE = f"""
+svg * {{ opacity:0 !important; }}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {{
+  opacity:1 !important;
+  fill:#ffffff !important;
+  stroke:none !important;
+}}
+"""
+
+LINE_STYLE = f"""
+svg * {{ opacity:0 !important; }}
+.stroke {{
+  opacity:1 !important;
+  fill:none !important;
+  stroke:#ffffff !important;
+  stroke-width:2.6 !important;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}}
+.thin {{
+  opacity:1 !important;
+  fill:none !important;
+  stroke:#ffffff !important;
+  stroke-width:1.7 !important;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}}
+.soft {{
+  opacity:1 !important;
+  fill:none !important;
+  stroke:#ffffff !important;
+  stroke-width:1.8 !important;
+}}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {{
+  opacity:1 !important;
+  fill:none !important;
+  stroke:#ffffff !important;
+  stroke-width:1.15 !important;
+}}
+"""
+
+
 def parse_preview() -> dict[tuple[str, str], str]:
     text = PREVIEW.read_text(encoding="utf-8")
     found: dict[tuple[str, str], str] = {}
@@ -245,17 +307,36 @@ def main() -> None:
         tmpdir = Path(tmp)
         duo = tmpdir / "duo"
         mono = tmpdir / "mono"
+        base = tmpdir / "base"
+        primary = tmpdir / "primary"
+        accent = tmpdir / "accent"
+        line = tmpdir / "line"
+
         resources = render_sheet(entries, DUO_STYLE, duo)
         render_sheet(entries, MONO_STYLE, mono)
+        render_sheet(entries, BASE_STYLE, base)
+        render_sheet(entries, PRIMARY_STYLE, primary)
+        render_sheet(entries, ACCENT_STYLE, accent)
+        render_sheet(entries, LINE_STYLE, line)
 
         for resource in resources:
             normal = TEXTURE_ROOT / f"{resource}.png"
             monochrome = TEXTURE_ROOT / f"{resource}_mono.png"
+            base_layer = TEXTURE_ROOT / f"{resource}_base.png"
+            primary_layer = TEXTURE_ROOT / f"{resource}_primary.png"
+            accent_layer = TEXTURE_ROOT / f"{resource}_accent.png"
+            line_layer = TEXTURE_ROOT / f"{resource}_line.png"
             normal.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(duo / f"{resource}.png", normal)
             shutil.copy2(mono / f"{resource}.png", monochrome)
+            shutil.copy2(base / f"{resource}.png", base_layer)
+            shutil.copy2(primary / f"{resource}.png", primary_layer)
+            shutil.copy2(accent / f"{resource}.png", accent_layer)
+            shutil.copy2(line / f"{resource}.png", line_layer)
 
-    print(f"synced {len(ASSETS)} HTML SVG icons -> exact 64x64 duo + mono game textures")
+    print(
+        f"synced {len(ASSETS)} HTML SVG icons -> "
+        "64x64 duo/mono + base/primary/accent/line layers")
 
 
 if __name__ == "__main__":

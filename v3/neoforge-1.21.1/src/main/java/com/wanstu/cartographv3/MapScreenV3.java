@@ -82,8 +82,10 @@ public final class MapScreenV3 extends Screen {
     private int contextBlockZ;
     private MapMarkerStore.Marker contextMarker;
 
-    private final MapUiControls.Select<MapUiSettings.MarkerType> markerTypeSelect;
+    private final MapUiControls.PlayerMarkerTypeSelect markerTypeSelect;
+    private final MapUiControls.ColorInput markerPrimaryColorInput;
     private final MapUiControls.ColorInput markerColorInput;
+    private final MapUiControls.ColorInput markerLineColorInput;
     private final MapUiControls.Slider markerSizeSlider;
 
     private final MapUiControls.Table mapContextMenuTable;
@@ -110,15 +112,14 @@ public final class MapScreenV3 extends Screen {
 
     public MapScreenV3() {
         super(Component.literal("Cartograph V3"));
-        markerTypeSelect = new MapUiControls.Select<>(
-                86,
-                List.of(
-                        new MapUiControls.Option<>("箭头", MapUiSettings.MarkerType.ARROW),
-                        new MapUiControls.Option<>("十字", MapUiSettings.MarkerType.CROSS)),
-                MapUiSettings.markerType(),
-                MapUiSettings::setMarkerType);
+        markerTypeSelect = new MapUiControls.PlayerMarkerTypeSelect(
+                110, MapUiSettings.markerType(), MapUiSettings::setMarkerType);
+        markerPrimaryColorInput = new MapUiControls.ColorInput(
+                110, MapUiSettings.markerPrimaryColor(), MapUiSettings::setMarkerPrimaryColor);
         markerColorInput = new MapUiControls.ColorInput(
-                86, MapUiSettings.markerColor(), MapUiSettings::setMarkerColor);
+                110, MapUiSettings.markerColor(), MapUiSettings::setMarkerColor);
+        markerLineColorInput = new MapUiControls.ColorInput(
+                110, MapUiSettings.markerLineColor(), MapUiSettings::setMarkerLineColor);
         markerSizeSlider = new MapUiControls.Slider(
                 126, 6, 32, MapUiSettings.markerSize(), MapUiSettings::setMarkerSize);
         var addMarkerIcon = new MapUiControls.Icon(12, MapUiControls.IconType.ADD);
@@ -387,14 +388,16 @@ public final class MapScreenV3 extends Screen {
         int size = MapUiSettings.markerSize();
         if (sx < -size || sy < -size || sx > width + size || sy > height + size) return;
 
-        int color = 0xff000000 | MapUiSettings.markerColor();
-        int outline = 0xdd0b0d0f;
+        int primary = MapUiSettings.markerPrimaryColor();
+        int accent = MapUiSettings.markerColor();
+        int line = MapUiSettings.markerLineColor();
         int x = (int) Math.round(sx);
         int y = (int) Math.round(sy);
 
         if (MapUiSettings.markerType() == MapUiSettings.MarkerType.CROSS) {
             MapIconAtlas.drawPlayerCross(
-                    graphics, x, y, Math.max(8, size), color);
+                    graphics, x, y, Math.max(8, size),
+                    primary, accent, line);
             return;
         }
 
@@ -402,7 +405,9 @@ public final class MapScreenV3 extends Screen {
         pose.pushPose();
         pose.translate(x, y, 0.0);
         pose.mulPose(Axis.ZP.rotationDegrees(180.0f + minecraft.player.getYRot()));
-        MapIconAtlas.drawPlayerArrow(graphics, 0, 0, Math.max(8, size), color);
+        MapIconAtlas.drawPlayerArrow(
+                graphics, 0, 0, Math.max(8, size),
+                primary, accent, line);
         pose.popPose();
     }
 
@@ -633,22 +638,30 @@ public final class MapScreenV3 extends Screen {
 
             layoutSettingsControls();
             markerTypeSelect.setValue(MapUiSettings.markerType());
+            markerPrimaryColorInput.setValue(MapUiSettings.markerPrimaryColor());
             markerColorInput.setValue(MapUiSettings.markerColor());
+            markerLineColorInput.setValue(MapUiSettings.markerLineColor());
             markerSizeSlider.setValue(MapUiSettings.markerSize());
 
             int row1 = contentY + 38;
-            int row2 = contentY + 78;
-            int row3 = contentY + 118;
+            int row2 = contentY + 76;
+            int row3 = contentY + 114;
+            int row4 = contentY + 152;
+            int row5 = contentY + 194;
 
             graphics.drawString(font, "图标类型", contentX, row1 + 7, 0xffd8dde2, false);
-            graphics.drawString(font, "图标颜色", contentX, row2 + 7, 0xffd8dde2, false);
-            graphics.drawString(font, "图标大小", contentX, row3 + 6, 0xffd8dde2, false);
+            graphics.drawString(font, "主色", contentX, row2 + 7, 0xffd8dde2, false);
+            graphics.drawString(font, "辅色", contentX, row3 + 7, 0xffd8dde2, false);
+            graphics.drawString(font, "线条色", contentX, row4 + 7, 0xffd8dde2, false);
+            graphics.drawString(font, "图标大小", contentX, row5 + 6, 0xffd8dde2, false);
             graphics.drawString(font, MapUiSettings.markerSize() + " px",
-                    contentX + 350, row3 + 6, 0xffb8c0c7, false);
+                    contentX + 350, row5 + 6, 0xffb8c0c7, false);
 
-            markerSizeSlider.render(graphics, font, mouseX, mouseY);
             markerTypeSelect.render(graphics, font, mouseX, mouseY);
+            markerPrimaryColorInput.render(graphics, font, mouseX, mouseY);
             markerColorInput.render(graphics, font, mouseX, mouseY);
+            markerLineColorInput.render(graphics, font, mouseX, mouseY);
+            markerSizeSlider.render(graphics, font, mouseX, mouseY);
         } else if (settingsTab == SettingsTab.MAP) {
             graphics.drawString(font, "地图性能", contentX, contentY, 0xfff0f3f5, false);
             graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
@@ -660,9 +673,11 @@ public final class MapScreenV3 extends Screen {
             int row1 = contentY + 38;
             int row2 = contentY + 112;
             graphics.drawString(font, "每批请求区块数", contentX, row1 + 6, 0xffd8dde2, false);
-            graphics.drawString(font, Integer.toString(MapUiSettings.requestBatchSize()),
-                    contentX + 350, row1 + 6, 0xffb8c0c7, false);
             requestBatchSlider.render(graphics, font, mouseX, mouseY);
+            int requestValueX = Math.min(contentRight - 72, contentX + 380);
+            graphics.drawString(font,
+                    "当前 " + MapUiSettings.requestBatchSize(),
+                    requestValueX, row1 + 6, 0xffd7dde2, false);
             requestBatchHelp.render(graphics, font, mouseX, mouseY);
 
             graphics.drawString(font, "实时扫描间隔", contentX, row2 + 6, 0xffd8dde2, false);
@@ -695,7 +710,9 @@ public final class MapScreenV3 extends Screen {
     private void setSettingsTab(SettingsTab next) {
         settingsTab = next;
         markerTypeSelect.closePopup();
+        markerPrimaryColorInput.closePopup();
         markerColorInput.closePopup();
+        markerLineColorInput.closePopup();
     }
 
     private void layoutSettingsControls() {
@@ -705,8 +722,10 @@ public final class MapScreenV3 extends Screen {
         int controlW = Math.max(150, Math.min(220, width - controlX - 28));
 
         markerTypeSelect.setBounds(controlX, contentY + 38, controlW, 22);
-        markerColorInput.setBounds(controlX, contentY + 78, controlW, 22);
-        markerSizeSlider.setBounds(controlX, contentY + 118, Math.min(180, controlW), 18);
+        markerPrimaryColorInput.setBounds(controlX, contentY + 76, controlW, 22);
+        markerColorInput.setBounds(controlX, contentY + 114, controlW, 22);
+        markerLineColorInput.setBounds(controlX, contentY + 152, controlW, 22);
+        markerSizeSlider.setBounds(controlX, contentY + 194, Math.min(180, controlW), 18);
     }
 
     private void layoutPerformanceSettings() {
@@ -856,20 +875,61 @@ public final class MapScreenV3 extends Screen {
         if (settingsTab == SettingsTab.PLAYER) {
             layoutSettingsControls();
 
+            if (markerTypeSelect.popupOpen()
+                    && markerTypeSelect.mouseClicked(
+                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                return true;
+            }
+            if (markerPrimaryColorInput.popupOpen()
+                    && markerPrimaryColorInput.mouseClicked(
+                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                return true;
+            }
+            if (markerColorInput.popupOpen()
+                    && markerColorInput.mouseClicked(
+                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                return true;
+            }
+            if (markerLineColorInput.popupOpen()
+                    && markerLineColorInput.mouseClicked(
+                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                return true;
+            }
+
+            if (markerTypeSelect.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                markerPrimaryColorInput.closePopup();
+                markerColorInput.closePopup();
+                markerLineColorInput.closePopup();
+                return true;
+            }
+            if (markerPrimaryColorInput.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                markerTypeSelect.closePopup();
+                markerColorInput.closePopup();
+                markerLineColorInput.closePopup();
+                return true;
+            }
             if (markerColorInput.mouseClicked(
                     mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
                 markerTypeSelect.closePopup();
+                markerPrimaryColorInput.closePopup();
+                markerLineColorInput.closePopup();
                 return true;
             }
-            if (markerTypeSelect.mouseClicked(
+            if (markerLineColorInput.mouseClicked(
                     mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                markerTypeSelect.closePopup();
+                markerPrimaryColorInput.closePopup();
                 markerColorInput.closePopup();
                 return true;
             }
             if (markerSizeSlider.mouseClicked(
                     mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
                 markerTypeSelect.closePopup();
+                markerPrimaryColorInput.closePopup();
                 markerColorInput.closePopup();
+                markerLineColorInput.closePopup();
                 return true;
             }
         } else if (settingsTab == SettingsTab.MAP) {
@@ -900,7 +960,9 @@ public final class MapScreenV3 extends Screen {
     private void closeSettings() {
         settingsOpen = false;
         markerTypeSelect.closePopup();
+        markerPrimaryColorInput.closePopup();
         markerColorInput.closePopup();
+        markerLineColorInput.closePopup();
     }
 
     @Override
@@ -910,7 +972,9 @@ public final class MapScreenV3 extends Screen {
         }
 
         if (settingsOpen && settingsTab == SettingsTab.PLAYER) {
+            if (markerPrimaryColorInput.mouseReleased(mouseX, mouseY, button)) return true;
             if (markerColorInput.mouseReleased(mouseX, mouseY, button)) return true;
+            if (markerLineColorInput.mouseReleased(mouseX, mouseY, button)) return true;
             if (markerSizeSlider.mouseReleased(mouseX, mouseY, button)) return true;
         } else if (settingsOpen && settingsTab == SettingsTab.MAP) {
             if (requestBatchSlider.mouseReleased(mouseX, mouseY, button)) return true;
@@ -937,7 +1001,11 @@ public final class MapScreenV3 extends Screen {
 
         if (settingsOpen) {
             if (settingsTab == SettingsTab.PLAYER) {
+                if (markerPrimaryColorInput.mouseDragged(
+                        mouseX, mouseY, button, dragX, dragY)) return true;
                 if (markerColorInput.mouseDragged(
+                        mouseX, mouseY, button, dragX, dragY)) return true;
+                if (markerLineColorInput.mouseDragged(
                         mouseX, mouseY, button, dragX, dragY)) return true;
                 if (markerSizeSlider.mouseDragged(
                         mouseX, mouseY, button, dragX, dragY)) return true;
@@ -994,9 +1062,10 @@ public final class MapScreenV3 extends Screen {
             return true;
         }
 
-        if (settingsOpen && settingsTab == SettingsTab.PLAYER
-                && markerColorInput.keyPressed(keyCode, scanCode, modifiers)) {
-            return true;
+        if (settingsOpen && settingsTab == SettingsTab.PLAYER) {
+            if (markerPrimaryColorInput.keyPressed(keyCode, scanCode, modifiers)) return true;
+            if (markerColorInput.keyPressed(keyCode, scanCode, modifiers)) return true;
+            if (markerLineColorInput.keyPressed(keyCode, scanCode, modifiers)) return true;
         }
 
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
@@ -1024,9 +1093,10 @@ public final class MapScreenV3 extends Screen {
                 && markerUi.charTyped(codePoint, modifiers)) {
             return true;
         }
-        if (settingsOpen && settingsTab == SettingsTab.PLAYER
-                && markerColorInput.charTyped(codePoint, modifiers)) {
-            return true;
+        if (settingsOpen && settingsTab == SettingsTab.PLAYER) {
+            if (markerPrimaryColorInput.charTyped(codePoint, modifiers)) return true;
+            if (markerColorInput.charTyped(codePoint, modifiers)) return true;
+            if (markerLineColorInput.charTyped(codePoint, modifiers)) return true;
         }
         return super.charTyped(codePoint, modifiers);
     }
