@@ -134,25 +134,23 @@ public final class MapScreenV3 extends Screen {
     private void renderDownsampled(GuiGraphics graphics, VisibleTiles tiles) {
         double halfWidth = width * 0.5;
         double halfHeight = height * 0.5;
-        double sampleOffset = 0.25 / zoom;
+        AxisCoverage[] xCoverage = new AxisCoverage[width];
+
+        for (int screenX = 0; screenX < width; screenX++) {
+            double worldX0 = centerX + (screenX - halfWidth) / zoom;
+            double worldX1 = centerX + (screenX + 1.0 - halfWidth) / zoom;
+            xCoverage[screenX] = AxisCoverage.of(worldX0, worldX1);
+        }
 
         for (int screenY = 0; screenY < height; screenY++) {
-            double worldCenterZ = centerZ + (screenY + 0.5 - halfHeight) / zoom;
-            double sampleZ0 = worldCenterZ - sampleOffset;
-            double sampleZ1 = worldCenterZ + sampleOffset;
+            double worldZ0 = centerZ + (screenY - halfHeight) / zoom;
+            double worldZ1 = centerZ + (screenY + 1.0 - halfHeight) / zoom;
+            AxisCoverage zCoverage = AxisCoverage.of(worldZ0, worldZ1);
 
             int runStart = -1;
             int runColor = 0;
             for (int screenX = 0; screenX < width; screenX++) {
-                double worldCenterX = centerX + (screenX + 0.5 - halfWidth) / zoom;
-                double sampleX0 = worldCenterX - sampleOffset;
-                double sampleX1 = worldCenterX + sampleOffset;
-
-                int color = average(
-                        tiles.colorAtWorld(sampleX0, sampleZ0),
-                        tiles.colorAtWorld(sampleX1, sampleZ0),
-                        tiles.colorAtWorld(sampleX0, sampleZ1),
-                        tiles.colorAtWorld(sampleX1, sampleZ1));
+                int color = areaAverage(tiles, xCoverage[screenX], zCoverage);
 
                 if ((color >>> 24) == 0) {
                     if (runStart >= 0) {
@@ -177,49 +175,71 @@ public final class MapScreenV3 extends Screen {
         }
     }
 
-    private static int average(int c0, int c1, int c2, int c3) {
-        int count = 0;
-        int red = 0;
-        int green = 0;
-        int blue = 0;
+    private static int areaAverage(VisibleTiles tiles,
+                                   AxisCoverage xCoverage,
+                                   AxisCoverage zCoverage) {
+        double red = 0.0;
+        double green = 0.0;
+        double blue = 0.0;
+        double knownArea = 0.0;
 
-        if ((c0 >>> 24) != 0) {
-            red += (c0 >>> 16) & 255;
-            green += (c0 >>> 8) & 255;
-            blue += c0 & 255;
-            count++;
-        }
-        if ((c1 >>> 24) != 0) {
-            red += (c1 >>> 16) & 255;
-            green += (c1 >>> 8) & 255;
-            blue += c1 & 255;
-            count++;
-        }
-        if ((c2 >>> 24) != 0) {
-            red += (c2 >>> 16) & 255;
-            green += (c2 >>> 8) & 255;
-            blue += c2 & 255;
-            count++;
-        }
-        if ((c3 >>> 24) != 0) {
-            red += (c3 >>> 16) & 255;
-            green += (c3 >>> 8) & 255;
-            blue += c3 & 255;
-            count++;
+        for (int blockZ = zCoverage.firstBlock(); blockZ <= zCoverage.lastBlock(); blockZ++) {
+            double zWeight = zCoverage.weight(blockZ);
+            if (zWeight <= 0.0) continue;
+
+            for (int blockX = xCoverage.firstBlock(); blockX <= xCoverage.lastBlock(); blockX++) {
+                double xWeight = xCoverage.weight(blockX);
+                if (xWeight <= 0.0) continue;
+
+                double area = xWeight * zWeight;
+                int color = tiles.colorAtBlock(blockX, blockZ);
+                if ((color >>> 24) == 0) continue;
+
+                red += ((color >>> 16) & 255) * area;
+                green += ((color >>> 8) & 255) * area;
+                blue += (color & 255) * area;
+                knownArea += area;
+            }
         }
 
-        if (count == 0) return 0;
+        if (knownArea <= 0.0) return 0;
 
-        // Missing samples are genuinely unknown map data. Blend their share
-        // with the map background instead of stretching known terrain into it.
-        final int backgroundRed = 0x11;
-        final int backgroundGreen = 0x14;
-        final int backgroundBlue = 0x17;
-        int missing = 4 - count;
-        red = (red + backgroundRed * missing + 2) / 4;
-        green = (green + backgroundGreen * missing + 2) / 4;
-        blue = (blue + backgroundBlue * missing + 2) / 4;
-        return 0xff000000 | (red << 16) | (green << 8) | blue;
+        double totalArea = xCoverage.length() * zCoverage.length();
+        double missingArea = Math.max(0.0, totalArea - knownArea);
+
+        // Unknown map data contributes the map background by exact covered area.
+        // A one-block river/road therefore cannot disappear merely because four
+        // fixed sample points happened to miss it.
+        red += 0x11 * missingArea;
+        green += 0x14 * missingArea;
+        blue += 0x17 * missingArea;
+
+        int r = clampColor((int) Math.round(red / totalArea));
+        int g = clampColor((int) Math.round(green / totalArea));
+        int b = clampColor((int) Math.round(blue / totalArea));
+        return 0xff000000 | (r << 16) | (g << 8) | b;
+    }
+
+    private static int clampColor(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
+
+    private record AxisCoverage(double start, double end,
+                                int firstBlock, int lastBlock) {
+        static AxisCoverage of(double start, double end) {
+            int first = (int) Math.floor(start);
+            int last = (int) Math.floor(Math.nextDown(end));
+            return new AxisCoverage(start, end, first, Math.max(first, last));
+        }
+
+        double length() {
+            return end - start;
+        }
+
+        double weight(int block) {
+            return Math.max(0.0,
+                    Math.min(end, block + 1.0) - Math.max(start, block));
+        }
     }
 
     private record VisibleTiles(int minChunkX, int minChunkZ,
@@ -255,9 +275,7 @@ public final class MapScreenV3 extends Screen {
             return tiles[z * columns + x];
         }
 
-        int colorAtWorld(double worldX, double worldZ) {
-            int blockX = (int) Math.floor(worldX);
-            int blockZ = (int) Math.floor(worldZ);
+        int colorAtBlock(int blockX, int blockZ) {
             int chunkX = Math.floorDiv(blockX, 16);
             int chunkZ = Math.floorDiv(blockZ, 16);
             SurfaceTile tile = tileAtChunk(chunkX, chunkZ);
