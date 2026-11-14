@@ -20,6 +20,7 @@ public final class MapClientCache {
     private static int received;
     private static int validated;
     private static long mapSession;
+    private static long tileRevision;
 
     private MapClientCache() {}
 
@@ -33,6 +34,7 @@ public final class MapClientCache {
         MISSING_AT.clear();
         VALIDATED_SESSION.clear();
         mapSession = 0L;
+        tileRevision++;
         ticks = 0;
         firstRequestNanos = 0L;
         received = 0;
@@ -88,6 +90,7 @@ public final class MapClientCache {
         if (disk.isPresent()) {
             SurfaceTile restoredTile = disk.get();
             TILES.put(key, restoredTile);
+            tileRevision++;
             int restored = TILES.size();
             if (restored == 1 || restored % 64 == 0)
                 LOG.info("V3_MAP_CACHE_RESTORE restored={} example={},{}",
@@ -136,7 +139,7 @@ public final class MapClientCache {
         if (!packet.present()) {
             MISSING_AT.put(key, ticks);
             VALIDATED_SESSION.put(key, mapSession);
-            TILES.remove(key);
+            if (TILES.remove(key) != null) tileRevision++;
             if (worldId != null) PersistentTileStore.delete(worldId, key);
             return;
         }
@@ -152,6 +155,7 @@ public final class MapClientCache {
         SurfaceTile tile = new SurfaceTile(key, packet.rgb());
         VALIDATED_SESSION.put(key, mapSession);
         TILES.put(key, tile);
+        tileRevision++;
         if (worldId != null) PersistentTileStore.save(worldId, tile);
         received++;
         if (received == 1 || received % 64 == 0) {
@@ -164,4 +168,5 @@ public final class MapClientCache {
 
     public static int cachedCount() { return TILES.size(); }
     public static int pendingCount() { return PENDING.size(); }
+    static long tileRevision() { return tileRevision; }
 }
