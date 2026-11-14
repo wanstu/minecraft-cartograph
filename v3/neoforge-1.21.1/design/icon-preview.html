@@ -10,6 +10,9 @@
   --text:#edf2f7;--muted:#8f9dac;--gold:#f2bd45;--blue:#63b7ff;
   --green:#72cf7d;--red:#ff6767;--shadow:0 18px 50px rgba(0,0,0,.32);
   --icon-size:42px;
+  --preview-primary:#e8eef5;
+  --preview-accent:#f2bd45;
+  --preview-line:#dfe7ef;
 }
 *{box-sizing:border-box}
 body{margin:0;background:
@@ -73,6 +76,43 @@ h1 b{color:var(--gold)}
 .hidden{display:none!important}
 footer{color:#74818f;text-align:center;padding-top:18px}
 @media(max-width:720px){.shell{padding:12px}.group-grid{grid-template-columns:repeat(3,1fr)}.card{min-width:0}.hero{align-items:flex-start}.badge{display:none}}
+
+.color-duo .icon-svg .stroke,
+.color-duo .icon-svg .thin{stroke:var(--preview-line)!important}
+.color-duo .icon-svg .fill{fill:var(--preview-primary)!important}
+.color-duo .icon-svg .gold,
+.color-duo .icon-svg .blue,
+.color-duo .icon-svg .green,
+.color-duo .icon-svg .brown,
+.color-duo .icon-svg .purple,
+.color-duo .icon-svg .water,
+.color-duo .icon-svg .sand,
+.color-duo .icon-svg .stone{
+  fill:var(--preview-accent)!important;
+  stroke:var(--preview-line)!important
+}
+.color-mono .icon-svg .stroke,
+.color-mono .icon-svg .thin{stroke:var(--preview-line)!important}
+.color-mono .icon-svg .fill{fill:var(--preview-primary)!important}
+.color-mono .icon-svg .gold,
+.color-mono .icon-svg .blue,
+.color-mono .icon-svg .green,
+.color-mono .icon-svg .brown,
+.color-mono .icon-svg .purple,
+.color-mono .icon-svg .water,
+.color-mono .icon-svg .sand,
+.color-mono .icon-svg .stone{
+  fill:var(--preview-primary)!important;
+  stroke:var(--preview-line)!important
+}
+.color-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-left:4px;border-left:1px solid #293541}
+.color-tools label{display:flex;align-items:center;gap:6px;color:#aeb8c2;font-size:12px}
+.color-tools select{background:#111820;color:#e7edf4;border:1px solid #33404d;border-radius:8px;padding:7px 9px}
+.color-tools input[type=color]{width:34px;height:30px;padding:2px;border:1px solid #3a4653;border-radius:8px;background:#111820;cursor:pointer}
+.reset-color{border:1px solid #3a4653;background:#151d26;color:#cbd4dd;border-radius:8px;padding:7px 10px;cursor:pointer}
+.reset-color:hover{background:#202a35}
+.color-tip{width:100%;font-size:11px;color:#788695;margin-left:2px}
+
 </style>
 </head>
 <body>
@@ -99,6 +139,20 @@ footer{color:#74818f;text-align:center;padding-top:18px}
     <button class="size-btn" data-size="32">小</button>
     <button class="size-btn" data-size="42">中</button>
     <button class="size-btn" data-size="52">大</button>
+    <div class="color-tools">
+      <label>模式
+        <select id="colorMode">
+          <option value="original">原设计</option>
+          <option value="duo" selected>双色</option>
+          <option value="mono">单色</option>
+        </select>
+      </label>
+      <label>主色 <input id="primaryColor" type="color" value="#e8eef5"></label>
+      <label>辅色 <input id="accentColor" type="color" value="#f2bd45"></label>
+      <label>线条 <input id="lineColor" type="color" value="#dfe7ef"></label>
+      <button class="reset-color" id="resetColor">重置</button>
+    </div>
+    <div class="color-tip">建议：不要让每一笔都单独配色。图标统一使用“主色 / 辅色 / 线条色”三个语义通道；单色模式用于最简洁的地图标记。</div>
   </div>
 
   <main id="app"></main>
@@ -113,10 +167,10 @@ footer{color:#74818f;text-align:center;padding-top:18px}
 <script>
 const I=(body)=>'<svg class="icon-svg" viewBox="0 0 64 64" aria-hidden="true">'+body+'</svg>';
 const icons = [
-{g:'player',group:'玩家图标',desc:'当前位置、朝向与定位',name:'导航箭头',meta:'推荐 · 固定屏幕尺寸',rec:1,svg:I('<path class="gold" d="M31 4 53 55 35 46 24 59 10 18Z"/><path class="thin" d="M31 4 35 46"/>')},
-{g:'player',group:'玩家图标',name:'箭头 · 蓝',meta:'备选',svg:I('<path class="blue" d="M31 5 52 54 34 45 23 58 11 18Z"/>')},
-{g:'player',group:'玩家图标',name:'箭头 · 绿',meta:'备选',svg:I('<path class="green" d="M31 5 52 54 34 45 23 58 11 18Z"/>')},
-{g:'player',group:'玩家图标',name:'箭头 · 线框',meta:'轻量',svg:I('<path class="stroke" d="M31 5 52 54 34 45 23 58 11 18Z"/>')},
+{g:'player',group:'玩家图标',desc:'当前位置、朝向与定位',name:'导航箭头',meta:'推荐 · 固定屏幕尺寸',rec:1,svg:I('<path class="gold" d="M9 28 55 8 37 56 29 38Z"/><path class="thin" d="m11 29 43-19-18 43-7-17Z"/>')},
+{g:'player',group:'玩家图标',name:'箭头 · 蓝',meta:'备选',svg:I('<path class="blue" d="M10 28 54 9 37 55 29 38Z"/>')},
+{g:'player',group:'玩家图标',name:'箭头 · 绿',meta:'备选',svg:I('<path class="green" d="M10 28 54 9 37 55 29 38Z"/>')},
+{g:'player',group:'玩家图标',name:'箭头 · 线框',meta:'轻量',svg:I('<path class="stroke" d="M10 28 54 9 37 55 29 38Z"/>')},
 {g:'player',group:'玩家图标',name:'十字准星',meta:'无方向',svg:I('<circle class="stroke" cx="32" cy="32" r="14"/><path class="stroke" d="M32 8v12m0 24v12M8 32h12m24 0h12"/><circle class="fill" cx="32" cy="32" r="3"/>')},
 
 {g:'menu',group:'菜单图标',desc:'界面与常用操作',name:'菜单',svg:I('<path class="stroke" d="M14 18h36M14 32h36M14 46h36"/>')},
@@ -207,6 +261,29 @@ let active='all';
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');active=b.dataset.filter;render(active,search.value)});
 document.querySelectorAll('.size-btn').forEach(b=>b.onclick=()=>document.documentElement.style.setProperty('--icon-size',b.dataset.size+'px'));
 const search=document.getElementById('search');search.oninput=()=>render(active,search.value);
+
+const root=document.documentElement;
+const mode=document.getElementById('colorMode');
+const primary=document.getElementById('primaryColor');
+const accent=document.getElementById('accentColor');
+const line=document.getElementById('lineColor');
+function applyColorPreview(){
+  document.body.classList.remove('color-duo','color-mono');
+  if(mode.value==='duo') document.body.classList.add('color-duo');
+  if(mode.value==='mono') document.body.classList.add('color-mono');
+  root.style.setProperty('--preview-primary',primary.value);
+  root.style.setProperty('--preview-accent',accent.value);
+  root.style.setProperty('--preview-line',line.value);
+}
+[mode,primary,accent,line].forEach(el=>el.addEventListener('input',applyColorPreview));
+document.getElementById('resetColor').onclick=()=>{
+  mode.value='duo';
+  primary.value='#e8eef5';
+  accent.value='#f2bd45';
+  line.value='#dfe7ef';
+  applyColorPreview();
+};
+applyColorPreview();
 render();
 
 const samples=[
