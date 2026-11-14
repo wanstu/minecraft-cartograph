@@ -35,7 +35,8 @@ public final class MapScreenV3 extends Screen {
     private static final int ZOOM_HUD_H = 16;
     private static final int LOCATE_HUD_SIZE = 12;
 
-    private static final int MAX_REQUESTS_PER_PASS = 2048;
+    private static final int MAX_REQUESTS_PER_PASS = 64;
+    private static final int MAX_PENDING_REQUESTS = 128;
 
     private static final float Z_MAP_MARKERS = 80.0f;
     private static final float Z_PLAYER = 100.0f;
@@ -173,6 +174,7 @@ public final class MapScreenV3 extends Screen {
     @Override
     protected void init() {
         MapClientCache.ensureWorld(minecraft.level);
+        PacketDistributor.sendToServer(new MapProtocol.MapViewState(true));
         if (!initialized) {
             MapClientCache.beginMapSession();
             if (minecraft.player != null) {
@@ -190,7 +192,9 @@ public final class MapScreenV3 extends Screen {
     public void tick() {
         MapClientCache.tick();
         requestTicks++;
-        if (!dragging) requestVisible(requestTicks % 20 == 0);
+        if (!dragging && MapClientCache.pendingCount() < MAX_PENDING_REQUESTS) {
+            requestVisible(requestTicks % 5 == 0);
+        }
     }
 
     private String dimension() {
@@ -235,11 +239,16 @@ public final class MapScreenV3 extends Screen {
         int maxRadius = Math.max(
                 Math.max(Math.abs(minChunkX - centerChunkX), Math.abs(maxChunkX - centerChunkX)),
                 Math.max(Math.abs(minChunkZ - centerChunkZ), Math.abs(maxChunkZ - centerChunkZ)));
+        int requestBudget = Math.min(
+                MAX_REQUESTS_PER_PASS,
+                Math.max(0, MAX_PENDING_REQUESTS - MapClientCache.pendingCount()));
+        if (requestBudget <= 0) return;
+
         int requested = 0;
         int scanned = 0;
         int scanBudget = MAX_REQUESTS_PER_PASS * 8;
 
-        while (requested < MAX_REQUESTS_PER_PASS
+        while (requested < requestBudget
                 && scanned < scanBudget
                 && requestRing <= maxRadius) {
             int dx;
@@ -950,6 +959,7 @@ public final class MapScreenV3 extends Screen {
 
     @Override
     public void removed() {
+        PacketDistributor.sendToServer(new MapProtocol.MapViewState(false));
         regionTextures.close();
     }
 

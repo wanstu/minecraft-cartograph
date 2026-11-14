@@ -41,9 +41,18 @@ final class SurfaceService {
             throw new IllegalStateException("Surface request must start on server thread");
 
         String dimension = level.dimension().location().toString();
+        Key key = key(level, chunkX, chunkZ);
+
+        // Revalidation should be cheap: if this tile is already in the server
+        // cache and the chunk has not been saved since, do not rescan a loaded
+        // 16x16 surface on the server thread. LiveSurfaceUpdates keeps active
+        // loaded tiles fresh while the map is open.
+        SurfaceTile cached = CACHE.get(key);
+        if (cached != null && !DISK_STALE.contains(key))
+            return CompletableFuture.completedFuture(Optional.of(cached));
+
         Optional<SurfaceTile> loaded = LoadedSurfaceReader.capture(level, chunkX, chunkZ);
         if (loaded.isPresent()) {
-            Key key = key(level, chunkX, chunkZ);
             CACHE.put(key, loaded.get());
             DISK_STALE.remove(key);
             int count = LOADED_HITS.incrementAndGet();
@@ -52,11 +61,6 @@ final class SurfaceService {
                         count, dimension, chunkX, chunkZ);
             return CompletableFuture.completedFuture(loaded);
         }
-
-        Key key = key(level, chunkX, chunkZ);
-        SurfaceTile cached = CACHE.get(key);
-        if (cached != null && !DISK_STALE.contains(key))
-            return CompletableFuture.completedFuture(Optional.of(cached));
 
         CompletableFuture<Optional<SurfaceTile>> existing = PENDING.get(key);
         if (existing != null) return existing;

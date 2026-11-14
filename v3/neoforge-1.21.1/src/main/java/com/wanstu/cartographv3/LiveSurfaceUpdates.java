@@ -10,59 +10,97 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 
 /**
- * Correctness-first live map updater.
+ * Budgeted live updater for map tiles.
  *
- * Only chunks already requested by a map client are watched. Every watched
- * chunk that is currently loaded by Minecraft is resampled directly each
- * server tick. SurfaceService compares the new 16x16 raster with the previous
- * fingerprint; unchanged chunks produce no network payload.
- *
- * This is intentionally correctness-first. Performance throttling belongs to
- * a later phase after map behavior is accepted.
+ * A player only has watchers while the map screen is open. Watched keys are
+ * capped and refreshed round-robin at a small budget instead of rescanning
+ * every watched loaded chunk every server tick.
  */
 final class LiveSurfaceUpdates {
     private static final Logger LOG = LoggerFactory.getLogger("cartograph.v3.live");
-    private static final Map<UUID, Set<ChunkKey>> WATCHERS = new HashMap<>();
+
+    private static final int MAX_WATCHED_PER_PLAYER = 512;
+    private static final int REFRESH_INTERVAL_TICKS = 10;
+    private static final int REFRESH_BUDGET_PER_PLAYER = 8;
+    private static final int MAX_SCAN_ATTEMPTS_PER_PLAYER = 64;
+
+    private static final class WatchState {
+        final LinkedHashMap<ChunkKey, Long> watched = new LinkedHashMap<>();
+        int cursor;
+    }
+
+    private static final Map<UUID, WatchState> WATCHERS = new HashMap<>();
+    private static long tickCounter;
+    private static long changedPushes;
+
     private LiveSurfaceUpdates() {}
 
+    static void open(ServerPlayer player) {
+        WatchState state = new WatchState();
+        WATCHERS.put(player.getUUID(), state);
+    }
+
+    static void close(ServerPlayer player) {
+        WATCHERS.remove(player.getUUID());
+    }
+
     static void watch(ServerPlayer player, ChunkKey key) {
-        WATCHERS.computeIfAbsent(player.getUUID(), ignored -> new HashSet<>()).add(key);
+        WatchState state = WATCHERS.get(player.getUUID());
+        if (state == null) return;
+
+        // Refresh recency without keeping an unbounded history.
+        state.watched.remove(key);
+        state.watched.put(key, player.serverLevel().getGameTime());
+
+        while (state.watched.size() > MAX_WATCHED_PER_PLAYER) {
+            Iterator<ChunkKey> it = state.watched.keySet().iterator();
+            if (!it.hasNext()) break;
+            it.next();
+            it.remove();
+            if (state.cursor > 0) state.cursor--;
+        }
     }
 
     static void tick(ServerTickEvent.Post event) {
+        tickCounter++;
+        if (tickCounter % REFRESH_INTERVAL_TICKS != 0) return;
+
         var server = event.getServer();
         WATCHERS.keySet().removeIf(uuid -> server.getPlayerList().getPlayer(uuid) == null);
 
-        for (ServerLevel level : server.getAllLevels()) {
+        for (var watcher : WATCHERS.entrySet()) {
+            ServerPlayer player = server.getPlayerList().getPlayer(watcher.getKey());
+            if (player == null) continue;
+
+            WatchState state = watcher.getValue();
+            if (state.watched.isEmpty()) continue;
+
+            ServerLevel level = player.serverLevel();
             String dimension = level.dimension().location().toString();
-            Map<ChunkKey, List<ServerPlayer>> active = new HashMap<>();
+            List<ChunkKey> keys = new ArrayList<>(state.watched.keySet());
 
-            for (var watched : WATCHERS.entrySet()) {
-                ServerPlayer player = server.getPlayerList().getPlayer(watched.getKey());
-                if (player == null || player.serverLevel() != level) continue;
-                for (ChunkKey key : watched.getValue()) {
-                    if (key.dimension().equals(dimension))
-                        active.computeIfAbsent(key, ignored -> new ArrayList<>()).add(player);
-                }
-            }
+            int refreshed = 0;
+            int attempts = 0;
+            while (refreshed < REFRESH_BUDGET_PER_PLAYER
+                    && attempts < Math.min(MAX_SCAN_ATTEMPTS_PER_PLAYER, keys.size())) {
+                if (state.cursor >= keys.size()) state.cursor = 0;
+                ChunkKey key = keys.get(state.cursor++);
+                attempts++;
 
-            for (var entry : active.entrySet()) {
-                ChunkKey key = entry.getKey();
+                if (!key.dimension().equals(dimension)) continue;
                 LevelChunk chunk = level.getChunkSource().getChunkNow(key.x(), key.z());
                 if (chunk == null) continue;
 
-                // Correctness first: do not depend on Minecraft's dirty/unsaved flag.
-                // Every watched loaded chunk is fingerprinted each tick. SurfaceService
-                // suppresses all work when the 16x16 rendered surface is unchanged.
+                refreshed++;
                 SurfaceService.refreshLoaded(level, key.x(), key.z()).ifPresent(changed -> {
-                    int viewers = 0;
-                    for (ServerPlayer player : entry.getValue()) {
-                        MapProtocol.pushChanged(player, changed);
-                        viewers++;
+                    MapProtocol.pushChanged(player, changed);
+                    changedPushes++;
+                    if (changedPushes == 1 || changedPushes % 256 == 0) {
+                        LOG.debug(
+                                "V3_LIVE_PUSH count={} dim={} chunk={},{} fingerprint={}",
+                                changedPushes, key.dimension(), key.x(), key.z(),
+                                Long.toUnsignedString(changed.fingerprint64()));
                     }
-                    LOG.info("V3_LIVE_PUSH dim={} chunk={},{} viewers={} fingerprint={}",
-                            key.dimension(), key.x(), key.z(), viewers,
-                            Long.toUnsignedString(changed.fingerprint64()));
                 });
             }
         }
@@ -70,5 +108,7 @@ final class LiveSurfaceUpdates {
 
     static void clear() {
         WATCHERS.clear();
+        tickCounter = 0L;
+        changedPushes = 0L;
     }
 }

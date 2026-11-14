@@ -22,6 +22,16 @@ public final class MapProtocol {
         }
     }
 
+    public record MapViewState(boolean open) implements CustomPacketPayload {
+        public static final Type<MapViewState> TYPE = new Type<>(
+                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "map_view_state"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, MapViewState> CODEC =
+                StreamCodec.of(
+                        (buf, value) -> buf.writeBoolean(value.open()),
+                        buf -> new MapViewState(buf.readBoolean()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     public record RequestWorldInfo() implements CustomPacketPayload {
         public static final Type<RequestWorldInfo> TYPE = new Type<>(
                 ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "request_world_info"));
@@ -222,7 +232,13 @@ public final class MapProtocol {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("7");
+        var registrar = event.registrar("8");
+        registrar.playToServer(MapViewState.TYPE, MapViewState.CODEC, (request, context) ->
+                context.enqueueWork(() -> {
+                    if (!(context.player() instanceof ServerPlayer player)) return;
+                    if (request.open()) LiveSurfaceUpdates.open(player);
+                    else LiveSurfaceUpdates.close(player);
+                }));
         registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
