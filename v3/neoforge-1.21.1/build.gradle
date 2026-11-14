@@ -1,0 +1,66 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+
+version = mod_version
+group = mod_group_id
+base { archivesName = 'Cartograph-V3' }
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = project.neo_version
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+    runs {
+        client { client() }
+        server { server(); programArgument '--nogui' }
+        configureEach { logLevel = org.slf4j.event.Level.INFO }
+    }
+    mods {
+        "${mod_id}" { sourceSet(sourceSets.main) }
+    }
+}
+
+def generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    def props = [
+        minecraft_version_range: minecraft_version_range,
+        neo_version: neo_version,
+        loader_version_range: loader_version_range,
+        mod_id: mod_id,
+        mod_name: mod_name,
+        mod_license: mod_license,
+        mod_version: mod_version
+    ]
+    inputs.properties props
+    expand props
+    from 'src/main/templates'
+    into 'build/generated/sources/modMetadata'
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+tasks.named('jar', Jar) {
+    archiveFileName = "Cartograph-V3-${mod_version}-mc${minecraft_version}-neoforge.jar"
+}
+
+tasks.register('verifyV3Isolation') {
+    dependsOn tasks.named('jar')
+    doLast {
+        def jarFile = tasks.named('jar', Jar).get().archiveFile.get().asFile
+        def legacy = zipTree(jarFile).matching { include 'com/wanstu/cartograph/**' }.files
+        if (!legacy.isEmpty()) {
+            throw new GradleException("V3 JAR contains legacy runtime classes: " + legacy)
+        }
+        def sourceLeak = fileTree('src/main/java').matching {
+            include '**/*.java'
+        }.files.findAll { it.text.contains('import com.wanstu.cartograph.') }
+        if (!sourceLeak.isEmpty()) {
+            throw new GradleException("V3 source imports legacy runtime: " + sourceLeak)
+        }
+    }
+}
+tasks.named('check').configure { dependsOn tasks.named('verifyV3Isolation') }
