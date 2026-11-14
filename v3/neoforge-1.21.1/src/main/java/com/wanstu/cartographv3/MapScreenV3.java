@@ -110,10 +110,10 @@ public final class MapScreenV3 extends Screen {
 
                         double worldX0 = chunkX * 16.0 + localX;
                         double worldZ0 = chunkZ * 16.0 + localZ;
-                        int x0 = (int) Math.floor(width * 0.5 + (worldX0 - centerX) * zoom);
-                        int y0 = (int) Math.floor(height * 0.5 + (worldZ0 - centerZ) * zoom);
-                        int x1 = (int) Math.ceil(width * 0.5 + (worldX0 + 1 - centerX) * zoom);
-                        int y1 = (int) Math.ceil(height * 0.5 + (worldZ0 + 1 - centerZ) * zoom);
+                        int x0 = screenX(worldX0);
+                        int y0 = screenY(worldZ0);
+                        int x1 = screenX(worldX0 + 1);
+                        int y1 = screenY(worldZ0 + 1);
                         if (x1 <= 0 || y1 <= 0 || x0 >= width || y0 >= height) continue;
 
                         graphics.fill(x0, y0, x1, y1, color);
@@ -121,6 +121,14 @@ public final class MapScreenV3 extends Screen {
                 }
             }
         }
+    }
+
+    private int screenX(double worldX) {
+        return (int) Math.floor(width * 0.5 + (worldX - centerX) * zoom);
+    }
+
+    private int screenY(double worldZ) {
+        return (int) Math.floor(height * 0.5 + (worldZ - centerZ) * zoom);
     }
 
     private void renderDownsampled(GuiGraphics graphics, VisibleTiles tiles) {
