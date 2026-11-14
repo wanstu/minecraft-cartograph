@@ -136,6 +136,9 @@ public final class MapScreenV3 extends Screen {
         if (dragging && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             centerX -= dragX / zoom;
             centerZ -= dragY / zoom;
+            if (Boolean.getBoolean("cartograph.v3.qaInput"))
+                LOG.info("V3_QA_DRAG center={},{} delta={},{} zoom={}",
+                        centerX, centerZ, dragX, dragY, zoom);
             requestVisible();
             return true;
         }
@@ -154,6 +157,8 @@ public final class MapScreenV3 extends Screen {
         centerX = worldAtMouseX - (mouseX - width * 0.5) / next;
         centerZ = worldAtMouseZ - (mouseY - height * 0.5) / next;
         zoom = next;
+        if (Boolean.getBoolean("cartograph.v3.qaInput"))
+            LOG.info("V3_QA_SCROLL center={},{} zoom={}", centerX, centerZ, zoom);
         requestVisible();
         return true;
     }

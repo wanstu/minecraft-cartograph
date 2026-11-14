@@ -15,6 +15,8 @@ final class SurfaceService {
             org.slf4j.LoggerFactory.getLogger("cartograph.v3.surface");
     private static final java.util.concurrent.atomic.AtomicInteger DISK_HITS =
             new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicInteger LOADED_HITS =
+            new java.util.concurrent.atomic.AtomicInteger();
     private record Key(String worldRoot, String dimension, int x, int z) {}
 
     private static final ConcurrentHashMap<Key, SurfaceTile> CACHE = new ConcurrentHashMap<>();
@@ -41,6 +43,10 @@ final class SurfaceService {
         if (loaded.isPresent()) {
             Key key = key(level, chunkX, chunkZ);
             CACHE.put(key, loaded.get());
+            int count = LOADED_HITS.incrementAndGet();
+            if (count == 1 || count % 64 == 0)
+                LOG.info("V3_LOADED_DIRECT_READ count={} dim={} example={},{}",
+                        count, dimension, chunkX, chunkZ);
             return CompletableFuture.completedFuture(loaded);
         }
 
