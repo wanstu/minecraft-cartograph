@@ -31,6 +31,22 @@ final class MapMarkerStore {
         SHIP("沉船"),
         CITY("城市"),
         FORTRESS("要塞"),
+        HOME("住宅"),
+        FLAG("旗帜"),
+        CAMP("营地"),
+        FARM("农场"),
+        SHOP("商店"),
+        RAIL("铁路"),
+        HARBOR("港口"),
+        FACTORY("工厂"),
+        TOWER("高塔"),
+        CAVE("洞穴"),
+        MOUNTAIN("山峰"),
+        TREE("森林"),
+        WATER("水域"),
+        DANGER("危险"),
+        INFO("信息"),
+        FOOD("食物"),
         STAR("星标");
 
         final String label;

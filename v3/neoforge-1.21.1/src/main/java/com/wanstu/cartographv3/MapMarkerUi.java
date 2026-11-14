@@ -11,8 +11,15 @@ final class MapMarkerUi {
     private enum ManagerTab { LIST, TRASH }
     private enum TrashKind { CUSTOM, AUTO }
 
+    private record EditorLayout(
+            int x, int y, int w, int h,
+            int labelX, int controlX, int controlW,
+            int nameY, int iconY, int colorY,
+            int descriptionY, int descriptionH,
+            int locationY, int buttonY, int buttonH) {}
+
     private final MapUiControls.Input nameInput;
-    private final MapUiControls.Select<MapMarkerStore.Icon> iconSelect;
+    private final MapUiControls.MarkerIconSelect iconSelect;
     private final MapUiControls.ColorInput colorInput;
     private final MapUiControls.TextArea descriptionInput;
 
@@ -29,12 +36,8 @@ final class MapMarkerUi {
 
     MapMarkerUi() {
         nameInput = new MapUiControls.Input(220, "", 64, value -> {});
-        List<MapUiControls.Option<MapMarkerStore.Icon>> iconOptions = new ArrayList<>();
-        for (MapMarkerStore.Icon icon : MapMarkerStore.Icon.values()) {
-            iconOptions.add(new MapUiControls.Option<>(icon.label, icon));
-        }
-        iconSelect = new MapUiControls.Select<>(
-                160, iconOptions, MapMarkerStore.Icon.PIN, value -> {});
+        iconSelect = new MapUiControls.MarkerIconSelect(
+                180, MapMarkerStore.Icon.PIN, value -> {});
         colorInput = new MapUiControls.ColorInput(160, 0xe53935, value -> {});
         descriptionInput = new MapUiControls.TextArea(300, 82, "", 512, value -> {});
     }
@@ -147,55 +150,50 @@ final class MapMarkerUi {
 
     private void renderEditor(
             GuiGraphics graphics, Font font, int width, int height, int mouseX, int mouseY) {
-        int panelW = Math.min(520, Math.max(360, width - 80));
-        int panelH = Math.min(350, Math.max(280, height - 80));
-        int x = (width - panelW) / 2;
-        int y = (height - panelH) / 2;
+        EditorLayout l = editorLayout(width, height);
 
         graphics.fill(0, 0, width, height, 0x88000000);
-        graphics.fill(x, y, x + panelW, y + panelH, 0xff20262c);
-        graphics.fill(x, y, x + panelW, y + 34, 0xff303840);
+        graphics.fill(l.x(), l.y(), l.x() + l.w(), l.y() + l.h(), 0xff20262c);
+        int headerH = Math.min(34, Math.max(24, l.nameY() - l.y() - 8));
+        graphics.fill(l.x(), l.y(), l.x() + l.w(), l.y() + headerH, 0xff303840);
         graphics.drawString(font, editingId == null ? "增加标点" : "编辑标点",
-                x + 14, y + 12, 0xffffffff, false);
+                l.x() + 12, l.y() + Math.max(7, (headerH - font.lineHeight) / 2),
+                0xffffffff, false);
 
-        int labelX = x + 20;
-        int controlX = x + 120;
-        int controlW = panelW - 140;
-        int row1 = y + 52;
-        int row2 = y + 86;
-        int row3 = y + 120;
-        int row4 = y + 154;
-
-        graphics.drawString(font, "名字", labelX, row1 + 7, 0xffdbe1e6, false);
-        graphics.drawString(font, "图标", labelX, row2 + 7, 0xffdbe1e6, false);
-        graphics.drawString(font, "颜色", labelX, row3 + 7, 0xffdbe1e6, false);
-        graphics.drawString(font, "简介", labelX, row4 + 7, 0xffdbe1e6, false);
+        graphics.drawString(font, "名字", l.labelX(), l.nameY() + 7, 0xffdbe1e6, false);
+        graphics.drawString(font, "图标", l.labelX(), l.iconY() + 7, 0xffdbe1e6, false);
+        graphics.drawString(font, "颜色", l.labelX(), l.colorY() + 7, 0xffdbe1e6, false);
+        graphics.drawString(font, "简介", l.labelX(), l.descriptionY() + 7, 0xffdbe1e6, false);
         graphics.drawString(font, "位置  " + editorX + ", " + editorZ,
-                labelX, y + panelH - 82, 0xff8f989f, false);
+                l.labelX(), l.locationY(), 0xff8f989f, false);
 
-        nameInput.setBounds(controlX, row1, controlW, 22);
-        iconSelect.setBounds(controlX, row2, Math.min(180, controlW), 22);
-        colorInput.setBounds(controlX, row3, Math.min(180, controlW), 22);
-        descriptionInput.setBounds(controlX, row4, controlW, 82);
+        nameInput.setBounds(l.controlX(), l.nameY(), l.controlW(), 22);
+        iconSelect.setBounds(l.controlX(), l.iconY(), Math.min(180, l.controlW()), 22);
+        colorInput.setBounds(l.controlX(), l.colorY(), Math.min(180, l.controlW()), 22);
+        descriptionInput.setBounds(
+                l.controlX(), l.descriptionY(), l.controlW(), l.descriptionH());
 
         nameInput.render(graphics, font, mouseX, mouseY);
         descriptionInput.render(graphics, font, mouseX, mouseY);
         iconSelect.render(graphics, font, mouseX, mouseY);
         colorInput.render(graphics, font, mouseX, mouseY);
 
-        int buttonY = y + panelH - 42;
-        drawButton(graphics, font, x + panelW - 204, buttonY, 58, 24, "取消",
+        int saveW = 52;
+        int cancelW = 52;
+        int saveX = l.x() + l.w() - 10 - saveW;
+        int cancelX = saveX - 6 - cancelW;
+        drawButton(graphics, font, cancelX, l.buttonY(), cancelW, l.buttonH(), "取消",
                 mouseX, mouseY, false);
-        drawButton(graphics, font, x + panelW - 138, buttonY, 58, 24, "保存",
+        drawButton(graphics, font, saveX, l.buttonY(), saveW, l.buttonH(), "保存",
                 mouseX, mouseY, true);
 
         if (editingId != null) {
             Optional<MapMarkerStore.Marker> marker = MapMarkerStore.find(editingId);
             if (marker.isPresent()) {
-                drawButton(graphics, font, x + 20, buttonY, 58, 24, "删除",
+                drawButton(graphics, font, l.x() + 10, l.buttonY(), 52, l.buttonH(), "删除",
                         mouseX, mouseY, false);
                 if (marker.get().origin == MapMarkerStore.Origin.AUTO && marker.get().modifiedAuto) {
-                    drawButton(graphics, font, x + 86, buttonY, 78, 24, "重置自动",
+                    drawButton(graphics, font, l.x() + 68, l.buttonY(), 72, l.buttonH(), "重置自动",
                             mouseX, mouseY, false);
                 }
             }
@@ -335,10 +333,7 @@ final class MapMarkerUi {
     }
 
     private boolean editorMouseClicked(double mouseX, double mouseY, int width, int height) {
-        int panelW = Math.min(520, Math.max(360, width - 80));
-        int panelH = Math.min(350, Math.max(280, height - 80));
-        int x = (width - panelW) / 2;
-        int y = (height - panelH) / 2;
+        EditorLayout l = editorLayout(width, height);
 
         if (colorInput.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
             iconSelect.closePopup();
@@ -351,18 +346,21 @@ final class MapMarkerUi {
         if (nameInput.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
         if (descriptionInput.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
 
-        int buttonY = y + panelH - 42;
-        if (inside(mouseX, mouseY, x + panelW - 204, buttonY, 58, 24)) {
+        int saveW = 52;
+        int cancelW = 52;
+        int saveX = l.x() + l.w() - 10 - saveW;
+        int cancelX = saveX - 6 - cancelW;
+        if (inside(mouseX, mouseY, cancelX, l.buttonY(), cancelW, l.buttonH())) {
             editorOpen = false;
             return true;
         }
-        if (inside(mouseX, mouseY, x + panelW - 138, buttonY, 58, 24)) {
+        if (inside(mouseX, mouseY, saveX, l.buttonY(), saveW, l.buttonH())) {
             saveEditor();
             return true;
         }
 
         if (editingId != null) {
-            if (inside(mouseX, mouseY, x + 20, buttonY, 58, 24)) {
+            if (inside(mouseX, mouseY, l.x() + 10, l.buttonY(), 52, l.buttonH())) {
                 MapMarkerStore.delete(editingId);
                 editorOpen = false;
                 return true;
@@ -371,7 +369,7 @@ final class MapMarkerUi {
             if (marker.isPresent()
                     && marker.get().origin == MapMarkerStore.Origin.AUTO
                     && marker.get().modifiedAuto
-                    && inside(mouseX, mouseY, x + 86, buttonY, 78, 24)) {
+                    && inside(mouseX, mouseY, l.x() + 68, l.buttonY(), 72, l.buttonH())) {
                 MapMarkerStore.resetAutomatic(editingId);
                 editorOpen = false;
                 return true;
@@ -462,6 +460,40 @@ final class MapMarkerUi {
         colorInput.closePopup();
     }
 
+    private static EditorLayout editorLayout(int width, int height) {
+        int margin = 6;
+        int panelW = Math.max(1, Math.min(520, width - margin * 2));
+        int panelH = Math.max(1, Math.min(350, height - margin * 2));
+        int x = Math.max(0, (width - panelW) / 2);
+        int y = Math.max(0, (height - panelH) / 2);
+
+        boolean compact = panelH < 280;
+        int headerH = compact ? 26 : 34;
+        int horizontalPad = panelW < 340 ? 12 : 20;
+        int labelW = panelW < 340 ? 48 : 82;
+        int labelX = x + horizontalPad;
+        int controlX = labelX + labelW;
+        int controlW = Math.max(64, x + panelW - horizontalPad - controlX);
+
+        int gap = compact ? 24 : 34;
+        int nameY = y + headerH + 8;
+        int iconY = nameY + gap;
+        int colorY = iconY + gap;
+        int descriptionY = colorY + gap;
+
+        int buttonH = compact ? 20 : 24;
+        int buttonY = y + panelH - buttonH - 8;
+        int locationY = buttonY - (compact ? 15 : 18);
+        int descriptionH = Math.max(24, locationY - 7 - descriptionY);
+
+        return new EditorLayout(
+                x, y, panelW, panelH,
+                labelX, controlX, controlW,
+                nameY, iconY, colorY,
+                descriptionY, descriptionH,
+                locationY, buttonY, buttonH);
+    }
+
     private List<MapMarkerStore.Marker> managerRows() {
         if (managerTab == ManagerTab.LIST) return MapMarkerStore.customManagerEntries();
         return trashKind == TrashKind.CUSTOM
@@ -472,55 +504,7 @@ final class MapMarkerUi {
     private static void drawMarkerIcon(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
             int x, int y, int rgb, boolean hovered) {
-        int color = 0xff000000 | (rgb & 0x00ffffff);
-        int outline = hovered ? 0xffffffff : 0xdd111315;
-        int r = hovered ? 6 : 5;
-
-        switch (icon) {
-            case PIN -> {
-                graphics.fill(x - r - 1, y - r - 1, x + r + 2, y + r + 2, outline);
-                graphics.fill(x - r, y - r, x + r + 1, y + r + 1, color);
-                graphics.fill(x - 1, y + r, x + 2, y + r + 5, outline);
-                graphics.fill(x, y + r, x + 1, y + r + 4, color);
-            }
-            case VILLAGE, MANSION, TEMPLE, OUTPOST -> {
-                for (int row = 0; row < 5; row++) {
-                    graphics.fill(x - row - 1, y - 6 + row, x + row + 2, y - 5 + row, outline);
-                    graphics.fill(x - row, y - 6 + row, x + row + 1, y - 5 + row, color);
-                }
-                graphics.fill(x - 5, y - 2, x + 6, y + 6, outline);
-                graphics.fill(x - 4, y - 1, x + 5, y + 5, color);
-            }
-            case MINE -> {
-                graphics.fill(x - 6, y - 2, x + 7, y + 3, outline);
-                graphics.fill(x - 5, y - 1, x + 6, y + 2, color);
-                graphics.fill(x - 2, y - 6, x + 3, y + 7, outline);
-                graphics.fill(x - 1, y - 5, x + 2, y + 6, color);
-            }
-            case PORTAL -> {
-                graphics.fill(x - 5, y - 6, x + 6, y + 7, outline);
-                graphics.fill(x - 3, y - 4, x + 4, y + 5, color);
-                graphics.fill(x - 1, y - 2, x + 2, y + 3, 0xff1b1f23);
-            }
-            case SHIP -> {
-                graphics.fill(x - 6, y + 1, x + 7, y + 5, outline);
-                graphics.fill(x - 5, y + 1, x + 6, y + 4, color);
-                graphics.fill(x, y - 6, x + 2, y + 2, outline);
-                graphics.fill(x + 1, y - 5, x + 2, y + 1, color);
-            }
-            case CITY, FORTRESS -> {
-                graphics.fill(x - 6, y - 5, x + 7, y + 6, outline);
-                graphics.fill(x - 5, y - 4, x + 6, y + 5, color);
-                graphics.fill(x - 3, y - 2, x - 1, y + 5, outline);
-                graphics.fill(x + 2, y - 2, x + 4, y + 5, outline);
-            }
-            case STAR -> {
-                graphics.fill(x - 1, y - 6, x + 2, y + 7, outline);
-                graphics.fill(x - 6, y - 1, x + 7, y + 2, outline);
-                graphics.fill(x - 1, y - 5, x + 2, y + 6, color);
-                graphics.fill(x - 5, y - 1, x + 6, y + 2, color);
-            }
-        }
+        MapIconAtlas.drawMarker(graphics, icon, x, y, hovered ? 16 : 14, rgb, hovered);
     }
 
     private static boolean overlaps(List<int[]> occupied, int[] rect) {

@@ -1,5 +1,6 @@
 package com.wanstu.cartographv3;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import org.lwjgl.glfw.GLFW;
@@ -58,7 +59,7 @@ final class MapUiControls {
     }
 
 
-    enum IconType { MENU, CLOSE, SETTINGS, TELEPORT, CHEVRON_RIGHT, LOCATE }
+    enum IconType { MENU, CLOSE, SETTINGS, TELEPORT, ADD, CHEVRON_RIGHT, LOCATE }
 
     static final class Icon extends Control {
         private IconType type;
@@ -82,57 +83,31 @@ final class MapUiControls {
             if (!visible) return;
             int cx = x + width / 2;
             int cy = y + height / 2;
-            int s = Math.max(3, Math.min(width, height) / 2 - 1);
+            int size = Math.max(8, Math.min(width, height));
+            int rgb = color & 0x00ffffff;
 
             switch (type) {
-                case MENU -> {
-                    int half = Math.max(4, Math.min(7, s));
-                    for (int dy : new int[] {-4, 0, 4}) {
-                        graphics.fill(cx - half, cy + dy, cx + half + 1, cy + dy + 2, 0xaa000000);
-                        graphics.fill(cx - half, cy + dy - 1, cx + half + 1, cy + dy + 1, color);
-                    }
-                }
-                case CLOSE -> {
-                    for (int i = -s; i <= s; i++) {
-                        graphics.fill(cx + i, cy + i, cx + i + 2, cy + i + 2, color);
-                        graphics.fill(cx + i, cy - i, cx + i + 2, cy - i + 2, color);
-                    }
-                }
-                case SETTINGS -> {
-                    graphics.fill(cx - 1, cy - s, cx + 2, cy + s + 1, color);
-                    graphics.fill(cx - s, cy - 1, cx + s + 1, cy + 2, color);
-                    graphics.fill(cx - 3, cy - 3, cx + 4, cy + 4, 0xff20252b);
-                    graphics.fill(cx - 1, cy - 1, cx + 2, cy + 2, color);
-                }
-                case TELEPORT -> {
-                    graphics.fill(cx - 1, cy - s, cx + 2, cy + s + 1, color);
-                    graphics.fill(cx - s, cy - 1, cx + s + 1, cy + 2, color);
-                    graphics.fill(cx - 3, cy - 3, cx + 4, cy + 4, 0xff20252b);
-                }
+                case MENU -> MapIconAtlas.drawUi(
+                        graphics, MapIconAtlas.UiIcon.MENU, cx, cy, size, rgb);
+                case CLOSE -> MapIconAtlas.drawUi(
+                        graphics, MapIconAtlas.UiIcon.CLOSE, cx, cy, size, rgb);
+                case SETTINGS -> MapIconAtlas.drawUi(
+                        graphics, MapIconAtlas.UiIcon.SETTINGS, cx, cy, size, rgb);
+                case TELEPORT -> MapIconAtlas.drawUi(
+                        graphics, MapIconAtlas.UiIcon.TELEPORT, cx, cy, size, rgb);
+                case ADD -> MapIconAtlas.drawUi(
+                        graphics, MapIconAtlas.UiIcon.ADD, cx, cy, size, rgb);
+                case LOCATE -> MapIconAtlas.drawUi(
+                        graphics, MapIconAtlas.UiIcon.LOCATE, cx, cy, size, rgb);
                 case CHEVRON_RIGHT -> {
+                    int s = Math.max(3, size / 2 - 1);
                     for (int i = -s / 2; i <= s / 2; i++) {
                         int offset = Math.abs(i);
-                        graphics.fill(cx + offset - 1, cy + i, cx + offset + 1, cy + i + 2, color);
+                        graphics.fill(
+                                cx + offset - 1, cy + i,
+                                cx + offset + 1, cy + i + 2,
+                                color);
                     }
-                }
-                case LOCATE -> {
-                    int r = Math.max(4, Math.min(7, s));
-                    graphics.fill(cx - 1, cy - r - 2, cx + 2, cy - r + 1, color);
-                    graphics.fill(cx - 1, cy + r - 1, cx + 2, cy + r + 2, color);
-                    graphics.fill(cx - r - 2, cy - 1, cx - r + 1, cy + 2, color);
-                    graphics.fill(cx + r - 1, cy - 1, cx + r + 2, cy + 2, color);
-
-                    graphics.fill(cx - r, cy - r, cx - r + 2, cy - 2, color);
-                    graphics.fill(cx - r, cy - r, cx - 2, cy - r + 2, color);
-                    graphics.fill(cx + r - 1, cy - r, cx + r + 1, cy - 2, color);
-                    graphics.fill(cx + 2, cy - r, cx + r + 1, cy - r + 2, color);
-                    graphics.fill(cx - r, cy + 2, cx - r + 2, cy + r + 1, color);
-                    graphics.fill(cx - r, cy + r - 1, cx - 2, cy + r + 1, color);
-                    graphics.fill(cx + r - 1, cy + 2, cx + r + 1, cy + r + 1, color);
-                    graphics.fill(cx + 2, cy + r - 1, cx + r + 1, cy + r + 1, color);
-
-                    graphics.fill(cx - 2, cy - 2, cx + 3, cy + 3, 0xaa000000);
-                    graphics.fill(cx - 1, cy - 1, cx + 2, cy + 2, color);
                 }
             }
         }
@@ -612,7 +587,7 @@ final class MapUiControls {
 
             graphics.pose().pushPose();
             graphics.pose().translate(0.0f, 0.0f, 120.0f);
-            int oy = y + height + 2;
+            int oy = popupY();
             for (int i = 0; i < options.size(); i++) {
                 int itemY = oy + i * height;
                 boolean itemHover = mouseX >= x && mouseX < x + width
@@ -634,7 +609,7 @@ final class MapUiControls {
             }
             if (!open) return false;
 
-            int oy = y + height + 2;
+            int oy = popupY();
             for (int i = 0; i < options.size(); i++) {
                 int itemY = oy + i * height;
                 if (mouseX >= x && mouseX < x + width
@@ -652,11 +627,156 @@ final class MapUiControls {
         @Override void closePopup() { open = false; }
         @Override boolean popupOpen() { return open; }
 
+        private int popupY() {
+            int screenH = Minecraft.getInstance().getWindow().getGuiScaledHeight();
+            int popupH = options.size() * height;
+            int desired = y + height + 2;
+            return Math.max(2, Math.min(desired, screenH - popupH - 2));
+        }
+
         private String labelFor(T current) {
             for (Option<T> option : options) {
                 if (Objects.equals(option.value(), current)) return option.label();
             }
             return String.valueOf(current);
+        }
+    }
+
+    static final class MarkerIconSelect extends Control {
+        private static final int COLUMNS = 6;
+        private static final int CELL = 26;
+        private static final int LABEL_H = 18;
+
+        private final Consumer<MapMarkerStore.Icon> onChange;
+        private MapMarkerStore.Icon value;
+        private boolean open;
+
+        MarkerIconSelect(
+                int width,
+                MapMarkerStore.Icon initial,
+                Consumer<MapMarkerStore.Icon> onChange) {
+            super(width, 22);
+            this.value = initial == null ? MapMarkerStore.Icon.PIN : initial;
+            this.onChange = onChange == null ? next -> {} : onChange;
+        }
+
+        MapMarkerStore.Icon value() { return value; }
+
+        void setValue(MapMarkerStore.Icon next) {
+            if (next != null) value = next;
+        }
+
+        @Override
+        void render(GuiGraphics graphics, Font font, int mouseX, int mouseY) {
+            if (!visible) return;
+            boolean hover = contains(mouseX, mouseY);
+            graphics.fill(
+                    x, y, x + width, y + height,
+                    hover ? 0xff3a424b : 0xff2b3239);
+            MapIconAtlas.drawMarker(
+                    graphics, value, x + 13, y + height / 2, 14,
+                    0xe7edf2, false);
+            graphics.drawString(
+                    font, value.label, x + 27, y + 7,
+                    0xffffffff, false);
+
+            int cx = x + width - 10;
+            graphics.fill(cx - 3, y + 9, cx + 4, y + 10, 0xffdbe1e6);
+            graphics.fill(cx - 2, y + 10, cx + 3, y + 11, 0xffdbe1e6);
+            graphics.fill(cx - 1, y + 11, cx + 2, y + 12, 0xffdbe1e6);
+
+            if (!open) return;
+
+            int[] bounds = popupBounds();
+            int px = bounds[0];
+            int py = bounds[1];
+            int popupW = bounds[2];
+            int popupH = bounds[3];
+
+            graphics.pose().pushPose();
+            graphics.pose().translate(0.0f, 0.0f, 130.0f);
+            graphics.fill(px, py, px + popupW, py + popupH, 0xf51d2227);
+
+            MapMarkerStore.Icon[] icons = MapMarkerStore.Icon.values();
+            int hoveredIndex = -1;
+            for (int i = 0; i < icons.length; i++) {
+                int col = i % COLUMNS;
+                int row = i / COLUMNS;
+                int cellX = px + col * CELL;
+                int cellY = py + row * CELL;
+                boolean selected = icons[i] == value;
+                boolean cellHover = mouseX >= cellX && mouseX < cellX + CELL
+                        && mouseY >= cellY && mouseY < cellY + CELL;
+                if (cellHover) hoveredIndex = i;
+
+                if (selected || cellHover) {
+                    graphics.fill(
+                            cellX + 1, cellY + 1,
+                            cellX + CELL - 1, cellY + CELL - 1,
+                            selected ? 0xff39434b : 0xff2d353d);
+                }
+                MapIconAtlas.drawMarker(
+                        graphics, icons[i],
+                        cellX + CELL / 2, cellY + CELL / 2,
+                        16,
+                        selected ? 0xffd166 : cellHover ? 0xffffff : 0xcfd6dc,
+                        false);
+            }
+
+            int labelY = py + popupH - LABEL_H;
+            graphics.fill(px, labelY, px + popupW, py + popupH, 0xff252b31);
+            MapMarkerStore.Icon labelIcon = hoveredIndex >= 0
+                    ? icons[hoveredIndex] : value;
+            graphics.drawCenteredString(
+                    font, labelIcon.label,
+                    px + popupW / 2, labelY + 5,
+                    0xffe8edf1);
+            graphics.pose().popPose();
+        }
+
+        @Override
+        boolean mouseClicked(double mouseX, double mouseY, int button) {
+            if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT || !enabled) return false;
+            if (contains(mouseX, mouseY)) {
+                open = !open;
+                return true;
+            }
+            if (!open) return false;
+
+            int[] bounds = popupBounds();
+            int px = bounds[0];
+            int py = bounds[1];
+            int gridH = bounds[3] - LABEL_H;
+            if (inside(mouseX, mouseY, px, py, bounds[2], gridH)) {
+                int col = ((int) mouseX - px) / CELL;
+                int row = ((int) mouseY - py) / CELL;
+                int index = row * COLUMNS + col;
+                MapMarkerStore.Icon[] icons = MapMarkerStore.Icon.values();
+                if (col >= 0 && col < COLUMNS && index >= 0 && index < icons.length) {
+                    value = icons[index];
+                    onChange.accept(value);
+                    open = false;
+                    return true;
+                }
+            }
+            if (inside(mouseX, mouseY, px, py, bounds[2], bounds[3])) return true;
+            open = false;
+            return false;
+        }
+
+        @Override void closePopup() { open = false; }
+        @Override boolean popupOpen() { return open; }
+
+        private int[] popupBounds() {
+            int rows = (MapMarkerStore.Icon.values().length + COLUMNS - 1) / COLUMNS;
+            int popupW = COLUMNS * CELL;
+            int popupH = rows * CELL + LABEL_H;
+            int screenW = Minecraft.getInstance().getWindow().getGuiScaledWidth();
+            int screenH = Minecraft.getInstance().getWindow().getGuiScaledHeight();
+            int px = Math.max(2, Math.min(x, screenW - popupW - 2));
+            int desiredY = y + height + 2;
+            int py = Math.max(2, Math.min(desiredY, screenH - popupH - 2));
+            return new int[] {px, py, popupW, popupH};
         }
     }
 
@@ -891,7 +1011,7 @@ final class MapUiControls {
             graphics.pose().pushPose();
             graphics.pose().translate(0.0f, 0.0f, 140.0f);
             int px = pickerX();
-            int py = y + height + 3;
+            int py = pickerY();
             graphics.fill(px, py, px + PICKER_W, py + PICKER_H, 0xf522282e);
             graphics.fill(px + 1, py + 1, px + PICKER_W - 1, py + PICKER_H - 1, 0xff1d2227);
 
@@ -939,7 +1059,7 @@ final class MapUiControls {
             if (!open) return false;
 
             int px = pickerX();
-            int py = y + height + 3;
+            int py = pickerY();
             if (inside(mouseX, mouseY, px + SV_X, py + SV_Y, SV_W, SV_H)) {
                 dragMode = 1;
                 updateSv(mouseX, mouseY);
@@ -989,19 +1109,26 @@ final class MapUiControls {
         @Override boolean popupOpen() { return open; }
 
         private int pickerX() {
-            return x + width - PICKER_W;
+            int screenW = Minecraft.getInstance().getWindow().getGuiScaledWidth();
+            return Math.max(2, Math.min(x + width - PICKER_W, screenW - PICKER_W - 2));
+        }
+
+        private int pickerY() {
+            int screenH = Minecraft.getInstance().getWindow().getGuiScaledHeight();
+            int desired = y + height + 3;
+            return Math.max(2, Math.min(desired, screenH - PICKER_H - 2));
         }
 
         private void updateSv(double mouseX, double mouseY) {
             int px = pickerX();
-            int py = y + height + 3;
+            int py = pickerY();
             saturation = (float) Math.max(0.0, Math.min(1.0, (mouseX - px - SV_X) / SV_W));
             value = 1.0f - (float) Math.max(0.0, Math.min(1.0, (mouseY - py - SV_Y) / SV_H));
             commitHsv();
         }
 
         private void updateHue(double mouseY) {
-            int py = y + height + 3;
+            int py = pickerY();
             hue = (float) Math.max(0.0, Math.min(0.9999, (mouseY - py - SV_Y) / SV_H));
             commitHsv();
         }
