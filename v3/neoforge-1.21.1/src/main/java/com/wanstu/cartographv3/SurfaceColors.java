@@ -1,9 +1,27 @@
 package com.wanstu.cartographv3;
 
+import net.minecraft.world.level.material.MapColor;
+
 final class SurfaceColors {
     static final short UNKNOWN_HEIGHT = Short.MIN_VALUE;
 
     private SurfaceColors() {}
+
+    static int surfaceColor(MapColor color, int waterDepth, int worldX, int worldZ) {
+        if (color != MapColor.WATER) return color.col & 0x00ffffff;
+
+        double depthShade = Math.max(0, waterDepth) * 0.1
+                + (((worldX + worldZ) & 1) == 0 ? 0.0 : 0.2);
+        MapColor.Brightness brightness;
+        if (depthShade < 0.5) {
+            brightness = MapColor.Brightness.HIGH;
+        } else if (depthShade > 0.9) {
+            brightness = MapColor.Brightness.LOW;
+        } else {
+            brightness = MapColor.Brightness.NORMAL;
+        }
+        return color.calculateRGBColor(brightness) & 0x00ffffff;
+    }
 
     static int[] shade(int[] rgb, short[] heights) {
         int[] out = rgb.clone();

@@ -30,6 +30,7 @@ final class LoadedSurfaceReader {
                 int worldX = chunkX * 16 + x;
                 int worldZ = chunkZ * 16 + z;
                 int top = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+                int oceanFloor = chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z);
                 for (int y = top; y >= chunk.getMinBuildHeight(); y--) {
                     pos.set(worldX, y, worldZ);
                     var state = chunk.getBlockState(pos);
@@ -40,7 +41,9 @@ final class LoadedSurfaceReader {
                         color = MapColor.STONE;
                     }
                     if (color == MapColor.NONE) continue;
-                    colors[index] = color.col & 0x00ffffff;
+                    int waterDepth = color == MapColor.WATER ? Math.max(0, y - oceanFloor) : 0;
+                    colors[index] = SurfaceColors.surfaceColor(
+                            color, waterDepth, worldX, worldZ);
                     heights[index] = (short) y;
                     break;
                 }
