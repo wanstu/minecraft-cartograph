@@ -57,6 +57,12 @@ final class SavedSurfaceReader {
                 oceanFloor = new SimpleBitStorage(heightBits, 256, packedOceanFloor);
             }
 
+            SimpleBitStorage reliefHeightmap = null;
+            long[] packedRelief = heightmaps.getLongArray("MOTION_BLOCKING_NO_LEAVES");
+            if (packedRelief.length == expectedHeightLongs) {
+                reliefHeightmap = new SimpleBitStorage(heightBits, 256, packedRelief);
+            }
+
             Map<Integer, Section> sections = new HashMap<>();
             ListTag rawSections = nbt.getList("sections", Tag.TAG_COMPOUND);
             for (int i = 0; i < rawSections.size(); i++) {
@@ -118,7 +124,14 @@ final class SavedSurfaceReader {
                         }
                         colors[index] = SurfaceColors.surfaceColor(
                                 color, waterDepth, chunkX * 16 + x, chunkZ * 16 + z);
-                        heights[index] = (short) y;
+                        int reliefY = y;
+                        if (reliefHeightmap != null) {
+                            int reliefStored = reliefHeightmap.get(index);
+                            if (reliefStored > 0 && reliefStored <= worldHeight) {
+                                reliefY = minBuildHeight + reliefStored - 1;
+                            }
+                        }
+                        heights[index] = (short) reliefY;
                         break;
                     }
                 }
