@@ -1,6 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-<circle cx="16" cy="16" r="11"/>
-<circle cx="16" cy="10" r="1"/>
-<line x1="16" y1="14" x2="16" y2="23"/>
-<line x1="13" y1="23" x2="19" y2="23"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+<style>
+svg {
+  display:block;
+  width:256px;
+  height:256px;
+  color:#e8eef5;
+  overflow:visible;
+}
+.stroke {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:3.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.thin {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:2.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.fill {
+  fill:#e8eef5 !important;
+  stroke:none;
+}
+.soft {
+  fill:rgba(232,238,245,.13) !important;
+  stroke:#dfe7ef !important;
+  stroke-width:2.4;
+}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
+  fill:#f2bd45 !important;
+  stroke:#dfe7ef !important;
+  stroke-width:1.5;
+}
+</style>
+<circle class="blue" cx="32" cy="32" r="25"/><circle cx="32" cy="20" r="4" fill="#0d2233"/><path d="M32 29v18" stroke="#0d2233" stroke-width="5" stroke-linecap="round"/>
 </svg>

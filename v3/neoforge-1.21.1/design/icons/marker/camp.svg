@@ -1,6 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-<polygon points="6,25 16,7 26,25"/>
-<line x1="11" y1="25" x2="16" y2="17"/>
-<line x1="21" y1="25" x2="16" y2="17"/>
-<line x1="5" y1="27" x2="27" y2="27"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+<style>
+svg {
+  display:block;
+  width:256px;
+  height:256px;
+  color:#e8eef5;
+  overflow:visible;
+}
+.stroke {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:3.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.thin {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:2.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.fill {
+  fill:#e8eef5 !important;
+  stroke:none;
+}
+.soft {
+  fill:rgba(232,238,245,.13) !important;
+  stroke:#dfe7ef !important;
+  stroke-width:2.4;
+}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
+  fill:#f2bd45 !important;
+  stroke:#dfe7ef !important;
+  stroke-width:1.5;
+}
+</style>
+<path class="gold" d="M10 51 31 15l23 36Z"/><path d="M24 51 32 34l9 17Z" fill="#3a2a19"/><path class="brown" d="M45 15c8-5 12 3 8 8 6 2 6 10 0 12-2 5-9 5-11 0-6-2-6-10 0-12-3-4-1-7 3-8Z"/>
 </svg>

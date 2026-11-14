@@ -7,6 +7,8 @@ import net.minecraft.resources.ResourceLocation;
 import java.util.Locale;
 
 final class MapIconAtlas {
+    private static final int TEXTURE_SIZE = 64;
+
     enum UiIcon {
         MENU("menu"),
         MARKERS("markers"),
@@ -24,60 +26,58 @@ final class MapIconAtlas {
         private final ResourceLocation texture;
 
         UiIcon(String name) {
-            this.texture = texture("ui/" + name);
+            this.texture = texture("ui/" + name + "_mono");
         }
     }
 
-    private static final ResourceLocation PLAYER_ARROW = texture("player/arrow");
-    private static final ResourceLocation PIN = texture("marker/pin");
-    private static final ResourceLocation VILLAGE = texture("marker/village");
-    private static final ResourceLocation MANSION = texture("marker/mansion");
-    private static final ResourceLocation TEMPLE = texture("marker/temple");
-    private static final ResourceLocation OUTPOST = texture("marker/outpost");
-    private static final ResourceLocation MINE = texture("marker/mine");
-    private static final ResourceLocation PORTAL = texture("marker/portal");
-    private static final ResourceLocation SHIP = texture("marker/ship");
-    private static final ResourceLocation CITY = texture("marker/city");
-    private static final ResourceLocation FORTRESS = texture("marker/fortress");
-    private static final ResourceLocation HOME = texture("marker/home");
-    private static final ResourceLocation FLAG = texture("marker/flag");
-    private static final ResourceLocation CAMP = texture("marker/camp");
-    private static final ResourceLocation FARM = texture("marker/farm");
-    private static final ResourceLocation SHOP = texture("marker/shop");
-    private static final ResourceLocation RAIL = texture("marker/rail");
-    private static final ResourceLocation HARBOR = texture("marker/harbor");
-    private static final ResourceLocation FACTORY = texture("marker/factory");
-    private static final ResourceLocation TOWER = texture("marker/tower");
-    private static final ResourceLocation CAVE = texture("marker/cave");
-    private static final ResourceLocation MOUNTAIN = texture("marker/mountain");
-    private static final ResourceLocation TREE = texture("marker/tree");
-    private static final ResourceLocation WATER = texture("marker/water");
-    private static final ResourceLocation DANGER = texture("marker/danger");
-    private static final ResourceLocation INFO = texture("marker/info");
-    private static final ResourceLocation FOOD = texture("marker/food");
-    private static final ResourceLocation STAR = texture("marker/star");
+    private static final ResourceLocation PLAYER_ARROW =
+            texture("player/arrow_mono");
+    private static final ResourceLocation PLAYER_CROSS =
+            texture("player/cross_mono");
 
     private MapIconAtlas() {}
 
-    static void drawUi(GuiGraphics graphics, UiIcon icon, int centerX, int centerY, int size, int rgb) {
+    static void drawUi(
+            GuiGraphics graphics, UiIcon icon,
+            int centerX, int centerY, int size, int rgb) {
         draw(graphics, icon.texture, centerX, centerY, size, rgb, 1.0f);
     }
 
     static void drawPlayerArrow(
             GuiGraphics graphics, int centerX, int centerY, int size, int rgb) {
-        draw(graphics, PLAYER_ARROW, centerX, centerY, size + 3, 0x111315, 0.95f);
+        draw(graphics, PLAYER_ARROW, centerX, centerY, size + 3, 0x101317, 0.95f);
         draw(graphics, PLAYER_ARROW, centerX, centerY, size, rgb, 1.0f);
+    }
+
+    static void drawPlayerCross(
+            GuiGraphics graphics, int centerX, int centerY, int size, int rgb) {
+        draw(graphics, PLAYER_CROSS, centerX, centerY, size + 3, 0x101317, 0.95f);
+        draw(graphics, PLAYER_CROSS, centerX, centerY, size, rgb, 1.0f);
+    }
+
+    static void drawMarker(
+            GuiGraphics graphics, MapMarkerStore.Icon icon,
+            int centerX, int centerY, int size, int rgb,
+            boolean hovered, boolean htmlPalette) {
+        String base = "marker/" + icon.name().toLowerCase(Locale.ROOT);
+        ResourceLocation texture = texture(base + (htmlPalette ? "" : "_mono"));
+
+        if (hovered) {
+            ResourceLocation halo = texture(base + "_mono");
+            draw(graphics, halo, centerX, centerY, size + 4, 0xffffff, 0.72f);
+        }
+
+        if (htmlPalette) {
+            draw(graphics, texture, centerX, centerY, size, 0xffffff, 1.0f);
+        } else {
+            draw(graphics, texture, centerX, centerY, size, rgb, 1.0f);
+        }
     }
 
     static void drawMarker(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
             int centerX, int centerY, int size, int rgb, boolean hovered) {
-        ResourceLocation markerTexture =
-                texture("marker/" + icon.name().toLowerCase(Locale.ROOT));
-        if (hovered) {
-            draw(graphics, markerTexture, centerX, centerY, size + 4, 0xffffff, 0.95f);
-        }
-        draw(graphics, markerTexture, centerX, centerY, size, rgb, 1.0f);
+        drawMarker(graphics, icon, centerX, centerY, size, rgb, hovered, false);
     }
 
     private static void draw(
@@ -95,8 +95,8 @@ final class MapIconAtlas {
                 centerY - size / 2,
                 size, size,
                 0.0f, 0.0f,
-                32, 32,
-                32, 32);
+                TEXTURE_SIZE, TEXTURE_SIZE,
+                TEXTURE_SIZE, TEXTURE_SIZE);
         RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
     }
 

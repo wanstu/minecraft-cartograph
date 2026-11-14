@@ -1,10 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-<rect x="5" y="16" width="6" height="11" rx="1"/>
-<rect x="13" y="10" width="7" height="17" rx="1"/>
-<rect x="22" y="14" width="5" height="13" rx="1"/>
-<line x1="4" y1="27" x2="28" y2="27"/>
-<line x1="16" y1="6" x2="16" y2="10"/>
-<line x1="8" y1="19" x2="8" y2="22"/>
-<line x1="16" y1="14" x2="16" y2="17"/>
-<line x1="24" y1="18" x2="24" y2="21"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+<style>
+svg {
+  display:block;
+  width:256px;
+  height:256px;
+  color:#e8eef5;
+  overflow:visible;
+}
+.stroke {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:3.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.thin {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:2.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.fill {
+  fill:#e8eef5 !important;
+  stroke:none;
+}
+.soft {
+  fill:rgba(232,238,245,.13) !important;
+  stroke:#dfe7ef !important;
+  stroke-width:2.4;
+}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
+  fill:#f2bd45 !important;
+  stroke:#dfe7ef !important;
+  stroke-width:1.5;
+}
+</style>
+<path class="stone" d="M8 57V34h12v23M24 57V18h16v39M44 57V29h12v28"/><path class="blue" d="M29 25h6v7h-6Zm0 12h6v7h-6Z"/><path class="stroke" d="M6 57h52"/>
 </svg>

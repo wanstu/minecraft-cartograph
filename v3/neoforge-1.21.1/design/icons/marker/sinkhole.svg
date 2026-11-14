@@ -1,5 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-<circle cx="16" cy="16" r="12"/>
-<circle cx="16" cy="17" r="7"/>
-<polyline points="8,13 12,15 16,14 21,16 25,13"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+<style>
+svg {
+  display:block;
+  width:256px;
+  height:256px;
+  color:#e8eef5;
+  overflow:visible;
+}
+.stroke {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:3.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.thin {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:2.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.fill {
+  fill:#e8eef5 !important;
+  stroke:none;
+}
+.soft {
+  fill:rgba(232,238,245,.13) !important;
+  stroke:#dfe7ef !important;
+  stroke-width:2.4;
+}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
+  fill:#f2bd45 !important;
+  stroke:#dfe7ef !important;
+  stroke-width:1.5;
+}
+</style>
+<ellipse class="stone" cx="32" cy="32" rx="26" ry="17"/><ellipse cx="32" cy="34" rx="16" ry="9" fill="#0b1016"/><path class="thin" d="M12 29c12 5 28 5 40 0"/>
 </svg>

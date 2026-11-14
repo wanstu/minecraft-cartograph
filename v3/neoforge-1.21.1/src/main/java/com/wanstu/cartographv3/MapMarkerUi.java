@@ -147,7 +147,8 @@ final class MapMarkerUi {
             boolean hovered = Math.abs(mouseX - sx) <= hoverRadius
                     && Math.abs(mouseY - sy) <= hoverRadius;
             drawMarkerIcon(
-                    graphics, marker.icon, sx, sy, marker.color, hovered, iconSize);
+                    graphics, marker.icon, sx, sy, marker.color, hovered, iconSize,
+                    marker.origin == MapMarkerStore.Origin.AUTO && !marker.modifiedAuto);
             iconRects.add(new int[] {
                     sx - iconSize / 2 - 2,
                     sy - iconSize / 2 - 2,
@@ -340,7 +341,8 @@ final class MapMarkerUi {
             drawMarkerIcon(
                     graphics, marker.icon,
                     contentX + 16, y + 18,
-                    marker.color, false, 18);
+                    marker.color, false, 18,
+                    marker.origin == MapMarkerStore.Origin.AUTO && !marker.modifiedAuto);
             graphics.drawString(
                     font, marker.name,
                     contentX + 32, y + 7,
@@ -613,11 +615,12 @@ final class MapMarkerUi {
 
     private static void drawMarkerIcon(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
-            int x, int y, int rgb, boolean hovered, int size) {
+            int x, int y, int rgb, boolean hovered, int size,
+            boolean htmlPalette) {
         MapIconAtlas.drawMarker(
                 graphics, icon, x, y,
                 hovered ? size + 2 : size,
-                rgb, hovered);
+                rgb, hovered, htmlPalette);
     }
 
     private static boolean overlaps(List<int[]> occupied, int[] rect) {

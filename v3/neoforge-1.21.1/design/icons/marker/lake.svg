@@ -1,4 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-<polyline points="5,17 8,12 14,10 21,11 27,15 28,20 24,25 16,27 9,24 5,17"/>
-<polyline points="8,19 13,17 18,19 24,17"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+<style>
+svg {
+  display:block;
+  width:256px;
+  height:256px;
+  color:#e8eef5;
+  overflow:visible;
+}
+.stroke {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:3.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.thin {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:2.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.fill {
+  fill:#e8eef5 !important;
+  stroke:none;
+}
+.soft {
+  fill:rgba(232,238,245,.13) !important;
+  stroke:#dfe7ef !important;
+  stroke-width:2.4;
+}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
+  fill:#f2bd45 !important;
+  stroke:#dfe7ef !important;
+  stroke-width:1.5;
+}
+</style>
+<path class="water" d="M8 39c0-13 11-20 25-20 13 0 23 7 23 18 0 12-10 19-25 19C18 56 8 50 8 39Z"/><path class="green" d="M9 32c4-9 9-12 17-14l-3-6 6 5 7-8 1 8c8 1 15 5 19 12"/>
 </svg>

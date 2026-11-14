@@ -1,6 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-<line x1="16" y1="5" x2="16" y2="25"/>
-<circle cx="16" cy="9" r="3"/>
-<polyline points="8,18 8,22 12,26 20,26 24,22 24,18"/>
-<line x1="10" y1="19" x2="22" y2="19"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+<style>
+svg {
+  display:block;
+  width:256px;
+  height:256px;
+  color:#e8eef5;
+  overflow:visible;
+}
+.stroke {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:3.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.thin {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:2.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.fill {
+  fill:#e8eef5 !important;
+  stroke:none;
+}
+.soft {
+  fill:rgba(232,238,245,.13) !important;
+  stroke:#dfe7ef !important;
+  stroke-width:2.4;
+}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
+  fill:#f2bd45 !important;
+  stroke:#dfe7ef !important;
+  stroke-width:1.5;
+}
+</style>
+<path class="water" d="M7 49c8-5 15 5 23 0s15 5 27 0v9H7Z"/><path class="brown" d="M9 35h34v7H9Zm6-13h7v20h-7Zm23 5h7v15h-7Z"/><path class="stroke" d="M48 12v28m-9-18h18M48 12c-5 0-8 3-8 7m8-7c5 0 8 3 8 7"/>
 </svg>

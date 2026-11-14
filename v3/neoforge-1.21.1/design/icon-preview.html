@@ -174,6 +174,7 @@ const icons = [
 {g:'player',group:'玩家图标',name:'十字准星',meta:'无方向',svg:I('<circle class="stroke" cx="32" cy="32" r="14"/><path class="stroke" d="M32 8v12m0 24v12M8 32h12m24 0h12"/><circle class="fill" cx="32" cy="32" r="3"/>')},
 
 {g:'menu',group:'菜单图标',desc:'界面与常用操作',name:'菜单',svg:I('<path class="stroke" d="M14 18h36M14 32h36M14 46h36"/>')},
+{g:'menu',group:'菜单图标',name:'标点',svg:I('<path class="stroke" d="M32 7c-10 0-18 8-18 18 0 14 18 31 18 31s18-17 18-31c0-10-8-18-18-18Z"/><circle class="fill" cx="32" cy="25" r="6"/>')},
 {g:'menu',group:'菜单图标',name:'设置',svg:I('<path class="stroke" d="M32 11v7m0 28v7M11 32h7m28 0h7M17 17l5 5m20 20 5 5M47 17l-5 5M22 42l-5 5"/><circle class="stroke" cx="32" cy="32" r="11"/><circle class="fill" cx="32" cy="32" r="4"/>')},
 {g:'menu',group:'菜单图标',name:'图层',svg:I('<path class="stroke" d="m32 10 21 11-21 11L11 21Zm-18 22 18 10 18-10M14 43l18 10 18-10"/>')},
 {g:'menu',group:'菜单图标',name:'定位',svg:I('<circle class="stroke" cx="32" cy="32" r="14"/><circle class="fill" cx="32" cy="32" r="4"/><path class="stroke" d="M32 7v9m0 32v9M7 32h9m32 0h9"/>')},
@@ -182,6 +183,7 @@ const icons = [
 {g:'menu',group:'菜单图标',name:'编辑',svg:I('<path class="stroke" d="m13 47 4-13 23-23 13 13-23 23Z"/><path class="thin" d="m36 15 13 13M13 47l13-4"/>')},
 {g:'menu',group:'菜单图标',name:'删除',svg:I('<path class="stroke" d="M19 21h26l-3 33H22Zm-4-7h34M25 14l2-6h10l2 6M27 28v17m10-17v17"/>')},
 {g:'menu',group:'菜单图标',name:'恢复',svg:I('<path class="stroke" d="M20 18H9v-11M10 18c7-10 23-13 34-5 12 9 13 26 3 36-8 8-21 9-31 3"/>')},
+{g:'menu',group:'菜单图标',name:'重置',svg:I('<path class="stroke" d="M19 18H8V7M9 18c7-11 23-14 35-6 13 9 14 27 4 38M32 22v13l9 6"/>')},
 {g:'menu',group:'菜单图标',name:'传送',svg:I('<path class="stroke" d="M32 7c-9 0-16 7-16 16 0 13 16 31 16 31s16-18 16-31c0-9-7-16-16-16Z"/><circle class="stroke" cx="32" cy="23" r="6"/><ellipse class="thin" cx="32" cy="55" rx="18" ry="5"/>')},
 
 {g:'structure',group:'结构图标',desc:'自动识别的游戏结构',name:'村庄',svg:I('<path class="brown" d="M8 30 20 19l11 9 11-12 14 14v24H8Z"/><path class="gold" d="m6 31 14-14 13 11 9-14 16 16-3 3-13-13-9 14-13-10L10 34Z"/><path class="soft" d="M16 38h10v16H16Zm27-8h8v10h-8Z"/>')},
@@ -199,8 +201,10 @@ const icons = [
 {g:'structure',group:'结构图标',name:'商店',svg:I('<path class="brown" d="M10 28h44v29H10Z"/><path class="gold" d="M7 18h50l-5 12H12Z"/><path class="soft" d="M16 35h13v12H16Zm21 0h11v22H37Z"/>')},
 {g:'structure',group:'结构图标',name:'海底神殿',svg:I('<path class="water" d="M6 55h52"/><path class="stone" d="M12 47h40l-4-20H16Z"/><path class="gold" d="M25 27 32 12l7 15Z"/><path class="stroke" d="M19 36h26M22 47V36m20 11V36"/>')},
 {g:'structure',group:'结构图标',name:'远古城市',svg:I('<path class="stone" d="M8 55V31h9V18h8v13h8V11h9v20h14v24Z"/><path class="blue" d="M27 43h10v12H27Z"/><path class="stroke" d="M7 55h50"/>')},
+{g:'structure',group:'结构图标',name:'要塞',svg:I('<path class="stone" d="M8 23h48v34H8Z"/><path class="soft" d="M6 12h10v10h8V12h8v10h8V12h8v10h10v9H6Z"/><path class="stroke" d="M16 34h10v23M38 34h10v23M26 42h12"/>')},
 
-{g:'custom',group:'自定义标点',desc:'玩家手动添加的兴趣点',name:'住宅',svg:I('<path class="gold" d="m8 31 24-20 24 20-4 5-20-16-20 16Z"/><path class="brown" d="M14 32h36v25H14Z"/><path class="soft" d="M26 42h12v15H26Z"/>')},
+{g:'custom',group:'自定义标点',desc:'玩家手动添加的兴趣点',name:'标点',svg:I('<path class="gold" d="M32 6c-11 0-20 8-20 19 0 15 20 33 20 33s20-18 20-33C52 14 43 6 32 6Z"/><circle class="fill" cx="32" cy="25" r="7"/>')},
+{g:'custom',group:'自定义标点',name:'住宅',svg:I('<path class="gold" d="m8 31 24-20 24 20-4 5-20-16-20 16Z"/><path class="brown" d="M14 32h36v25H14Z"/><path class="soft" d="M26 42h12v15H26Z"/>')},
 {g:'custom',group:'自定义标点',name:'基地',svg:I('<path class="stone" d="M9 25h46v32H9Z"/><path class="soft" d="M7 25h10v-9h8v9h14v-9h8v9h10v8H7Z"/><path class="stroke" d="M27 45h10v12"/>')},
 {g:'custom',group:'自定义标点',name:'星标',svg:I('<path class="gold" d="m32 6 8 17 19 2-14 13 4 19-17-9-17 9 4-19L5 25l19-2Z"/>')},
 {g:'custom',group:'自定义标点',name:'旗帜',svg:I('<path class="stroke" d="M18 7v51"/><path class="gold" d="M20 10h31l-8 9 8 10H20Z"/>')},
@@ -215,7 +219,8 @@ const icons = [
 {g:'custom',group:'自定义标点',name:'宝箱',svg:I('<path class="brown" d="M9 24h46v30H9Z"/><path class="gold" d="M9 24c0-10 8-16 23-16s23 6 23 16Z"/><path class="stroke" d="M9 34h46"/><rect x="28" y="31" width="8" height="11" rx="2" fill="#f2bd45"/>')},
 {g:'custom',group:'自定义标点',name:'资源点',svg:I('<path class="gold" d="m32 7 7 17 18 2-14 12 5 18-16-9-16 9 5-18L7 26l18-2Z"/><circle cx="32" cy="32" r="5" fill="#8a6210"/>')},
 
-{g:'geo',group:'地理要素',desc:'自然地形、水系与区域标记',name:'湖泊',svg:I('<path class="water" d="M8 39c0-13 11-20 25-20 13 0 23 7 23 18 0 12-10 19-25 19C18 56 8 50 8 39Z"/><path class="green" d="M9 32c4-9 9-12 17-14l-3-6 6 5 7-8 1 8c8 1 15 5 19 12"/>')},
+{g:'geo',group:'地理要素',desc:'自然地形、水系与区域标记',name:'水域',svg:I('<path class="water" d="M5 18c8-6 14 6 22 0s15 6 32 0v10c-12 7-20-6-31 0S14 23 5 31Zm0 18c8-6 14 6 22 0s15 6 32 0v10c-12 7-20-6-31 0S14 41 5 49Z"/>')},
+{g:'geo',group:'地理要素',name:'湖泊',svg:I('<path class="water" d="M8 39c0-13 11-20 25-20 13 0 23 7 23 18 0 12-10 19-25 19C18 56 8 50 8 39Z"/><path class="green" d="M9 32c4-9 9-12 17-14l-3-6 6 5 7-8 1 8c8 1 15 5 19 12"/>')},
 {g:'geo',group:'地理要素',name:'河流',svg:I('<path class="water" d="M7 14c10 8 18 5 27 14s14 6 23 19l-8 7C40 43 34 46 24 35S12 28 5 21Z"/>')},
 {g:'geo',group:'地理要素',name:'大河',svg:I('<path class="water" d="M5 21c10-8 19 8 29 0s18 7 25-1v9c-9 9-17-6-26 2S14 24 5 33Zm0 17c10-8 19 8 29 0s18 7 25-1v9c-9 9-17-6-26 2S14 41 5 50Z"/>')},
 {g:'geo',group:'地理要素',name:'小河',svg:I('<path class="stroke" style="stroke:#61c8ff;stroke-width:5" d="M7 39c10-16 18 6 30-9s16 3 21-10"/>')},

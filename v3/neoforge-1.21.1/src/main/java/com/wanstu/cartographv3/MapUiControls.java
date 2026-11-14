@@ -679,7 +679,7 @@ final class MapUiControls {
                     hover ? 0xff3a424b : 0xff2b3239);
             MapIconAtlas.drawMarker(
                     graphics, value, x + 13, y + height / 2, 14,
-                    0xe7edf2, false);
+                    0xe7edf2, false, true);
             graphics.drawString(
                     font, value.label, x + 27, y + 7,
                     0xffffffff, false);
@@ -724,7 +724,7 @@ final class MapUiControls {
                         cellX + CELL / 2, cellY + CELL / 2,
                         16,
                         selected ? 0xffd166 : cellHover ? 0xffffff : 0xcfd6dc,
-                        false);
+                        false, true);
             }
 
             int labelY = py + popupH - LABEL_H;

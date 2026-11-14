@@ -1,12 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-<circle cx="16" cy="16" r="5"/>
-<circle cx="16" cy="16" r="2"/>
-<line x1="16" y1="4" x2="16" y2="8"/>
-<line x1="16" y1="24" x2="16" y2="28"/>
-<line x1="4" y1="16" x2="8" y2="16"/>
-<line x1="24" y1="16" x2="28" y2="16"/>
-<line x1="8" y1="8" x2="11" y2="11"/>
-<line x1="21" y1="21" x2="24" y2="24"/>
-<line x1="8" y1="24" x2="11" y2="21"/>
-<line x1="21" y1="11" x2="24" y2="8"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+<style>
+svg {
+  display:block;
+  width:256px;
+  height:256px;
+  color:#e8eef5;
+  overflow:visible;
+}
+.stroke {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:3.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.thin {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:2.2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.fill {
+  fill:#e8eef5 !important;
+  stroke:none;
+}
+.soft {
+  fill:rgba(232,238,245,.13) !important;
+  stroke:#dfe7ef !important;
+  stroke-width:2.4;
+}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
+  fill:#f2bd45 !important;
+  stroke:#dfe7ef !important;
+  stroke-width:1.5;
+}
+</style>
+<path class="stroke" d="M32 11v7m0 28v7M11 32h7m28 0h7M17 17l5 5m20 20 5 5M47 17l-5 5M22 42l-5 5"/><circle class="stroke" cx="32" cy="32" r="11"/><circle class="fill" cx="32" cy="32" r="4"/>
 </svg>

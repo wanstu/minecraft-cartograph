@@ -270,6 +270,12 @@ public final class MapScreenV3 extends Screen {
         if (!force && !viewportChanged) return;
 
         if (viewportChanged) {
+            // Disk restore is local-only and deliberately independent from the
+            // server request budget. Previously cached map data should appear
+            // immediately while server validation continues in the background.
+            MapClientCache.restoreVisibleFromDisk(
+                    dim, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
+
             lastRequestMinChunkX = minChunkX;
             lastRequestMaxChunkX = maxChunkX;
             lastRequestMinChunkZ = minChunkZ;
@@ -387,12 +393,8 @@ public final class MapScreenV3 extends Screen {
         int y = (int) Math.round(sy);
 
         if (MapUiSettings.markerType() == MapUiSettings.MarkerType.CROSS) {
-            int arm = Math.max(3, size / 2);
-            int thick = Math.max(1, size / 6);
-            graphics.fill(x - arm - 1, y - thick - 1, x + arm + 2, y + thick + 2, outline);
-            graphics.fill(x - thick - 1, y - arm - 1, x + thick + 2, y + arm + 2, outline);
-            graphics.fill(x - arm, y - thick, x + arm + 1, y + thick + 1, color);
-            graphics.fill(x - thick, y - arm, x + thick + 1, y + arm + 1, color);
+            MapIconAtlas.drawPlayerCross(
+                    graphics, x, y, Math.max(8, size), color);
             return;
         }
 

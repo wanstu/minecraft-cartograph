@@ -9,6 +9,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BiConsumer;
+import java.util.Set;
 
 final class PersistentTileStore {
     private static final int MAGIC = 0x43545633; // CTV3
@@ -16,7 +18,12 @@ final class PersistentTileStore {
     private static final int VERSION_SURFACE_FACTS = 2;
 
     private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(task -> {
-        Thread thread = new Thread(task, "cartograph-v3-client-cache");
+        Thread thread = new Thread(task, "cartograph-v3-client-cache-writer");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final ExecutorService READER = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "cartograph-v3-client-cache-reader");
         thread.setDaemon(true);
         return thread;
     });
@@ -24,6 +31,13 @@ final class PersistentTileStore {
     private PersistentTileStore() {}
 
     static Optional<SurfaceTile> load(UUID worldId, ChunkKey key) {
+        Optional<SurfaceTile> raw = loadRaw(worldId, key);
+        if (raw.isEmpty()) return raw;
+        SurfaceTile tile = raw.get();
+        return Optional.of(tile.hasSurfaceFacts() ? SatelliteSurfaceRenderer.render(tile) : tile);
+    }
+
+    private static Optional<SurfaceTile> loadRaw(UUID worldId, ChunkKey key) {
         Path file = file(worldId, key);
         if (!Files.isRegularFile(file)) return Optional.empty();
 
@@ -55,8 +69,7 @@ final class PersistentTileStore {
                     relief[i] = input.readShort();
                     water[i] = input.readByte();
                 }
-                tile = SatelliteSurfaceRenderer.render(
-                        SurfaceTile.fromFacts(key, states, biomes, surface, relief, water));
+                tile = SurfaceTile.fromFacts(key, states, biomes, surface, relief, water);
             } else {
                 return Optional.empty();
             }
@@ -66,6 +79,55 @@ final class PersistentTileStore {
         } catch (IOException | RuntimeException corrupt) {
             try { Files.deleteIfExists(file); } catch (IOException ignored) {}
             return Optional.empty();
+        }
+    }
+
+    static void loadVisibleAsync(
+            UUID worldId,
+            String dimension,
+            int minChunkX, int maxChunkX,
+            int minChunkZ, int maxChunkZ,
+            Set<ChunkKey> scheduled,
+            BiConsumer<UUID, SurfaceTile> consumer) {
+        if (worldId == null || dimension == null || dimension.isBlank()
+                || scheduled == null || consumer == null) return;
+
+        Path directory = directory(worldId, dimension);
+        READER.execute(() -> {
+            if (!Files.isDirectory(directory)) return;
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*.ctv3")) {
+                for (Path candidate : stream) {
+                    ChunkKey key = keyFromFile(dimension, candidate.getFileName().toString());
+                    if (key == null
+                            || key.x() < minChunkX || key.x() > maxChunkX
+                            || key.z() < minChunkZ || key.z() > maxChunkZ
+                            || !scheduled.add(key)) {
+                        continue;
+                    }
+
+                    Optional<SurfaceTile> tile = loadRaw(worldId, key);
+                    if (tile.isPresent()) {
+                        consumer.accept(worldId, tile.get());
+                    } else {
+                        scheduled.remove(key);
+                    }
+                }
+            } catch (IOException ignored) {}
+        });
+    }
+
+    private static ChunkKey keyFromFile(String dimension, String filename) {
+        if (filename == null || !filename.endsWith(".ctv3")) return null;
+        String stem = filename.substring(0, filename.length() - 5);
+        int split = stem.indexOf('_');
+        if (split <= 0 || split >= stem.length() - 1) return null;
+        try {
+            return new ChunkKey(
+                    dimension,
+                    Integer.parseInt(stem.substring(0, split)),
+                    Integer.parseInt(stem.substring(split + 1)));
+        } catch (NumberFormatException invalid) {
+            return null;
         }
     }
 
@@ -117,12 +179,16 @@ final class PersistentTileStore {
     }
 
     private static Path file(UUID worldId, ChunkKey key) {
+        return directory(worldId, key.dimension())
+                .resolve(key.x() + "_" + key.z() + ".ctv3");
+    }
+
+    private static Path directory(UUID worldId, String dimensionId) {
         String dimension = Base64.getUrlEncoder().withoutPadding().encodeToString(
-                key.dimension().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                dimensionId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return Minecraft.getInstance().gameDirectory.toPath()
                 .resolve("cartograph_v3_map_cache")
                 .resolve(worldId.toString())
-                .resolve(dimension)
-                .resolve(key.x() + "_" + key.z() + ".ctv3");
+                .resolve(dimension);
     }
 }

@@ -4,6 +4,8 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public final class MapClientCache {
     private static final org.slf4j.Logger LOG =
@@ -14,6 +16,12 @@ public final class MapClientCache {
     private static final Map<ChunkKey, Long> VALIDATED_SESSION = new HashMap<>();
     private record RegionKey(String dimension, int x, int z) {}
     private static final Map<RegionKey, Integer> REGION_TILE_COUNTS = new HashMap<>();
+    private record DiskRestore(java.util.UUID worldId, SurfaceTile tile) {}
+    private static final Set<ChunkKey> DISK_RESTORE_SCHEDULED = ConcurrentHashMap.newKeySet();
+    private static final ConcurrentLinkedQueue<DiskRestore> DISK_RESTORE_QUEUE =
+            new ConcurrentLinkedQueue<>();
+    private static final int MAX_DISK_RESTORES_PER_TICK = 512;
+
     private static ClientLevel world;
     private static java.util.UUID worldId;
     private static boolean worldInfoRequested;
@@ -36,6 +44,8 @@ public final class MapClientCache {
         MISSING_AT.clear();
         VALIDATED_SESSION.clear();
         REGION_TILE_COUNTS.clear();
+        DISK_RESTORE_SCHEDULED.clear();
+        DISK_RESTORE_QUEUE.clear();
         mapSession = 0L;
         tileRevision++;
         ticks = 0;
@@ -55,6 +65,7 @@ public final class MapClientCache {
 
     public static void tick() {
         ticks++;
+        drainDiskRestores();
         if (world != null && worldId == null && ticks % 20 == 0) {
             worldInfoRequested = false;
             requestWorldInfo();
@@ -63,6 +74,51 @@ public final class MapClientCache {
 
     public static SurfaceTile tile(ChunkKey key) {
         return TILES.get(key);
+    }
+
+    public static void restoreVisibleFromDisk(
+            String dimension,
+            int minChunkX, int maxChunkX,
+            int minChunkZ, int maxChunkZ) {
+        java.util.UUID currentWorldId = worldId;
+        if (world == null || currentWorldId == null || dimension == null || dimension.isBlank()) {
+            return;
+        }
+        PersistentTileStore.loadVisibleAsync(
+                currentWorldId,
+                dimension,
+                minChunkX, maxChunkX,
+                minChunkZ, maxChunkZ,
+                DISK_RESTORE_SCHEDULED,
+                (restoreWorldId, tile) ->
+                        DISK_RESTORE_QUEUE.add(new DiskRestore(restoreWorldId, tile)));
+    }
+
+    private static void drainDiskRestores() {
+        int restored = 0;
+        while (restored < MAX_DISK_RESTORES_PER_TICK) {
+            DiskRestore next = DISK_RESTORE_QUEUE.poll();
+            if (next == null) break;
+            if (!Objects.equals(worldId, next.worldId())) continue;
+
+            SurfaceTile raw = next.tile();
+            ChunkKey key = raw.key();
+            if (MISSING_AT.containsKey(key) || TILES.containsKey(key)) continue;
+
+            SurfaceTile tile = raw.hasSurfaceFacts()
+                    ? SatelliteSurfaceRenderer.render(raw)
+                    : raw;
+            TILES.put(key, tile);
+            addRegionTile(key);
+            tileRevision++;
+            restored++;
+
+            int total = TILES.size();
+            if (total == 1 || total % 512 == 0) {
+                LOG.info("V3_MAP_CACHE_RESTORE restored={} example={},{}",
+                        total, key.x(), key.z());
+            }
+        }
     }
 
     public static void beginMapSession() {
@@ -76,7 +132,7 @@ public final class MapClientCache {
     public static boolean needsRequest(ChunkKey key) {
         if (world == null || worldId == null || PENDING.contains(key)) return false;
         SurfaceTile tile = TILES.get(key);
-        if (tile == null) return true;
+        if (tile == null) return !DISK_RESTORE_SCHEDULED.contains(key);
         return VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) != mapSession;
     }
 
@@ -126,6 +182,8 @@ public final class MapClientCache {
                 MISSING_AT.clear();
                 VALIDATED_SESSION.clear();
                 REGION_TILE_COUNTS.clear();
+                DISK_RESTORE_SCHEDULED.clear();
+                DISK_RESTORE_QUEUE.clear();
                 tileRevision++;
             }
             worldId = next;
