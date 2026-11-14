@@ -9,11 +9,13 @@ STROKE = 2.2
 
 def L(*pts): return ("polyline", pts)
 def P(*pts): return ("polygon", pts)
+def F(*pts): return ("fill_polygon", pts)
 def R(x,y,w,h): return ("rect", x,y,w,h)
 def C(cx,cy,r): return ("circle", cx,cy,r)
 def LN(x1,y1,x2,y2): return ("line", x1,y1,x2,y2)
 
 icons = {
+    "player/arrow": [F((16,2),(27,27),(18,23),(12,30),(5,11))],
     "ui/menu": [LN(7,9,25,9), LN(7,16,25,16), LN(7,23,25,23)],
     "ui/markers": [C(16,11,5), L((12,15),(16,25),(20,15)), C(16,11,1.5)],
     "ui/layers": [P((16,5),(27,11),(16,17),(5,11)), L((6,16),(16,22),(26,16)), L((6,21),(16,27),(26,21))],
@@ -69,6 +71,9 @@ def svg_for(cmds):
         elif t == "polygon":
             pts = " ".join(f"{x},{y}" for x,y in cmd[1])
             parts.append(f'<polygon points="{pts}"/>')
+        elif t == "fill_polygon":
+            pts = " ".join(f"{x},{y}" for x,y in cmd[1])
+            parts.append(f'<polygon points="{pts}" fill="white" stroke="none"/>')
         elif t == "rect":
             _,x,y,w,h = cmd
             parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="1"/>')
@@ -93,15 +98,20 @@ def draw_png(cmds, out):
         elif t=="polygon":
             pts=[pt(p) for p in cmd[1]]
             d.line(pts+[pts[0]], fill="white", width=w, joint="curve")
+        elif t=="fill_polygon":
+            pts=[pt(p) for p in cmd[1]]
+            d.polygon(pts, fill="white")
         elif t=="rect":
             _,x,y,rw,rh=cmd
             d.rounded_rectangle([x*SCALE,y*SCALE,(x+rw)*SCALE,(y+rh)*SCALE], radius=SCALE, outline="white", width=w)
         elif t=="circle":
             _,cx,cy,r=cmd
             d.ellipse([(cx-r)*SCALE,(cy-r)*SCALE,(cx+r)*SCALE,(cy+r)*SCALE], outline="white", width=w)
-    im=im.resize((32,32), Image.Resampling.LANCZOS)
+    im=im.resize((28,28), Image.Resampling.LANCZOS)
+    final=Image.new("RGBA",(32,32),(0,0,0,0))
+    final.alpha_composite(im,(2,2))
     out.parent.mkdir(parents=True, exist_ok=True)
-    im.save(out)
+    final.save(out)
 
 for name,cmds in icons.items():
     svg_path = SVG_ROOT / f"{name}.svg"

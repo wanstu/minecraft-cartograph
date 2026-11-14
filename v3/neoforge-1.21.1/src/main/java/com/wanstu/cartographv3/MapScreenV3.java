@@ -53,7 +53,7 @@ public final class MapScreenV3 extends Screen {
     };
 
     private enum SettingsTab { PLAYER, MAP, CONTROL }
-    private enum MenuSection { NONE, MARKERS, LAYERS, SETTINGS }
+    private enum MenuSection { NONE, MARKERS, LAYERS }
 
     private double centerX;
     private double centerZ;
@@ -294,11 +294,13 @@ public final class MapScreenV3 extends Screen {
         if (minecraft.level != null) {
             regionTextures.render(
                     graphics, dimension(), centerX, centerZ, zoom, width, height);
-            if (MapUiSettings.structureLayerEnabled()) {
+            if (MapUiSettings.markerLayerEnabled() || MapUiSettings.structureLayerEnabled()) {
                 withLayer(graphics, Z_MAP_MARKERS, () ->
                         markerUi.renderLayer(
                                 graphics, font, dimension(), centerX, centerZ, zoom,
-                                width, height, mouseX, mouseY));
+                                width, height, mouseX, mouseY,
+                                MapUiSettings.markerLayerEnabled(),
+                                MapUiSettings.structureLayerEnabled()));
             }
             withLayer(graphics, Z_PLAYER, () -> renderPlayerMarker(graphics));
         }
@@ -344,22 +346,7 @@ public final class MapScreenV3 extends Screen {
         pose.pushPose();
         pose.translate(x, y, 0.0);
         pose.mulPose(Axis.ZP.rotationDegrees(180.0f + minecraft.player.getYRot()));
-
-        int h = Math.max(6, size);
-        int half = Math.max(3, (size + 1) / 2);
-
-        // One clean navigation triangle with a one-pixel dark outline.
-        for (int row = 0; row < h; row++) {
-            int yy = -h / 2 + row;
-            int w = Math.max(0, (int) Math.round((row / (double) (h - 1)) * half));
-            graphics.fill(-w - 1, yy, w + 2, yy + 1, outline);
-        }
-        for (int row = 1; row < h - 1; row++) {
-            int yy = -h / 2 + row;
-            int w = Math.max(0, (int) Math.round((row / (double) (h - 1)) * (half - 1)));
-            graphics.fill(-w, yy, w + 1, yy + 1, color);
-        }
-
+        MapIconAtlas.drawPlayerArrow(graphics, 0, 0, Math.max(8, size), color);
         pose.popPose();
     }
 
@@ -407,37 +394,35 @@ public final class MapScreenV3 extends Screen {
         drawMenuButton(
                 graphics, settingsX, menuY, MENU_ITEM_W, MENU_H,
                 "设置", MapIconAtlas.UiIcon.SETTINGS,
-                menuSection == MenuSection.SETTINGS, mouseX, mouseY);
+                false, mouseX, mouseY);
         drawMenuButton(
                 graphics, menuX, menuY, MENU_W, MENU_H,
                 "", MapIconAtlas.UiIcon.MENU, true, mouseX, mouseY);
 
         if (menuSection == MenuSection.NONE) return;
 
-        int dropX = switch (menuSection) {
-            case MARKERS -> markersX;
-            case LAYERS -> layersX;
-            case SETTINGS -> settingsX;
-            case NONE -> markersX;
-        };
+        int dropX = menuSection == MenuSection.MARKERS ? markersX : layersX;
         dropX = Math.max(MENU_MARGIN, Math.min(width - MENU_MARGIN - MENU_DROP_W, dropX));
         int dropY = menuY + MENU_H + 2;
 
-        String text = switch (menuSection) {
-            case MARKERS -> "标点管理";
-            case LAYERS -> MapUiSettings.structureLayerEnabled() ? "图标  ✓" : "图标";
-            case SETTINGS -> "打开设置";
-            case NONE -> "";
-        };
-        MapIconAtlas.UiIcon icon = switch (menuSection) {
-            case MARKERS -> MapIconAtlas.UiIcon.MARKERS;
-            case LAYERS -> MapIconAtlas.UiIcon.LAYERS;
-            case SETTINGS -> MapIconAtlas.UiIcon.SETTINGS;
-            case NONE -> MapIconAtlas.UiIcon.MENU;
-        };
+        if (menuSection == MenuSection.MARKERS) {
+            drawMenuButton(
+                    graphics, dropX, dropY, MENU_DROP_W, MENU_DROP_H,
+                    "标点管理", MapIconAtlas.UiIcon.MARKERS,
+                    false, mouseX, mouseY);
+            return;
+        }
+
         drawMenuButton(
                 graphics, dropX, dropY, MENU_DROP_W, MENU_DROP_H,
-                text, icon, false, mouseX, mouseY);
+                MapUiSettings.markerLayerEnabled() ? "标点  ✓" : "标点",
+                MapIconAtlas.UiIcon.MARKERS,
+                MapUiSettings.markerLayerEnabled(), mouseX, mouseY);
+        drawMenuButton(
+                graphics, dropX, dropY + MENU_DROP_H, MENU_DROP_W, MENU_DROP_H,
+                MapUiSettings.structureLayerEnabled() ? "结构  ✓" : "结构",
+                MapIconAtlas.UiIcon.LAYERS,
+                MapUiSettings.structureLayerEnabled(), mouseX, mouseY);
     }
 
     private int menuBarLeft() {
@@ -456,16 +441,14 @@ public final class MapScreenV3 extends Screen {
         if (inside((int) mouseX, (int) mouseY, left, menuY, barW, MENU_H)) return true;
 
         if (menuSection == MenuSection.NONE) return false;
-        int dropX = switch (menuSection) {
-            case MARKERS -> left;
-            case LAYERS -> left + MENU_ITEM_W + MENU_ITEM_GAP;
-            case SETTINGS -> left + (MENU_ITEM_W + MENU_ITEM_GAP) * 2;
-            case NONE -> left;
-        };
+        int dropX = menuSection == MenuSection.MARKERS
+                ? left : left + MENU_ITEM_W + MENU_ITEM_GAP;
         dropX = Math.max(MENU_MARGIN, Math.min(width - MENU_MARGIN - MENU_DROP_W, dropX));
+        int dropH = menuSection == MenuSection.LAYERS
+                ? MENU_DROP_H * 2 : MENU_DROP_H;
         return inside(
                 (int) mouseX, (int) mouseY,
-                dropX, menuY + MENU_H + 2, MENU_DROP_W, MENU_DROP_H);
+                dropX, menuY + MENU_H + 2, MENU_DROP_W, dropH);
     }
 
     private boolean handleTopMenuClick(int mouseX, int mouseY) {
@@ -496,38 +479,37 @@ public final class MapScreenV3 extends Screen {
             return true;
         }
         if (inside(mouseX, mouseY, settingsX, menuY, MENU_ITEM_W, MENU_H)) {
-            menuSection = menuSection == MenuSection.SETTINGS
-                    ? MenuSection.NONE : MenuSection.SETTINGS;
+            settingsOpen = true;
+            markerUi.closeOverlay();
+            menuExpanded = false;
+            menuSection = MenuSection.NONE;
+            contextOpen = false;
             return true;
         }
 
-        if (menuSection != MenuSection.NONE) {
-            int dropX = switch (menuSection) {
-                case MARKERS -> left;
-                case LAYERS -> layersX;
-                case SETTINGS -> settingsX;
-                case NONE -> left;
-            };
-            dropX = Math.max(MENU_MARGIN, Math.min(width - MENU_MARGIN - MENU_DROP_W, dropX));
+        if (menuSection == MenuSection.MARKERS) {
+            int dropX = Math.max(
+                    MENU_MARGIN, Math.min(width - MENU_MARGIN - MENU_DROP_W, left));
             int dropY = menuY + MENU_H + 2;
             if (inside(mouseX, mouseY, dropX, dropY, MENU_DROP_W, MENU_DROP_H)) {
-                switch (menuSection) {
-                    case MARKERS -> {
-                        markerUi.openManager();
-                        menuExpanded = false;
-                        menuSection = MenuSection.NONE;
-                    }
-                    case LAYERS -> MapUiSettings.setStructureLayerEnabled(
-                            !MapUiSettings.structureLayerEnabled());
-                    case SETTINGS -> {
-                        settingsOpen = true;
-                        markerUi.closeOverlay();
-                        menuExpanded = false;
-                        menuSection = MenuSection.NONE;
-                    }
-                    case NONE -> {}
-                }
+                markerUi.openManager();
+                menuExpanded = false;
+                menuSection = MenuSection.NONE;
                 contextOpen = false;
+                return true;
+            }
+        } else if (menuSection == MenuSection.LAYERS) {
+            int dropX = Math.max(
+                    MENU_MARGIN, Math.min(width - MENU_MARGIN - MENU_DROP_W, layersX));
+            int dropY = menuY + MENU_H + 2;
+            if (inside(mouseX, mouseY, dropX, dropY, MENU_DROP_W, MENU_DROP_H)) {
+                MapUiSettings.setMarkerLayerEnabled(!MapUiSettings.markerLayerEnabled());
+                return true;
+            }
+            if (inside(
+                    mouseX, mouseY,
+                    dropX, dropY + MENU_DROP_H, MENU_DROP_W, MENU_DROP_H)) {
+                MapUiSettings.setStructureLayerEnabled(!MapUiSettings.structureLayerEnabled());
                 return true;
             }
         }
@@ -692,10 +674,12 @@ public final class MapScreenV3 extends Screen {
             }
 
             Optional<MapMarkerStore.Marker> marker =
-                    MapUiSettings.structureLayerEnabled()
+                    (MapUiSettings.markerLayerEnabled() || MapUiSettings.structureLayerEnabled())
                             ? markerUi.markerAt(
                                     dimension(), centerX, centerZ, zoom,
-                                    width, height, mouseX, mouseY)
+                                    width, height, mouseX, mouseY,
+                                    MapUiSettings.markerLayerEnabled(),
+                                    MapUiSettings.structureLayerEnabled())
                             : Optional.empty();
             if (marker.isPresent()) {
                 markerUi.openEdit(marker.get());

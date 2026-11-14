@@ -26,6 +26,7 @@ final class MapIconAtlas {
         }
     }
 
+    private static final ResourceLocation PLAYER_ARROW = texture("player/arrow");
     private static final ResourceLocation PIN = texture("marker/pin");
     private static final ResourceLocation VILLAGE = texture("marker/village");
     private static final ResourceLocation MANSION = texture("marker/mansion");
@@ -58,6 +59,12 @@ final class MapIconAtlas {
 
     static void drawUi(GuiGraphics graphics, UiIcon icon, int centerX, int centerY, int size, int rgb) {
         draw(graphics, icon.texture, centerX, centerY, size, rgb, 1.0f);
+    }
+
+    static void drawPlayerArrow(
+            GuiGraphics graphics, int centerX, int centerY, int size, int rgb) {
+        draw(graphics, PLAYER_ARROW, centerX, centerY, size + 3, 0x111315, 0.95f);
+        draw(graphics, PLAYER_ARROW, centerX, centerY, size, rgb, 1.0f);
     }
 
     static void drawMarker(
@@ -111,8 +118,9 @@ final class MapIconAtlas {
                 texture,
                 centerX - size / 2,
                 centerY - size / 2,
-                0.0f, 0.0f,
                 size, size,
+                0.0f, 0.0f,
+                32, 32,
                 32, 32);
         RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
     }

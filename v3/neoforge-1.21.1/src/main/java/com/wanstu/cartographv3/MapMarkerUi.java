@@ -97,16 +97,22 @@ final class MapMarkerUi {
 
     Optional<MapMarkerStore.Marker> markerAt(
             String dimension, double centerX, double centerZ, double zoom,
-            int width, int height, double mouseX, double mouseY) {
+            int width, int height, double mouseX, double mouseY,
+            boolean markerLayerEnabled, boolean structureLayerEnabled) {
         MapMarkerStore.Marker best = null;
         double bestDistance = Double.MAX_VALUE;
+        int iconSize = markerIconSize(zoom);
+        double radius = Math.max(6.0, iconSize * 0.65);
+        double radiusSq = radius * radius;
+
         for (MapMarkerStore.Marker marker : MapMarkerStore.visible(dimension)) {
+            if (!layerVisible(marker, markerLayerEnabled, structureLayerEnabled)) continue;
             double sx = width * 0.5 + (marker.x - centerX) * zoom;
             double sy = height * 0.5 + (marker.z - centerZ) * zoom;
             double dx = sx - mouseX;
             double dy = sy - mouseY;
             double dist = dx * dx + dy * dy;
-            if (dist <= 100.0 && dist < bestDistance) {
+            if (dist <= radiusSq && dist < bestDistance) {
                 best = marker;
                 bestDistance = dist;
             }
@@ -117,30 +123,102 @@ final class MapMarkerUi {
     void renderLayer(
             GuiGraphics graphics, Font font,
             String dimension, double centerX, double centerZ, double zoom,
-            int width, int height, int mouseX, int mouseY) {
+            int width, int height, int mouseX, int mouseY,
+            boolean markerLayerEnabled, boolean structureLayerEnabled) {
         List<MapMarkerStore.Marker> markers = MapMarkerStore.visible(dimension);
-        List<int[]> labels = new ArrayList<>();
+        markers.removeIf(marker -> !layerVisible(
+                marker, markerLayerEnabled, structureLayerEnabled));
 
-        markers.sort(Comparator.comparingInt(marker -> marker.origin == MapMarkerStore.Origin.CUSTOM ? 1 : 0));
+        markers.sort(Comparator.comparingInt(marker -> customLayer(marker) ? 1 : 0));
+
+        int iconSize = markerIconSize(zoom);
+        int hoverRadius = Math.max(6, iconSize / 2 + 2);
+        List<int[]> iconRects = new ArrayList<>();
+        List<int[]> labelRects = new ArrayList<>();
+
         for (MapMarkerStore.Marker marker : markers) {
             int sx = (int) Math.round(width * 0.5 + (marker.x - centerX) * zoom);
             int sy = (int) Math.round(height * 0.5 + (marker.z - centerZ) * zoom);
-            if (sx < -24 || sy < -24 || sx > width + 24 || sy > height + 24) continue;
+            int margin = iconSize + 12;
+            if (sx < -margin || sy < -margin || sx > width + margin || sy > height + margin) {
+                continue;
+            }
 
-            boolean hovered = Math.abs(mouseX - sx) <= 8 && Math.abs(mouseY - sy) <= 8;
-            drawMarkerIcon(graphics, marker.icon, sx, sy, marker.color, hovered);
+            boolean hovered = Math.abs(mouseX - sx) <= hoverRadius
+                    && Math.abs(mouseY - sy) <= hoverRadius;
+            drawMarkerIcon(
+                    graphics, marker.icon, sx, sy, marker.color, hovered, iconSize);
+            iconRects.add(new int[] {
+                    sx - iconSize / 2 - 2,
+                    sy - iconSize / 2 - 2,
+                    sx + iconSize / 2 + 3,
+                    sy + iconSize / 2 + 3
+            });
+        }
 
-            if (zoom < 0.25 && !hovered) continue;
+        if (zoom < 0.25) return;
+
+        int index = 0;
+        for (MapMarkerStore.Marker marker : markers) {
+            int sx = (int) Math.round(width * 0.5 + (marker.x - centerX) * zoom);
+            int sy = (int) Math.round(height * 0.5 + (marker.z - centerZ) * zoom);
+            int margin = iconSize + 12;
+            if (sx < -margin || sy < -margin || sx > width + margin || sy > height + margin) {
+                continue;
+            }
+
+            boolean hovered = Math.abs(mouseX - sx) <= hoverRadius
+                    && Math.abs(mouseY - sy) <= hoverRadius;
             int textW = font.width(marker.name);
-            int lx = sx + 9;
-            int ly = sy - 5;
-            int[] rect = new int[] {lx - 2, ly - 2, lx + textW + 3, ly + font.lineHeight + 2};
-            if (!hovered && overlaps(labels, rect)) continue;
-            labels.add(rect);
+            int lx = Math.max(2, Math.min(width - textW - 2, sx - textW / 2));
+            int ly = sy + iconSize / 2 + 4;
+            int[] rect = new int[] {
+                    lx - 2, ly - 2,
+                    lx + textW + 3, ly + font.lineHeight + 2
+            };
 
+            if (!hovered) {
+                boolean blocked = overlaps(labelRects, rect);
+                if (!blocked) {
+                    for (int i = 0; i < iconRects.size(); i++) {
+                        if (i == index) continue;
+                        int[] iconRect = iconRects.get(i);
+                        if (rect[0] < iconRect[2] && rect[2] > iconRect[0]
+                                && rect[1] < iconRect[3] && rect[3] > iconRect[1]) {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                }
+                if (blocked) {
+                    index++;
+                    continue;
+                }
+            }
+
+            labelRects.add(rect);
             graphics.fill(rect[0], rect[1], rect[2], rect[3], 0xc0181c20);
             graphics.drawString(font, marker.name, lx, ly, 0xfff0f3f5, true);
+            index++;
         }
+    }
+
+    private static boolean customLayer(MapMarkerStore.Marker marker) {
+        return marker.origin == MapMarkerStore.Origin.CUSTOM
+                || (marker.origin == MapMarkerStore.Origin.AUTO && marker.modifiedAuto);
+    }
+
+    private static boolean layerVisible(
+            MapMarkerStore.Marker marker,
+            boolean markerLayerEnabled,
+            boolean structureLayerEnabled) {
+        return customLayer(marker) ? markerLayerEnabled : structureLayerEnabled;
+    }
+
+    private static int markerIconSize(double zoom) {
+        double safeZoom = Math.max(0.0625, zoom);
+        double log2 = Math.log(safeZoom) / Math.log(2.0);
+        return Math.max(8, Math.min(22, (int) Math.round(14.0 + log2 * 1.5)));
     }
 
     void renderOverlay(GuiGraphics graphics, Font font, int width, int height, int mouseX, int mouseY) {
@@ -205,7 +283,17 @@ final class MapMarkerUi {
         graphics.fill(0, 0, width, height, 0xff181d22);
         graphics.fill(0, 0, width, 38, 0xff2d343c);
         graphics.drawString(font, "自定义标点", 16, 14, 0xffffffff, false);
-        graphics.drawString(font, "ESC 关闭", width - 64, 14, 0xff9aa3aa, false);
+
+        int closeX = width - 30;
+        int closeY = 8;
+        boolean closeHover = inside(mouseX, mouseY, closeX, closeY, 22, 22);
+        if (closeHover) {
+            graphics.fill(closeX, closeY, closeX + 22, closeY + 22, 0xff3b444c);
+        }
+        MapIconAtlas.drawUi(
+                graphics, MapIconAtlas.UiIcon.CLOSE,
+                closeX + 11, closeY + 11, 14,
+                closeHover ? 0xffffff : 0xd8dde2);
 
         int sideW = 118;
         graphics.fill(0, 38, sideW, height, 0xff20262c);
@@ -227,7 +315,7 @@ final class MapMarkerUi {
         }
 
         List<MapMarkerStore.Marker> rows = managerRows();
-        int rowH = 28;
+        int rowH = 40;
         int maxRows = Math.max(1, (height - contentY - 20) / rowH);
         int maxScroll = Math.max(0, rows.size() - maxRows);
         listScroll = Math.max(0, Math.min(listScroll, maxScroll));
@@ -246,29 +334,41 @@ final class MapMarkerUi {
             int y = contentY + visible * rowH;
             boolean hover = mouseY >= y && mouseY < y + rowH
                     && mouseX >= contentX && mouseX < contentX + contentW;
-            graphics.fill(contentX, y, contentX + contentW, y + rowH - 2,
+            graphics.fill(contentX, y, contentX + contentW, y + rowH - 3,
                     hover ? 0xff2d353d : 0xff22292f);
 
-            drawMarkerIcon(graphics, marker.icon, contentX + 12, y + 13, marker.color, false);
-            graphics.drawString(font, marker.name, contentX + 26, y + 9, 0xffedf1f4, false);
+            drawMarkerIcon(
+                    graphics, marker.icon,
+                    contentX + 16, y + 18,
+                    marker.color, false, 18);
+            graphics.drawString(
+                    font, marker.name,
+                    contentX + 32, y + 7,
+                    0xffedf1f4, false);
+
             String origin = marker.origin == MapMarkerStore.Origin.AUTO
                     ? (marker.modifiedAuto ? "自动→自定义" : "自动") : "自定义";
-            graphics.drawString(font, origin, contentX + Math.max(180, contentW / 2),
-                    y + 9, 0xff9ca5ac, false);
-            graphics.drawString(font, marker.x + ", " + marker.z,
-                    contentX + Math.max(280, contentW * 2 / 3), y + 9, 0xff9ca5ac, false);
+            String meta = origin + " · " + marker.x + ", " + marker.z;
+            graphics.drawString(
+                    font, meta,
+                    contentX + 32, y + 23,
+                    0xff8f989f, false);
 
+            int deleteX = contentX + contentW - 38;
             if (managerTab == ManagerTab.LIST) {
-                drawActionText(graphics, font, contentX + contentW - 118, y + 9,
+                int resetX = deleteX - 42;
+                int editX = (marker.origin == MapMarkerStore.Origin.AUTO && marker.modifiedAuto)
+                        ? resetX - 42 : deleteX - 42;
+                drawActionText(graphics, font, editX, y + 23,
                         "编辑", mouseX, mouseY);
                 if (marker.origin == MapMarkerStore.Origin.AUTO && marker.modifiedAuto) {
-                    drawActionText(graphics, font, contentX + contentW - 78, y + 9,
+                    drawActionText(graphics, font, resetX, y + 23,
                             "重置", mouseX, mouseY);
                 }
-                drawActionText(graphics, font, contentX + contentW - 38, y + 9,
+                drawActionText(graphics, font, deleteX, y + 23,
                         "删除", mouseX, mouseY);
             } else {
-                drawActionText(graphics, font, contentX + contentW - 38, y + 9,
+                drawActionText(graphics, font, deleteX, y + 23,
                         "恢复", mouseX, mouseY);
             }
         }
@@ -379,6 +479,11 @@ final class MapMarkerUi {
     }
 
     private boolean managerMouseClicked(double mouseX, double mouseY, int width, int height) {
+        if (inside(mouseX, mouseY, width - 30, 8, 22, 22)) {
+            managerOpen = false;
+            return true;
+        }
+
         int sideW = 118;
         if (inside(mouseX, mouseY, 8, 54, sideW - 16, 28)) {
             managerTab = ManagerTab.LIST;
@@ -409,32 +514,37 @@ final class MapMarkerUi {
         }
 
         List<MapMarkerStore.Marker> rows = managerRows();
-        int rowH = 28;
+        int rowH = 40;
         int visible = (int) ((mouseY - contentY) / rowH);
         int index = listScroll + visible;
         if (mouseY < contentY || index < 0 || index >= rows.size()) return true;
 
         MapMarkerStore.Marker marker = rows.get(index);
         int rowY = contentY + visible * rowH;
-        if (mouseY >= rowY + rowH - 2) return true;
+        if (mouseY >= rowY + rowH - 3) return true;
 
+        int deleteX = contentX + contentW - 38;
         if (managerTab == ManagerTab.TRASH) {
-            if (mouseX >= contentX + contentW - 54) {
+            if (inside(mouseX, mouseY, deleteX - 2, rowY + 18, 38, 20)) {
                 MapMarkerStore.restore(marker.uuid());
             }
             return true;
         }
 
-        if (mouseX >= contentX + contentW - 48) {
+        int resetX = deleteX - 42;
+        int editX = (marker.origin == MapMarkerStore.Origin.AUTO && marker.modifiedAuto)
+                ? resetX - 42 : deleteX - 42;
+
+        if (inside(mouseX, mouseY, deleteX - 2, rowY + 18, 38, 20)) {
             MapMarkerStore.delete(marker.uuid());
             return true;
         }
         if (marker.origin == MapMarkerStore.Origin.AUTO && marker.modifiedAuto
-                && mouseX >= contentX + contentW - 88) {
+                && inside(mouseX, mouseY, resetX - 2, rowY + 18, 38, 20)) {
             MapMarkerStore.resetAutomatic(marker.uuid());
             return true;
         }
-        if (mouseX >= contentX + contentW - 132) {
+        if (inside(mouseX, mouseY, editX - 2, rowY + 18, 38, 20)) {
             openEdit(marker);
             return true;
         }
@@ -503,8 +613,11 @@ final class MapMarkerUi {
 
     private static void drawMarkerIcon(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
-            int x, int y, int rgb, boolean hovered) {
-        MapIconAtlas.drawMarker(graphics, icon, x, y, hovered ? 16 : 14, rgb, hovered);
+            int x, int y, int rgb, boolean hovered, int size) {
+        MapIconAtlas.drawMarker(
+                graphics, icon, x, y,
+                hovered ? size + 2 : size,
+                rgb, hovered);
     }
 
     private static boolean overlaps(List<int[]> occupied, int[] rect) {
