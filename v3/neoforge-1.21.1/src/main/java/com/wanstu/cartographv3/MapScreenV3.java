@@ -10,6 +10,7 @@ import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Optional;
 
@@ -52,7 +53,7 @@ public final class MapScreenV3 extends Screen {
             32.0, 40.0, 48.0, 64.0
     };
 
-    private enum SettingsTab { PLAYER, MAP, CONTROL }
+    private enum SettingsTab { PLAYER, STRUCTURE, MAP, CONTROL }
     private enum MenuSection { NONE, MARKERS, LAYERS }
 
     private double centerX;
@@ -87,6 +88,8 @@ public final class MapScreenV3 extends Screen {
     private final MapUiControls.ColorInput markerColorInput;
     private final MapUiControls.ColorInput markerLineColorInput;
     private final MapUiControls.Slider markerSizeSlider;
+    private final EnumMap<MapMarkerStore.StructurePreset, MapUiControls.MarkerIconSelect>
+            structurePresetSelects = new EnumMap<>(MapMarkerStore.StructurePreset.class);
 
     private final MapUiControls.Table mapContextMenuTable;
     private final MapUiControls.Table markerContextMenuTable;
@@ -102,6 +105,7 @@ public final class MapScreenV3 extends Screen {
     private final MapUiControls.Table locateHudTable;
 
     private final MapUiControls.Span playerTabLabel;
+    private final MapUiControls.Span structureTabLabel;
     private final MapUiControls.Span mapTabLabel;
     private final MapUiControls.Span controlTabLabel;
     private final MapUiControls.Table settingsTabsTable;
@@ -121,7 +125,18 @@ public final class MapScreenV3 extends Screen {
         markerLineColorInput = new MapUiControls.ColorInput(
                 110, MapUiSettings.markerLineColor(), MapUiSettings::setMarkerLineColor);
         markerSizeSlider = new MapUiControls.Slider(
-                126, 6, 32, MapUiSettings.markerSize(), MapUiSettings::setMarkerSize);
+                126, 6, 48, MapUiSettings.markerSize(), MapUiSettings::setMarkerSize);
+        for (MapMarkerStore.StructurePreset preset : MapMarkerStore.StructurePreset.values()) {
+            structurePresetSelects.put(
+                    preset,
+                    new MapUiControls.MarkerIconSelect(
+                            180,
+                            MapUiSettings.structurePresetIcon(preset),
+                            icon -> {
+                                MapUiSettings.setStructurePresetIcon(preset, icon);
+                                MapMarkerStore.applyStructurePreset(preset);
+                            }));
+        }
         var addMarkerIcon = new MapUiControls.Icon(12, MapUiControls.IconType.ADD);
         var addMarkerLabel = new MapUiControls.Span("增加标点");
         var teleportIcon = new MapUiControls.Icon(12, MapUiControls.IconType.TELEPORT);
@@ -196,6 +211,7 @@ public final class MapScreenV3 extends Screen {
                 LOCATE_HUD_SIZE, true, this::centerOnPlayer, locateIcon));
 
         playerTabLabel = new MapUiControls.Span("玩家");
+        structureTabLabel = new MapUiControls.Span("结构");
         mapTabLabel = new MapUiControls.Span("地图");
         controlTabLabel = new MapUiControls.Span("操作");
         settingsTabsTable = new MapUiControls.Table(SETTINGS_TAB_W - 12)
@@ -203,11 +219,13 @@ public final class MapScreenV3 extends Screen {
                 .hoverBackground(0xff303840)
                 .padding(10);
         settingsTabsTable.addRow(new MapUiControls.Table.Row(
-                30, true, () -> setSettingsTab(SettingsTab.PLAYER), playerTabLabel));
+                34, true, () -> setSettingsTab(SettingsTab.PLAYER), playerTabLabel));
         settingsTabsTable.addRow(new MapUiControls.Table.Row(
-                30, true, () -> setSettingsTab(SettingsTab.MAP), mapTabLabel));
+                34, true, () -> setSettingsTab(SettingsTab.STRUCTURE), structureTabLabel));
         settingsTabsTable.addRow(new MapUiControls.Table.Row(
-                30, true, () -> setSettingsTab(SettingsTab.CONTROL), controlTabLabel));
+                34, true, () -> setSettingsTab(SettingsTab.MAP), mapTabLabel));
+        settingsTabsTable.addRow(new MapUiControls.Table.Row(
+                34, true, () -> setSettingsTab(SettingsTab.CONTROL), controlTabLabel));
 
         emptyTabText = new MapUiControls.P(220, 70, "暂无可配置项");
         emptyTabText.setColor(0xff8f989f);
@@ -653,15 +671,37 @@ public final class MapScreenV3 extends Screen {
             graphics.drawString(font, "主色", contentX, row2 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "辅色", contentX, row3 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "线条色", contentX, row4 + 7, 0xffd8dde2, false);
-            graphics.drawString(font, "图标大小", contentX, row5 + 6, 0xffd8dde2, false);
-            graphics.drawString(font, MapUiSettings.markerSize() + " px",
-                    contentX + 350, row5 + 6, 0xffb8c0c7, false);
+            graphics.drawString(font, "图标大小（6～48 px）",
+                    contentX, row5 + 6, 0xffd8dde2, false);
+            int sizeValueX = Math.min(contentRight - 82, contentX + 380);
+            graphics.drawString(font, "当前 " + MapUiSettings.markerSize() + " px",
+                    sizeValueX, row5 + 6, 0xffd7dde2, false);
 
             markerTypeSelect.render(graphics, font, mouseX, mouseY);
             markerPrimaryColorInput.render(graphics, font, mouseX, mouseY);
             markerColorInput.render(graphics, font, mouseX, mouseY);
             markerLineColorInput.render(graphics, font, mouseX, mouseY);
             markerSizeSlider.render(graphics, font, mouseX, mouseY);
+        } else if (settingsTab == SettingsTab.STRUCTURE) {
+            graphics.drawString(font, "结构预设图标", contentX, contentY, 0xfff0f3f5, false);
+            graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
+            graphics.drawString(
+                    font,
+                    "修改后会统一应用到未被手工编辑过的自动结构标点。",
+                    contentX, contentY + 28, 0xff8f989f, false);
+
+            layoutStructurePresetSettings();
+            int row = 0;
+            for (MapMarkerStore.StructurePreset preset : MapMarkerStore.StructurePreset.values()) {
+                int rowY = contentY + 52 + row * 30;
+                graphics.drawString(
+                        font, preset.label,
+                        contentX, rowY + 7, 0xffd8dde2, false);
+                MapUiControls.MarkerIconSelect select = structurePresetSelects.get(preset);
+                select.setValue(MapUiSettings.structurePresetIcon(preset));
+                select.render(graphics, font, mouseX, mouseY);
+                row++;
+            }
         } else if (settingsTab == SettingsTab.MAP) {
             graphics.drawString(font, "地图性能", contentX, contentY, 0xfff0f3f5, false);
             graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
@@ -698,11 +738,12 @@ public final class MapScreenV3 extends Screen {
     }
 
     private void layoutSettingsTabs() {
-        settingsTabsTable.setBounds(8, 54, SETTINGS_TAB_W - 16, 102);
+        settingsTabsTable.setBounds(8, 54, SETTINGS_TAB_W - 16, 136);
     }
 
     private void updateSettingsTabStyle() {
         playerTabLabel.setColor(settingsTab == SettingsTab.PLAYER ? 0xffffd166 : 0xffcbd2d8);
+        structureTabLabel.setColor(settingsTab == SettingsTab.STRUCTURE ? 0xffffd166 : 0xffcbd2d8);
         mapTabLabel.setColor(settingsTab == SettingsTab.MAP ? 0xffffd166 : 0xffcbd2d8);
         controlTabLabel.setColor(settingsTab == SettingsTab.CONTROL ? 0xffffd166 : 0xffcbd2d8);
     }
@@ -713,6 +754,7 @@ public final class MapScreenV3 extends Screen {
         markerPrimaryColorInput.closePopup();
         markerColorInput.closePopup();
         markerLineColorInput.closePopup();
+        closeStructurePresetPopups();
     }
 
     private void layoutSettingsControls() {
@@ -726,6 +768,25 @@ public final class MapScreenV3 extends Screen {
         markerColorInput.setBounds(controlX, contentY + 114, controlW, 22);
         markerLineColorInput.setBounds(controlX, contentY + 152, controlW, 22);
         markerSizeSlider.setBounds(controlX, contentY + 194, Math.min(180, controlW), 18);
+    }
+
+    private void layoutStructurePresetSettings() {
+        int contentX = SETTINGS_TAB_W + 28;
+        int contentY = 58;
+        int controlX = Math.min(width - 230, contentX + 180);
+        int controlW = Math.max(150, Math.min(220, width - controlX - 28));
+        int row = 0;
+        for (MapMarkerStore.StructurePreset preset : MapMarkerStore.StructurePreset.values()) {
+            structurePresetSelects.get(preset).setBounds(
+                    controlX, contentY + 52 + row * 30, controlW, 22);
+            row++;
+        }
+    }
+
+    private void closeStructurePresetPopups() {
+        for (MapUiControls.MarkerIconSelect select : structurePresetSelects.values()) {
+            select.closePopup();
+        }
     }
 
     private void layoutPerformanceSettings() {
@@ -932,6 +993,24 @@ public final class MapScreenV3 extends Screen {
                 markerLineColorInput.closePopup();
                 return true;
             }
+        } else if (settingsTab == SettingsTab.STRUCTURE) {
+            layoutStructurePresetSettings();
+            for (MapUiControls.MarkerIconSelect select : structurePresetSelects.values()) {
+                if (select.popupOpen()
+                        && select.mouseClicked(
+                                mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                    return true;
+                }
+            }
+            for (MapUiControls.MarkerIconSelect select : structurePresetSelects.values()) {
+                if (select.mouseClicked(
+                        mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                    for (MapUiControls.MarkerIconSelect other : structurePresetSelects.values()) {
+                        if (other != select) other.closePopup();
+                    }
+                    return true;
+                }
+            }
         } else if (settingsTab == SettingsTab.MAP) {
             layoutPerformanceSettings();
             if (requestBatchSlider.mouseClicked(
@@ -963,6 +1042,7 @@ public final class MapScreenV3 extends Screen {
         markerPrimaryColorInput.closePopup();
         markerColorInput.closePopup();
         markerLineColorInput.closePopup();
+        closeStructurePresetPopups();
     }
 
     @Override

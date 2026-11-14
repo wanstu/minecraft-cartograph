@@ -24,6 +24,27 @@ final class MapMarkerStore {
 
     enum Origin { CUSTOM, AUTO }
 
+    enum StructurePreset {
+        VILLAGE("村庄", Icon.VILLAGE),
+        MANSION("林地府邸", Icon.MANSION),
+        TEMPLE("神殿 / 遗迹", Icon.TEMPLE),
+        OUTPOST("前哨站", Icon.OUTPOST),
+        MINE("废弃矿井", Icon.MINE),
+        PORTAL("传送门", Icon.PORTAL),
+        SHIP("沉船", Icon.SHIP),
+        CITY("城市", Icon.CITY),
+        FORTRESS("要塞 / 堡垒", Icon.FORTRESS),
+        OTHER("其他结构", Icon.STAR);
+
+        final String label;
+        final Icon defaultIcon;
+
+        StructurePreset(String label, Icon defaultIcon) {
+            this.label = label;
+            this.defaultIcon = defaultIcon;
+        }
+    }
+
     enum Icon {
         PIN("标点"),
         VILLAGE("村庄"),
@@ -151,6 +172,9 @@ final class MapMarkerStore {
             if (loaded == null) return;
             for (Marker marker : loaded) {
                 if (!valid(marker)) continue;
+                if (marker.origin == Origin.AUTO && !marker.modifiedAuto) {
+                    marker.icon = defaultStructureIcon(marker.structureId);
+                }
                 UUID id = marker.uuid();
                 MARKERS.put(id, marker);
                 if (marker.autoKey != null && !marker.autoKey.isBlank()) {
@@ -403,20 +427,44 @@ final class MapMarkerStore {
         return humanize(path);
     }
 
-    static Icon defaultStructureIcon(String id) {
+    static StructurePreset structurePreset(String id) {
         String path = id == null ? "" : id.toLowerCase(Locale.ROOT);
-        if (path.contains("village")) return Icon.VILLAGE;
-        if (path.contains("mansion")) return Icon.MANSION;
+        if (path.contains("village")) return StructurePreset.VILLAGE;
+        if (path.contains("mansion")) return StructurePreset.MANSION;
         if (path.contains("pyramid") || path.contains("temple") || path.contains("monument")
-                || path.contains("hut") || path.contains("igloo")) return Icon.TEMPLE;
-        if (path.contains("outpost")) return Icon.OUTPOST;
-        if (path.contains("mineshaft")) return Icon.MINE;
-        if (path.contains("portal")) return Icon.PORTAL;
-        if (path.contains("shipwreck")) return Icon.SHIP;
-        if (path.contains("city")) return Icon.CITY;
-        if (path.contains("fortress") || path.contains("stronghold") || path.contains("bastion"))
-            return Icon.FORTRESS;
-        return Icon.STAR;
+                || path.contains("hut") || path.contains("igloo")
+                || path.contains("ruin") || path.contains("trial_chambers")) {
+            return StructurePreset.TEMPLE;
+        }
+        if (path.contains("outpost")) return StructurePreset.OUTPOST;
+        if (path.contains("mineshaft")) return StructurePreset.MINE;
+        if (path.contains("portal")) return StructurePreset.PORTAL;
+        if (path.contains("shipwreck")) return StructurePreset.SHIP;
+        if (path.contains("city")) return StructurePreset.CITY;
+        if (path.contains("fortress") || path.contains("stronghold") || path.contains("bastion")) {
+            return StructurePreset.FORTRESS;
+        }
+        return StructurePreset.OTHER;
+    }
+
+    static Icon defaultStructureIcon(String id) {
+        StructurePreset preset = structurePreset(id);
+        return MapUiSettings.structurePresetIcon(preset);
+    }
+
+    static synchronized void applyStructurePreset(StructurePreset preset) {
+        if (preset == null) return;
+        Icon nextIcon = MapUiSettings.structurePresetIcon(preset);
+        boolean changed = false;
+        for (Marker marker : MARKERS.values()) {
+            if (marker.origin != Origin.AUTO || marker.modifiedAuto) continue;
+            if (structurePreset(marker.structureId) != preset) continue;
+            if (marker.icon != nextIcon) {
+                marker.icon = nextIcon;
+                changed = true;
+            }
+        }
+        if (changed) saveAsync();
     }
 
     static int defaultStructureColor(String id) {

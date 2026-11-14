@@ -10,14 +10,14 @@ svg {
 .stroke {
   fill:none;
   stroke:#dfe7ef !important;
-  stroke-width:3.2;
+  stroke-width:2.0;
   stroke-linecap:round;
   stroke-linejoin:round;
 }
 .thin {
   fill:none;
   stroke:#dfe7ef !important;
-  stroke-width:2.2;
+  stroke-width:1.25;
   stroke-linecap:round;
   stroke-linejoin:round;
 }
@@ -28,12 +28,11 @@ svg {
 .soft {
   fill:rgba(232,238,245,.13) !important;
   stroke:#dfe7ef !important;
-  stroke-width:2.4;
+  stroke-width:1.0;
 }
 .gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
   fill:#f2bd45 !important;
-  stroke:#dfe7ef !important;
-  stroke-width:1.5;
+  stroke:none !important;
 }
 </style>
 <path class="water" d="M8 39c0-13 11-20 25-20 13 0 23 7 23 18 0 12-10 19-25 19C18 56 8 50 8 39Z"/><path class="green" d="M9 32c4-9 9-12 17-14l-3-6 6 5 7-8 1 8c8 1 15 5 19 12"/>

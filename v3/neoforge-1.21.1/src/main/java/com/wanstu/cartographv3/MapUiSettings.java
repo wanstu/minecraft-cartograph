@@ -8,6 +8,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.EnumMap;
 import java.util.Properties;
 
 final class MapUiSettings {
@@ -30,6 +31,8 @@ final class MapUiSettings {
     private static boolean structureLayerEnabled = true;
     private static int requestBatchSize = DEFAULT_REQUEST_BATCH;
     private static int liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
+    private static final EnumMap<MapMarkerStore.StructurePreset, MapMarkerStore.Icon>
+            STRUCTURE_PRESET_ICONS = new EnumMap<>(MapMarkerStore.StructurePreset.class);
 
     private MapUiSettings() {}
 
@@ -78,6 +81,14 @@ final class MapUiSettings {
         return liveScanIntervalTicks;
     }
 
+
+    static synchronized MapMarkerStore.Icon structurePresetIcon(
+            MapMarkerStore.StructurePreset preset) {
+        ensureLoaded();
+        if (preset == null) return MapMarkerStore.Icon.STAR;
+        return STRUCTURE_PRESET_ICONS.getOrDefault(preset, preset.defaultIcon);
+    }
+
     static synchronized void setMarkerType(MarkerType next) {
         ensureLoaded();
         markerType = next == null ? MarkerType.ARROW : next;
@@ -104,7 +115,7 @@ final class MapUiSettings {
 
     static synchronized void setMarkerSize(int size) {
         ensureLoaded();
-        markerSize = Math.max(6, Math.min(32, size));
+        markerSize = Math.max(6, Math.min(48, size));
         save();
     }
 
@@ -129,6 +140,16 @@ final class MapUiSettings {
     static synchronized void setLiveScanIntervalTicks(int value) {
         ensureLoaded();
         liveScanIntervalTicks = Math.max(5, Math.min(100, value));
+        save();
+    }
+
+
+    static synchronized void setStructurePresetIcon(
+            MapMarkerStore.StructurePreset preset,
+            MapMarkerStore.Icon icon) {
+        ensureLoaded();
+        if (preset == null || icon == null) return;
+        STRUCTURE_PRESET_ICONS.put(preset, icon);
         save();
     }
 
@@ -173,7 +194,7 @@ final class MapUiSettings {
                 markerLineColor = DEFAULT_LINE_COLOR;
             }
             try {
-                markerSize = Math.max(6, Math.min(32,
+                markerSize = Math.max(6, Math.min(48,
                         Integer.parseInt(props.getProperty(
                                 "markerSize", Integer.toString(DEFAULT_SIZE)))));
             } catch (NumberFormatException ignored) {
@@ -197,6 +218,14 @@ final class MapUiSettings {
             } catch (NumberFormatException ignored) {
                 liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
             }
+            for (MapMarkerStore.StructurePreset preset
+                    : MapMarkerStore.StructurePreset.values()) {
+                String raw = props.getProperty("structurePreset." + preset.name());
+                if (raw == null || raw.isBlank()) continue;
+                try {
+                    STRUCTURE_PRESET_ICONS.put(preset, MapMarkerStore.Icon.valueOf(raw));
+                } catch (IllegalArgumentException ignored) {}
+            }
         } catch (IOException ignored) {}
     }
 
@@ -211,6 +240,12 @@ final class MapUiSettings {
         props.setProperty("structureLayerEnabled", Boolean.toString(structureLayerEnabled));
         props.setProperty("requestBatchSize", Integer.toString(requestBatchSize));
         props.setProperty("liveScanIntervalTicks", Integer.toString(liveScanIntervalTicks));
+        for (MapMarkerStore.StructurePreset preset
+                : MapMarkerStore.StructurePreset.values()) {
+            props.setProperty(
+                    "structurePreset." + preset.name(),
+                    structurePresetIcon(preset).name());
+        }
 
         Path path = path();
         try {

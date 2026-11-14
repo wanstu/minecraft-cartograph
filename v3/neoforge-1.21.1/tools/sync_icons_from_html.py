@@ -92,14 +92,14 @@ svg {
 .stroke {
   fill:none;
   stroke:CURRENT_LINE !important;
-  stroke-width:3.2;
+  stroke-width:2.0;
   stroke-linecap:round;
   stroke-linejoin:round;
 }
 .thin {
   fill:none;
   stroke:CURRENT_LINE !important;
-  stroke-width:2.2;
+  stroke-width:1.25;
   stroke-linecap:round;
   stroke-linejoin:round;
 }
@@ -110,12 +110,11 @@ svg {
 .soft {
   fill:CURRENT_SOFT !important;
   stroke:CURRENT_LINE !important;
-  stroke-width:2.4;
+  stroke-width:1.0;
 }
 .gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
   fill:CURRENT_ACCENT !important;
-  stroke:CURRENT_LINE !important;
-  stroke-width:1.5;
+  stroke:none !important;
 }
 """
 
@@ -167,7 +166,7 @@ svg * {{ opacity:0 !important; }}
   opacity:1 !important;
   fill:none !important;
   stroke:#ffffff !important;
-  stroke-width:2.6 !important;
+  stroke-width:2.0 !important;
   stroke-linecap:round;
   stroke-linejoin:round;
 }}
@@ -175,7 +174,7 @@ svg * {{ opacity:0 !important; }}
   opacity:1 !important;
   fill:none !important;
   stroke:#ffffff !important;
-  stroke-width:1.7 !important;
+  stroke-width:1.25 !important;
   stroke-linecap:round;
   stroke-linejoin:round;
 }}
@@ -183,13 +182,7 @@ svg * {{ opacity:0 !important; }}
   opacity:1 !important;
   fill:none !important;
   stroke:#ffffff !important;
-  stroke-width:1.8 !important;
-}}
-.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {{
-  opacity:1 !important;
-  fill:none !important;
-  stroke:#ffffff !important;
-  stroke-width:1.15 !important;
+  stroke-width:1.0 !important;
 }}
 """
 
