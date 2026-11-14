@@ -18,6 +18,14 @@ public final class MapScreenV3 extends Screen {
     private double zoom = 2.0;
     private boolean dragging;
 
+    private double[] downsampleX0 = new double[0];
+    private double[] downsampleX1 = new double[0];
+    private int[] downsampleFirstX = new int[0];
+    private int[] downsampleLastX = new int[0];
+    private int downsampleWidth = -1;
+    private double downsampleCenterX = Double.NaN;
+    private double downsampleZoom = Double.NaN;
+
     public MapScreenV3() {
         super(Component.literal("Cartograph V3"));
     }
@@ -132,25 +140,23 @@ public final class MapScreenV3 extends Screen {
     }
 
     private void renderDownsampled(GuiGraphics graphics, VisibleTiles tiles) {
-        double halfWidth = width * 0.5;
+        prepareDownsampleXCoverage();
         double halfHeight = height * 0.5;
-        AxisCoverage[] xCoverage = new AxisCoverage[width];
-
-        for (int screenX = 0; screenX < width; screenX++) {
-            double worldX0 = centerX + (screenX - halfWidth) / zoom;
-            double worldX1 = centerX + (screenX + 1.0 - halfWidth) / zoom;
-            xCoverage[screenX] = AxisCoverage.of(worldX0, worldX1);
-        }
 
         for (int screenY = 0; screenY < height; screenY++) {
             double worldZ0 = centerZ + (screenY - halfHeight) / zoom;
             double worldZ1 = centerZ + (screenY + 1.0 - halfHeight) / zoom;
-            AxisCoverage zCoverage = AxisCoverage.of(worldZ0, worldZ1);
+            int firstZ = (int) Math.floor(worldZ0);
+            int lastZ = Math.max(firstZ, (int) Math.floor(Math.nextDown(worldZ1)));
 
             int runStart = -1;
             int runColor = 0;
             for (int screenX = 0; screenX < width; screenX++) {
-                int color = areaAverage(tiles, xCoverage[screenX], zCoverage);
+                int color = areaAverage(
+                        tiles,
+                        downsampleX0[screenX], downsampleX1[screenX],
+                        downsampleFirstX[screenX], downsampleLastX[screenX],
+                        worldZ0, worldZ1, firstZ, lastZ);
 
                 if ((color >>> 24) == 0) {
                     if (runStart >= 0) {
@@ -175,20 +181,52 @@ public final class MapScreenV3 extends Screen {
         }
     }
 
+    private void prepareDownsampleXCoverage() {
+        if (downsampleWidth != width) {
+            downsampleX0 = new double[width];
+            downsampleX1 = new double[width];
+            downsampleFirstX = new int[width];
+            downsampleLastX = new int[width];
+            downsampleWidth = width;
+            downsampleCenterX = Double.NaN;
+            downsampleZoom = Double.NaN;
+        }
+        if (Double.compare(downsampleCenterX, centerX) == 0
+                && Double.compare(downsampleZoom, zoom) == 0) {
+            return;
+        }
+
+        double halfWidth = width * 0.5;
+        for (int screenX = 0; screenX < width; screenX++) {
+            double worldX0 = centerX + (screenX - halfWidth) / zoom;
+            double worldX1 = centerX + (screenX + 1.0 - halfWidth) / zoom;
+            downsampleX0[screenX] = worldX0;
+            downsampleX1[screenX] = worldX1;
+            int firstX = (int) Math.floor(worldX0);
+            downsampleFirstX[screenX] = firstX;
+            downsampleLastX[screenX] = Math.max(
+                    firstX, (int) Math.floor(Math.nextDown(worldX1)));
+        }
+        downsampleCenterX = centerX;
+        downsampleZoom = zoom;
+    }
+
     private static int areaAverage(VisibleTiles tiles,
-                                   AxisCoverage xCoverage,
-                                   AxisCoverage zCoverage) {
+                                   double worldX0, double worldX1,
+                                   int firstX, int lastX,
+                                   double worldZ0, double worldZ1,
+                                   int firstZ, int lastZ) {
         double red = 0.0;
         double green = 0.0;
         double blue = 0.0;
         double knownArea = 0.0;
 
-        for (int blockZ = zCoverage.firstBlock(); blockZ <= zCoverage.lastBlock(); blockZ++) {
-            double zWeight = zCoverage.weight(blockZ);
+        for (int blockZ = firstZ; blockZ <= lastZ; blockZ++) {
+            double zWeight = overlap(worldZ0, worldZ1, blockZ);
             if (zWeight <= 0.0) continue;
 
-            for (int blockX = xCoverage.firstBlock(); blockX <= xCoverage.lastBlock(); blockX++) {
-                double xWeight = xCoverage.weight(blockX);
+            for (int blockX = firstX; blockX <= lastX; blockX++) {
+                double xWeight = overlap(worldX0, worldX1, blockX);
                 if (xWeight <= 0.0) continue;
 
                 double area = xWeight * zWeight;
@@ -204,7 +242,7 @@ public final class MapScreenV3 extends Screen {
 
         if (knownArea <= 0.0) return 0;
 
-        double totalArea = xCoverage.length() * zCoverage.length();
+        double totalArea = (worldX1 - worldX0) * (worldZ1 - worldZ0);
         double missingArea = Math.max(0.0, totalArea - knownArea);
 
         // Unknown map data contributes the map background by exact covered area.
@@ -220,26 +258,12 @@ public final class MapScreenV3 extends Screen {
         return 0xff000000 | (r << 16) | (g << 8) | b;
     }
 
-    private static int clampColor(int value) {
-        return Math.max(0, Math.min(255, value));
+    private static double overlap(double start, double end, int block) {
+        return Math.max(0.0, Math.min(end, block + 1.0) - Math.max(start, block));
     }
 
-    private record AxisCoverage(double start, double end,
-                                int firstBlock, int lastBlock) {
-        static AxisCoverage of(double start, double end) {
-            int first = (int) Math.floor(start);
-            int last = (int) Math.floor(Math.nextDown(end));
-            return new AxisCoverage(start, end, first, Math.max(first, last));
-        }
-
-        double length() {
-            return end - start;
-        }
-
-        double weight(int block) {
-            return Math.max(0.0,
-                    Math.min(end, block + 1.0) - Math.max(start, block));
-        }
+    private static int clampColor(int value) {
+        return Math.max(0, Math.min(255, value));
     }
 
     private record VisibleTiles(int minChunkX, int minChunkZ,
@@ -276,11 +300,11 @@ public final class MapScreenV3 extends Screen {
         }
 
         int colorAtBlock(int blockX, int blockZ) {
-            int chunkX = Math.floorDiv(blockX, 16);
-            int chunkZ = Math.floorDiv(blockZ, 16);
+            int chunkX = blockX >> 4;
+            int chunkZ = blockZ >> 4;
             SurfaceTile tile = tileAtChunk(chunkX, chunkZ);
             if (tile == null) return 0;
-            return tile.colorAt(Math.floorMod(blockX, 16), Math.floorMod(blockZ, 16));
+            return tile.colorAt(blockX & 15, blockZ & 15);
         }
     }
 
