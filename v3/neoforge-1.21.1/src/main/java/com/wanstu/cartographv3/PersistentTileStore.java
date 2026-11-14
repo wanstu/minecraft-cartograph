@@ -41,6 +41,11 @@ final class PersistentTileStore {
         }
     }
 
+    static void delete(UUID worldId, ChunkKey key) {
+        try { Files.deleteIfExists(file(worldId, key)); }
+        catch (IOException ignored) {}
+    }
+
     static void save(UUID worldId, SurfaceTile tile) {
         int[] colors = tile.rgb();
         WRITER.execute(() -> {

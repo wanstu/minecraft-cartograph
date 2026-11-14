@@ -25,6 +25,7 @@ public final class MapScreenV3 extends Screen {
     @Override
     protected void init() {
         MapClientCache.ensureWorld(minecraft.level);
+        MapClientCache.beginMapSession();
         if (minecraft.player != null) {
             // Initial viewport only. No player marker or player-position layer exists.
             centerX = minecraft.player.getX();
@@ -61,7 +62,7 @@ public final class MapScreenV3 extends Screen {
         for (int z = minChunkZ; z <= maxChunkZ; z++) {
             for (int x = minChunkX; x <= maxChunkX; x++) {
                 ChunkKey key = new ChunkKey(dim, x, z);
-                if (!MapClientCache.hasOrPending(key)) visible.add(key);
+                if (MapClientCache.needsRequest(key)) visible.add(key);
             }
         }
 

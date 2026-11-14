@@ -12,4 +12,15 @@ public record SurfaceTile(ChunkKey key, int[] rgb) {
 
     @Override public int[] rgb() { return rgb.clone(); }
     public int colorAt(int x, int z) { return rgb[z * SIZE + x]; }
+
+    public long fingerprint64() {
+        long hash = 0xcbf29ce484222325L;
+        for (int color : rgb) {
+            hash ^= color & 0xffL; hash *= 0x100000001b3L;
+            hash ^= (color >>> 8) & 0xffL; hash *= 0x100000001b3L;
+            hash ^= (color >>> 16) & 0xffL; hash *= 0x100000001b3L;
+            hash ^= (color >>> 24) & 0xffL; hash *= 0x100000001b3L;
+        }
+        return hash;
+    }
 }

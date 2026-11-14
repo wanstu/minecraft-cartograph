@@ -11,12 +11,15 @@ public final class MapClientCache {
     private static final Map<ChunkKey, SurfaceTile> TILES = new HashMap<>();
     private static final Set<ChunkKey> PENDING = new HashSet<>();
     private static final Map<ChunkKey, Integer> MISSING_AT = new HashMap<>();
+    private static final Map<ChunkKey, Long> VALIDATED_SESSION = new HashMap<>();
     private static ClientLevel world;
     private static java.util.UUID worldId;
     private static boolean worldInfoRequested;
     private static int ticks;
     private static long firstRequestNanos;
     private static int received;
+    private static int validated;
+    private static long mapSession;
 
     private MapClientCache() {}
 
@@ -28,9 +31,12 @@ public final class MapClientCache {
         TILES.clear();
         PENDING.clear();
         MISSING_AT.clear();
+        VALIDATED_SESSION.clear();
+        mapSession = 0L;
         ticks = 0;
         firstRequestNanos = 0L;
         received = 0;
+        validated = 0;
         if (level != null) requestWorldInfo();
     }
 
@@ -52,19 +58,43 @@ public final class MapClientCache {
         return TILES.get(key);
     }
 
-    public static boolean hasOrPending(ChunkKey key) {
-        return TILES.containsKey(key) || PENDING.contains(key);
+    public static void beginMapSession() {
+        mapSession++;
+        validated = 0;
+        firstRequestNanos = 0L;
+        received = 0;
+    }
+
+    public static boolean needsRequest(ChunkKey key) {
+        if (world == null || worldId == null || PENDING.contains(key)) return false;
+        SurfaceTile tile = TILES.get(key);
+        if (tile == null) return true;
+        return VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) != mapSession;
     }
 
     public static void request(ChunkKey key) {
-        if (world == null || worldId == null || PENDING.contains(key) || TILES.containsKey(key)) return;
+        if (world == null || worldId == null || PENDING.contains(key)) return;
+
+        SurfaceTile inMemory = TILES.get(key);
+        if (inMemory != null) {
+            if (VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) == mapSession) return;
+            PENDING.add(key);
+            PacketDistributor.sendToServer(new MapProtocol.RequestTile(
+                    key.dimension(), key.x(), key.z(), true, inMemory.fingerprint64()));
+            return;
+        }
+
         java.util.Optional<SurfaceTile> disk = PersistentTileStore.load(worldId, key);
         if (disk.isPresent()) {
-            TILES.put(key, disk.get());
+            SurfaceTile restoredTile = disk.get();
+            TILES.put(key, restoredTile);
             int restored = TILES.size();
             if (restored == 1 || restored % 64 == 0)
                 LOG.info("V3_MAP_CACHE_RESTORE restored={} example={},{}",
                         restored, key.x(), key.z());
+            PENDING.add(key);
+            PacketDistributor.sendToServer(new MapProtocol.RequestTile(
+                    key.dimension(), key.x(), key.z(), true, restoredTile.fingerprint64()));
             return;
         }
         Integer missing = MISSING_AT.get(key);
@@ -72,7 +102,7 @@ public final class MapClientCache {
         PENDING.add(key);
         if (firstRequestNanos == 0L) firstRequestNanos = System.nanoTime();
         PacketDistributor.sendToServer(new MapProtocol.RequestTile(
-                key.dimension(), key.x(), key.z()));
+                key.dimension(), key.x(), key.z(), false, 0L));
     }
 
     public static void accept(MapProtocol.WorldInfo info) {
@@ -102,10 +132,22 @@ public final class MapClientCache {
         PENDING.remove(key);
         if (!packet.present()) {
             MISSING_AT.put(key, ticks);
+            VALIDATED_SESSION.put(key, mapSession);
+            TILES.remove(key);
+            if (worldId != null) PersistentTileStore.delete(worldId, key);
             return;
         }
         MISSING_AT.remove(key);
+        if (!packet.changed()) {
+            VALIDATED_SESSION.put(key, mapSession);
+            validated++;
+            if (validated == 1 || validated % 64 == 0)
+                LOG.info("V3_MAP_CACHE_VALID validated={} cached={} pending={} example={},{}",
+                        validated, TILES.size(), PENDING.size(), key.x(), key.z());
+            return;
+        }
         SurfaceTile tile = new SurfaceTile(key, packet.rgb());
+        VALIDATED_SESSION.put(key, mapSession);
         TILES.put(key, tile);
         if (worldId != null) PersistentTileStore.save(worldId, tile);
         received++;

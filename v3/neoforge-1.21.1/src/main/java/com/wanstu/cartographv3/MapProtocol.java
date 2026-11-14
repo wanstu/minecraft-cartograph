@@ -34,7 +34,8 @@ public final class MapProtocol {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    public record RequestTile(String dimension, int chunkX, int chunkZ)
+    public record RequestTile(String dimension, int chunkX, int chunkZ,
+                              boolean hasKnownFingerprint, long knownFingerprint)
             implements CustomPacketPayload {
         public static final Type<RequestTile> TYPE = new Type<>(
                 ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "request_tile"));
@@ -44,17 +45,21 @@ public final class MapProtocol {
                             buf.writeUtf(value.dimension(), 128);
                             buf.writeInt(value.chunkX());
                             buf.writeInt(value.chunkZ());
+                            buf.writeBoolean(value.hasKnownFingerprint());
+                            buf.writeLong(value.knownFingerprint());
                         },
-                        buf -> new RequestTile(buf.readUtf(128), buf.readInt(), buf.readInt()));
+                        buf -> new RequestTile(buf.readUtf(128), buf.readInt(), buf.readInt(),
+                                buf.readBoolean(), buf.readLong()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    public record Tile(String dimension, int chunkX, int chunkZ, boolean present, int[] rgb)
+    public record Tile(String dimension, int chunkX, int chunkZ,
+                       boolean present, boolean changed, int[] rgb)
             implements CustomPacketPayload {
         public Tile {
             if (dimension == null || dimension.isBlank() || dimension.length() > 128)
                 throw new IllegalArgumentException("Invalid dimension");
-            int expected = present ? SurfaceTile.PIXELS : 0;
+            int expected = present && changed ? SurfaceTile.PIXELS : 0;
             if (rgb == null || rgb.length != expected)
                 throw new IllegalArgumentException("Invalid tile payload");
             rgb = rgb.clone();
@@ -70,7 +75,8 @@ public final class MapProtocol {
                             buf.writeInt(value.chunkX());
                             buf.writeInt(value.chunkZ());
                             buf.writeBoolean(value.present());
-                            if (value.present()) {
+                            buf.writeBoolean(value.changed());
+                            if (value.present() && value.changed()) {
                                 for (int color : value.rgb()) buf.writeInt(color);
                             }
                         },
@@ -79,15 +85,16 @@ public final class MapProtocol {
                             int x = buf.readInt();
                             int z = buf.readInt();
                             boolean present = buf.readBoolean();
-                            int[] rgb = new int[present ? SurfaceTile.PIXELS : 0];
+                            boolean changed = buf.readBoolean();
+                            int[] rgb = new int[present && changed ? SurfaceTile.PIXELS : 0];
                             for (int i = 0; i < rgb.length; i++) rgb[i] = buf.readInt();
-                            return new Tile(dimension, x, z, present, rgb);
+                            return new Tile(dimension, x, z, present, changed, rgb);
                         });
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("2");
+        var registrar = event.registrar("3");
         registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
@@ -106,16 +113,31 @@ public final class MapProtocol {
                                 if (!player.isAlive() || player.serverLevel() == null) return;
                                 if (!player.serverLevel().dimension().location().toString()
                                         .equals(request.dimension())) return;
-                                if (error != null || surface == null || surface.isEmpty()) {
+                                if (error != null) {
+                                    if (request.hasKnownFingerprint()) {
+                                        PacketDistributor.sendToPlayer(player,
+                                                new Tile(request.dimension(), request.chunkX(),
+                                                        request.chunkZ(), true, false, new int[0]));
+                                    } else {
+                                        PacketDistributor.sendToPlayer(player,
+                                                new Tile(request.dimension(), request.chunkX(),
+                                                        request.chunkZ(), false, false, new int[0]));
+                                    }
+                                    return;
+                                }
+                                if (surface == null || surface.isEmpty()) {
                                     PacketDistributor.sendToPlayer(player,
                                             new Tile(request.dimension(), request.chunkX(),
-                                                    request.chunkZ(), false, new int[0]));
+                                                    request.chunkZ(), false, false, new int[0]));
                                     return;
                                 }
                                 SurfaceTile tile = surface.get();
+                                boolean unchanged = request.hasKnownFingerprint()
+                                        && request.knownFingerprint() == tile.fingerprint64();
                                 PacketDistributor.sendToPlayer(player,
                                         new Tile(tile.key().dimension(), tile.key().x(), tile.key().z(),
-                                                true, tile.rgb()));
+                                                true, !unchanged,
+                                                unchanged ? new int[0] : tile.rgb()));
                             }));
                 }));
 
