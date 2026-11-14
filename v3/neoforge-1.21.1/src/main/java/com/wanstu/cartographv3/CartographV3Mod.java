@@ -13,6 +13,7 @@ public final class CartographV3Mod {
     public CartographV3Mod(IEventBus modBus) {
         modBus.addListener(MapProtocol::register);
         NeoForge.EVENT_BUS.addListener(CartographV3Mod::chunkSaved);
+        NeoForge.EVENT_BUS.addListener(LiveSurfaceUpdates::tick);
         NeoForge.EVENT_BUS.addListener(CartographV3Mod::serverStopped);
     }
 
@@ -22,6 +23,7 @@ public final class CartographV3Mod {
 
     private static void serverStopped(ServerStoppedEvent event) {
         SurfaceService.clear(event.getServer());
+        LiveSurfaceUpdates.clear();
         WorldIdentity.clear(event.getServer());
     }
 }

@@ -130,6 +130,9 @@ public final class MapClientCache {
         if (!current.equals(packet.dimension())) return;
         ChunkKey key = new ChunkKey(packet.dimension(), packet.chunkX(), packet.chunkZ());
         PENDING.remove(key);
+        if (packet.retry()) {
+            return;
+        }
         if (!packet.present()) {
             MISSING_AT.put(key, ticks);
             VALIDATED_SESSION.put(key, mapSession);

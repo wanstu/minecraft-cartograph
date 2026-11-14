@@ -54,7 +54,7 @@ public final class MapProtocol {
     }
 
     public record Tile(String dimension, int chunkX, int chunkZ,
-                       boolean present, boolean changed, int[] rgb)
+                       boolean present, boolean changed, boolean retry, int[] rgb)
             implements CustomPacketPayload {
         public Tile {
             if (dimension == null || dimension.isBlank() || dimension.length() > 128)
@@ -76,6 +76,7 @@ public final class MapProtocol {
                             buf.writeInt(value.chunkZ());
                             buf.writeBoolean(value.present());
                             buf.writeBoolean(value.changed());
+                            buf.writeBoolean(value.retry());
                             if (value.present() && value.changed()) {
                                 for (int color : value.rgb()) buf.writeInt(color);
                             }
@@ -86,15 +87,22 @@ public final class MapProtocol {
                             int z = buf.readInt();
                             boolean present = buf.readBoolean();
                             boolean changed = buf.readBoolean();
+                            boolean retry = buf.readBoolean();
                             int[] rgb = new int[present && changed ? SurfaceTile.PIXELS : 0];
                             for (int i = 0; i < rgb.length; i++) rgb[i] = buf.readInt();
-                            return new Tile(dimension, x, z, present, changed, rgb);
+                            return new Tile(dimension, x, z, present, changed, retry, rgb);
                         });
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
+    static void pushChanged(ServerPlayer player, SurfaceTile tile) {
+        PacketDistributor.sendToPlayer(player,
+                new Tile(tile.key().dimension(), tile.key().x(), tile.key().z(),
+                        true, true, false, tile.rgb()));
+    }
+
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("3");
+        var registrar = event.registrar("4");
         registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
@@ -108,6 +116,10 @@ public final class MapProtocol {
                     String current = player.serverLevel().dimension().location().toString();
                     if (!current.equals(request.dimension())) return;
 
+                    ChunkKey watchedKey = new ChunkKey(
+                            request.dimension(), request.chunkX(), request.chunkZ());
+                    LiveSurfaceUpdates.watch(player, watchedKey);
+
                     SurfaceService.request(player.serverLevel(), request.chunkX(), request.chunkZ())
                             .whenComplete((surface, error) -> player.server.execute(() -> {
                                 if (!player.isAlive() || player.serverLevel() == null) return;
@@ -117,18 +129,18 @@ public final class MapProtocol {
                                     if (request.hasKnownFingerprint()) {
                                         PacketDistributor.sendToPlayer(player,
                                                 new Tile(request.dimension(), request.chunkX(),
-                                                        request.chunkZ(), true, false, new int[0]));
+                                                        request.chunkZ(), true, false, true, new int[0]));
                                     } else {
                                         PacketDistributor.sendToPlayer(player,
                                                 new Tile(request.dimension(), request.chunkX(),
-                                                        request.chunkZ(), false, false, new int[0]));
+                                                        request.chunkZ(), false, false, true, new int[0]));
                                     }
                                     return;
                                 }
                                 if (surface == null || surface.isEmpty()) {
                                     PacketDistributor.sendToPlayer(player,
                                             new Tile(request.dimension(), request.chunkX(),
-                                                    request.chunkZ(), false, false, new int[0]));
+                                                    request.chunkZ(), false, false, false, new int[0]));
                                     return;
                                 }
                                 SurfaceTile tile = surface.get();
@@ -136,7 +148,7 @@ public final class MapProtocol {
                                         && request.knownFingerprint() == tile.fingerprint64();
                                 PacketDistributor.sendToPlayer(player,
                                         new Tile(tile.key().dimension(), tile.key().x(), tile.key().z(),
-                                                true, !unchanged,
+                                                true, !unchanged, false,
                                                 unchanged ? new int[0] : tile.rgb()));
                             }));
                 }));
