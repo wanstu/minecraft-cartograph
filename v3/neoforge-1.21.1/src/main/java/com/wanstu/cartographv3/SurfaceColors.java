@@ -29,7 +29,7 @@ final class SurfaceColors {
             for (int x = 0; x < 16; x++) {
                 int i = z * 16 + x;
                 int base = rgb[i] & 0x00ffffff;
-                if (base == 0 || heights[i] == UNKNOWN_HEIGHT) {
+                if (heights[i] == UNKNOWN_HEIGHT) {
                     out[i] = 0;
                     continue;
                 }

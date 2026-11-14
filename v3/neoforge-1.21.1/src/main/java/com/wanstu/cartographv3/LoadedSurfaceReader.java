@@ -1,7 +1,9 @@
 package com.wanstu.cartographv3;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.MapColor;
@@ -21,7 +23,17 @@ final class LoadedSurfaceReader {
 
         int[] colors = new int[SurfaceTile.PIXELS];
         short[] heights = new short[SurfaceTile.PIXELS];
+        int[] stateIds = new int[SurfaceTile.PIXELS];
+        int[] biomeIds = new int[SurfaceTile.PIXELS];
+        short[] surfaceHeights = new short[SurfaceTile.PIXELS];
+        short[] reliefHeights = new short[SurfaceTile.PIXELS];
+        byte[] waterDepths = new byte[SurfaceTile.PIXELS];
         Arrays.fill(heights, SurfaceColors.UNKNOWN_HEIGHT);
+        Arrays.fill(stateIds, -1);
+        Arrays.fill(biomeIds, -1);
+        Arrays.fill(surfaceHeights, SurfaceTile.UNKNOWN_HEIGHT);
+        Arrays.fill(reliefHeights, SurfaceTile.UNKNOWN_HEIGHT);
+        var biomeRegistry = level.registryAccess().registryOrThrow(Registries.BIOME);
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
         for (int z = 0; z < 16; z++) {
@@ -46,12 +58,18 @@ final class LoadedSurfaceReader {
                     colors[index] = SurfaceColors.surfaceColor(
                             color, waterDepth, worldX, worldZ);
                     heights[index] = (short) Math.max(chunk.getMinBuildHeight(), reliefY);
+                    stateIds[index] = Block.getId(state);
+                    biomeIds[index] = biomeRegistry.getId(level.getBiome(pos).value());
+                    surfaceHeights[index] = (short) y;
+                    reliefHeights[index] = (short) Math.max(chunk.getMinBuildHeight(), reliefY);
+                    waterDepths[index] = (byte) Math.min(255, waterDepth);
                     break;
                 }
             }
         }
         return Optional.of(new SurfaceTile(
                 new ChunkKey(level.dimension().location().toString(), chunkX, chunkZ),
-                SurfaceColors.shade(colors, heights)));
+                SurfaceColors.shade(colors, heights),
+                stateIds, biomeIds, surfaceHeights, reliefHeights, waterDepths));
     }
 }

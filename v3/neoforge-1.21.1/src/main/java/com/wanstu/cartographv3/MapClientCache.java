@@ -39,6 +39,7 @@ public final class MapClientCache {
         firstRequestNanos = 0L;
         received = 0;
         validated = 0;
+        SatelliteSurfaceRenderer.beginMapSession();
         if (level != null) requestWorldInfo();
     }
 
@@ -62,6 +63,7 @@ public final class MapClientCache {
 
     public static void beginMapSession() {
         mapSession++;
+        SatelliteSurfaceRenderer.beginMapSession();
         validated = 0;
         firstRequestNanos = 0L;
         received = 0;
@@ -118,6 +120,8 @@ public final class MapClientCache {
                 TILES.clear();
                 PENDING.clear();
                 MISSING_AT.clear();
+                VALIDATED_SESSION.clear();
+                tileRevision++;
             }
             worldId = next;
             LOG.info("V3_WORLD_ID world={} dimension={}", worldId, current);
@@ -152,7 +156,11 @@ public final class MapClientCache {
                         validated, TILES.size(), PENDING.size(), key.x(), key.z());
             return;
         }
-        SurfaceTile tile = new SurfaceTile(key, packet.rgb());
+        SurfaceTile tile = SatelliteSurfaceRenderer.render(
+                SurfaceTile.fromFacts(
+                        key,
+                        packet.stateIds(), packet.biomeIds(),
+                        packet.surfaceHeights(), packet.reliefHeights(), packet.waterDepths()));
         VALIDATED_SESSION.put(key, mapSession);
         TILES.put(key, tile);
         tileRevision++;

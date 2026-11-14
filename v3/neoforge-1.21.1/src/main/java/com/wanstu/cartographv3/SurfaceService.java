@@ -1,5 +1,6 @@
 package com.wanstu.cartographv3;
 
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
@@ -63,6 +64,7 @@ final class SurfaceService {
         Path region = regionDirectory(level);
         int minY = level.getMinBuildHeight();
         int height = level.getHeight();
+        var biomeRegistry = level.registryAccess().registryOrThrow(Registries.BIOME);
 
         CompletableFuture<Optional<SurfaceTile>> future = new CompletableFuture<>();
         CompletableFuture<Optional<SurfaceTile>> raced = PENDING.putIfAbsent(key, future);
@@ -71,7 +73,7 @@ final class SurfaceService {
         DISK.execute(() -> {
             try {
                 Optional<SurfaceTile> result = SavedSurfaceReader.read(
-                        region, dimension, chunkX, chunkZ, minY, height);
+                        region, dimension, chunkX, chunkZ, minY, height, biomeRegistry);
                 result.ifPresent(tile -> {
                     CACHE.put(key, tile);
                     int count = DISK_HITS.incrementAndGet();

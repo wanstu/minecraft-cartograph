@@ -1,6 +1,8 @@
 package com.wanstu.cartographv3;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Registry;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtAccounter;
@@ -9,6 +11,8 @@ import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.util.SimpleBitStorage;
 import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
@@ -19,10 +23,21 @@ import java.nio.file.Path;
 import java.util.*;
 
 final class SavedSurfaceReader {
-    private record Section(BlockState[] states, SimpleBitStorage indices) {
+    private record Section(
+            BlockState[] states,
+            SimpleBitStorage indices,
+            int[] biomeIds,
+            SimpleBitStorage biomeIndices) {
         BlockState at(int x, int y, int z) {
             int id = indices == null ? 0 : indices.get(((y & 15) << 8) | (z << 4) | x);
             return states[id];
+        }
+
+        int biomeIdAt(int x, int y, int z) {
+            if (biomeIds == null || biomeIds.length == 0) return -1;
+            int index = (((y >> 2) & 3) << 4) | ((z >> 2) << 2) | (x >> 2);
+            int id = biomeIndices == null ? 0 : biomeIndices.get(index);
+            return id >= 0 && id < biomeIds.length ? biomeIds[id] : -1;
         }
     }
 
@@ -30,7 +45,8 @@ final class SavedSurfaceReader {
 
     static Optional<SurfaceTile> read(Path regionDirectory, String dimension,
                                       int chunkX, int chunkZ,
-                                      int minBuildHeight, int worldHeight) throws IOException {
+                                      int minBuildHeight, int worldHeight,
+                                      Registry<Biome> biomeRegistry) throws IOException {
         Optional<DataInputStream> opened = RegionNbtReader.openChunk(regionDirectory, chunkX, chunkZ);
         if (opened.isEmpty()) return Optional.empty();
 
@@ -87,12 +103,46 @@ final class SavedSurfaceReader {
                     if (data.length != expected) return Optional.empty();
                     indices = new SimpleBitStorage(bits, 4096, data);
                 }
-                sections.put((int) section.getByte("Y"), new Section(palette, indices));
+
+                int[] biomePaletteIds = null;
+                SimpleBitStorage biomeIndices = null;
+                CompoundTag biomes = section.getCompound("biomes");
+                ListTag biomePalette = biomes.getList("palette", Tag.TAG_STRING);
+                if (!biomePalette.isEmpty()) {
+                    biomePaletteIds = new int[biomePalette.size()];
+                    for (int p = 0; p < biomePaletteIds.length; p++) {
+                        ResourceLocation id = ResourceLocation.tryParse(biomePalette.getString(p));
+                        Biome biome = id == null ? null : biomeRegistry.get(id);
+                        biomePaletteIds[p] = biome == null ? -1 : biomeRegistry.getId(biome);
+                    }
+
+                    if (biomePaletteIds.length > 1) {
+                        int bits = 32 - Integer.numberOfLeadingZeros(biomePaletteIds.length - 1);
+                        long[] data = biomes.getLongArray("data");
+                        int perLong = 64 / bits;
+                        int expected = (64 + perLong - 1) / perLong;
+                        if (data.length == expected) {
+                            biomeIndices = new SimpleBitStorage(bits, 64, data);
+                        }
+                    }
+                }
+
+                sections.put((int) section.getByte("Y"),
+                        new Section(palette, indices, biomePaletteIds, biomeIndices));
             }
 
             int[] colors = new int[SurfaceTile.PIXELS];
             short[] heights = new short[SurfaceTile.PIXELS];
+            int[] stateIds = new int[SurfaceTile.PIXELS];
+            int[] biomeIds = new int[SurfaceTile.PIXELS];
+            short[] surfaceHeights = new short[SurfaceTile.PIXELS];
+            short[] reliefHeights = new short[SurfaceTile.PIXELS];
+            byte[] waterDepths = new byte[SurfaceTile.PIXELS];
             Arrays.fill(heights, SurfaceColors.UNKNOWN_HEIGHT);
+            Arrays.fill(stateIds, -1);
+            Arrays.fill(biomeIds, -1);
+            Arrays.fill(surfaceHeights, SurfaceTile.UNKNOWN_HEIGHT);
+            Arrays.fill(reliefHeights, SurfaceTile.UNKNOWN_HEIGHT);
             BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
             for (int z = 0; z < 16; z++) {
@@ -132,6 +182,11 @@ final class SavedSurfaceReader {
                             }
                         }
                         heights[index] = (short) reliefY;
+                        stateIds[index] = Block.getId(state);
+                        biomeIds[index] = section.biomeIdAt(x, y, z);
+                        surfaceHeights[index] = (short) y;
+                        reliefHeights[index] = (short) reliefY;
+                        waterDepths[index] = (byte) Math.min(255, waterDepth);
                         break;
                     }
                 }
@@ -139,7 +194,8 @@ final class SavedSurfaceReader {
 
             return Optional.of(new SurfaceTile(
                     new ChunkKey(dimension, chunkX, chunkZ),
-                    SurfaceColors.shade(colors, heights)));
+                    SurfaceColors.shade(colors, heights),
+                    stateIds, biomeIds, surfaceHeights, reliefHeights, waterDepths));
         }
     }
 }
