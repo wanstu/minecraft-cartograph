@@ -15,17 +15,21 @@ final class SurfaceColors {
                     out[i] = 0;
                     continue;
                 }
-                int neighbours = 0;
-                int sum = 0;
-                if (x > 0 && heights[i - 1] != UNKNOWN_HEIGHT) {
-                    sum += heights[i] - heights[i - 1];
-                    neighbours++;
+
+                double slopeX = axisSlope(heights, x, z, 1, 0);
+                double slopeZ = axisSlope(heights, x, z, 0, 1);
+                double sum = 0.0;
+                int axes = 0;
+                if (!Double.isNaN(slopeX)) {
+                    sum += slopeX;
+                    axes++;
                 }
-                if (z > 0 && heights[i - 16] != UNKNOWN_HEIGHT) {
-                    sum += heights[i] - heights[i - 16];
-                    neighbours++;
+                if (!Double.isNaN(slopeZ)) {
+                    sum += slopeZ;
+                    axes++;
                 }
-                double delta = neighbours == 0 ? 0.0 : (double) sum / neighbours;
+
+                double delta = axes == 0 ? 0.0 : sum / axes;
                 double factor = Math.max(0.78, Math.min(1.20, 1.0 + delta * 0.035));
                 int r = Math.min(255, (int) (((base >>> 16) & 255) * factor));
                 int g = Math.min(255, (int) (((base >>> 8) & 255) * factor));
@@ -34,5 +38,34 @@ final class SurfaceColors {
             }
         }
         return out;
+    }
+
+    private static double axisSlope(short[] heights, int x, int z, int dx, int dz) {
+        int centerIndex = z * 16 + x;
+        short center = heights[centerIndex];
+
+        int previousX = x - dx;
+        int previousZ = z - dz;
+        int nextX = x + dx;
+        int nextZ = z + dz;
+
+        boolean hasPrevious = previousX >= 0 && previousX < 16
+                && previousZ >= 0 && previousZ < 16;
+        boolean hasNext = nextX >= 0 && nextX < 16
+                && nextZ >= 0 && nextZ < 16;
+
+        short previous = hasPrevious
+                ? heights[previousZ * 16 + previousX]
+                : UNKNOWN_HEIGHT;
+        short next = hasNext
+                ? heights[nextZ * 16 + nextX]
+                : UNKNOWN_HEIGHT;
+
+        boolean previousKnown = previous != UNKNOWN_HEIGHT;
+        boolean nextKnown = next != UNKNOWN_HEIGHT;
+        if (previousKnown && nextKnown) return (next - previous) * 0.5;
+        if (previousKnown) return center - previous;
+        if (nextKnown) return next - center;
+        return Double.NaN;
     }
 }

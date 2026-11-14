@@ -88,9 +88,19 @@ public final class MapScreenV3 extends Screen {
         int minChunkZ = Math.floorDiv((int) Math.floor(centerZ - halfBlocksZ), 16) - 1;
         int maxChunkZ = Math.floorDiv((int) Math.floor(centerZ + halfBlocksZ), 16) + 1;
 
-        for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-            for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-                SurfaceTile tile = MapClientCache.tile(new ChunkKey(dim, chunkX, chunkZ));
+        VisibleTiles tiles = VisibleTiles.load(
+                dim, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
+        if (zoom < 1.0) {
+            renderDownsampled(graphics, tiles);
+        } else {
+            renderBlocks(graphics, tiles);
+        }
+    }
+
+    private void renderBlocks(GuiGraphics graphics, VisibleTiles tiles) {
+        for (int chunkZ = tiles.minChunkZ(); chunkZ <= tiles.maxChunkZ(); chunkZ++) {
+            for (int chunkX = tiles.minChunkX(); chunkX <= tiles.maxChunkX(); chunkX++) {
+                SurfaceTile tile = tiles.tileAtChunk(chunkX, chunkZ);
                 if (tile == null) continue;
 
                 for (int localZ = 0; localZ < 16; localZ++) {
@@ -110,6 +120,134 @@ public final class MapScreenV3 extends Screen {
                     }
                 }
             }
+        }
+    }
+
+    private void renderDownsampled(GuiGraphics graphics, VisibleTiles tiles) {
+        double halfWidth = width * 0.5;
+        double halfHeight = height * 0.5;
+        double sampleOffset = 0.25 / zoom;
+
+        for (int screenY = 0; screenY < height; screenY++) {
+            double worldCenterZ = centerZ + (screenY + 0.5 - halfHeight) / zoom;
+            double sampleZ0 = worldCenterZ - sampleOffset;
+            double sampleZ1 = worldCenterZ + sampleOffset;
+
+            int runStart = -1;
+            int runColor = 0;
+            for (int screenX = 0; screenX < width; screenX++) {
+                double worldCenterX = centerX + (screenX + 0.5 - halfWidth) / zoom;
+                double sampleX0 = worldCenterX - sampleOffset;
+                double sampleX1 = worldCenterX + sampleOffset;
+
+                int color = average(
+                        tiles.colorAtWorld(sampleX0, sampleZ0),
+                        tiles.colorAtWorld(sampleX1, sampleZ0),
+                        tiles.colorAtWorld(sampleX0, sampleZ1),
+                        tiles.colorAtWorld(sampleX1, sampleZ1));
+
+                if ((color >>> 24) == 0) {
+                    if (runStart >= 0) {
+                        graphics.fill(runStart, screenY, screenX, screenY + 1, runColor);
+                        runStart = -1;
+                    }
+                    continue;
+                }
+
+                if (runStart < 0) {
+                    runStart = screenX;
+                    runColor = color;
+                } else if (color != runColor) {
+                    graphics.fill(runStart, screenY, screenX, screenY + 1, runColor);
+                    runStart = screenX;
+                    runColor = color;
+                }
+            }
+            if (runStart >= 0) {
+                graphics.fill(runStart, screenY, width, screenY + 1, runColor);
+            }
+        }
+    }
+
+    private static int average(int c0, int c1, int c2, int c3) {
+        int count = 0;
+        int red = 0;
+        int green = 0;
+        int blue = 0;
+
+        if ((c0 >>> 24) != 0) {
+            red += (c0 >>> 16) & 255;
+            green += (c0 >>> 8) & 255;
+            blue += c0 & 255;
+            count++;
+        }
+        if ((c1 >>> 24) != 0) {
+            red += (c1 >>> 16) & 255;
+            green += (c1 >>> 8) & 255;
+            blue += c1 & 255;
+            count++;
+        }
+        if ((c2 >>> 24) != 0) {
+            red += (c2 >>> 16) & 255;
+            green += (c2 >>> 8) & 255;
+            blue += c2 & 255;
+            count++;
+        }
+        if ((c3 >>> 24) != 0) {
+            red += (c3 >>> 16) & 255;
+            green += (c3 >>> 8) & 255;
+            blue += c3 & 255;
+            count++;
+        }
+
+        if (count == 0) return 0;
+        red = (red + count / 2) / count;
+        green = (green + count / 2) / count;
+        blue = (blue + count / 2) / count;
+        return 0xff000000 | (red << 16) | (green << 8) | blue;
+    }
+
+    private record VisibleTiles(int minChunkX, int minChunkZ,
+                                int columns, int rows, SurfaceTile[] tiles) {
+        static VisibleTiles load(String dimension,
+                                 int minChunkX, int maxChunkX,
+                                 int minChunkZ, int maxChunkZ) {
+            int columns = maxChunkX - minChunkX + 1;
+            int rows = maxChunkZ - minChunkZ + 1;
+            SurfaceTile[] tiles = new SurfaceTile[columns * rows];
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+                    int index = (chunkZ - minChunkZ) * columns + (chunkX - minChunkX);
+                    tiles[index] = MapClientCache.tile(
+                            new ChunkKey(dimension, chunkX, chunkZ));
+                }
+            }
+            return new VisibleTiles(minChunkX, minChunkZ, columns, rows, tiles);
+        }
+
+        int maxChunkX() {
+            return minChunkX + columns - 1;
+        }
+
+        int maxChunkZ() {
+            return minChunkZ + rows - 1;
+        }
+
+        SurfaceTile tileAtChunk(int chunkX, int chunkZ) {
+            int x = chunkX - minChunkX;
+            int z = chunkZ - minChunkZ;
+            if (x < 0 || x >= columns || z < 0 || z >= rows) return null;
+            return tiles[z * columns + x];
+        }
+
+        int colorAtWorld(double worldX, double worldZ) {
+            int blockX = (int) Math.floor(worldX);
+            int blockZ = (int) Math.floor(worldZ);
+            int chunkX = Math.floorDiv(blockX, 16);
+            int chunkZ = Math.floorDiv(blockZ, 16);
+            SurfaceTile tile = tileAtChunk(chunkX, chunkZ);
+            if (tile == null) return 0;
+            return tile.colorAt(Math.floorMod(blockX, 16), Math.floorMod(blockZ, 16));
         }
     }
 
