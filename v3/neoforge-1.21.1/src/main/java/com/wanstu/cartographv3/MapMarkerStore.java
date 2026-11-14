@@ -25,23 +25,31 @@ final class MapMarkerStore {
     enum Origin { CUSTOM, AUTO }
 
     enum StructurePreset {
-        VILLAGE("村庄", Icon.VILLAGE),
-        MANSION("林地府邸", Icon.MANSION),
-        TEMPLE("神殿 / 遗迹", Icon.TEMPLE),
-        OUTPOST("前哨站", Icon.OUTPOST),
-        MINE("废弃矿井", Icon.MINE),
-        PORTAL("传送门", Icon.PORTAL),
-        SHIP("沉船", Icon.SHIP),
-        CITY("城市", Icon.CITY),
-        FORTRESS("要塞 / 堡垒", Icon.FORTRESS),
-        OTHER("其他结构", Icon.STAR);
+        VILLAGE("村庄", Icon.VILLAGE, 0xfff1cf, 0xdba637, 0x765d2c),
+        MANSION("林地府邸", Icon.MANSION, 0xe7e0d6, 0x765844, 0x40352f),
+        TEMPLE("神殿 / 遗迹", Icon.TEMPLE, 0xffefbf, 0xd8a238, 0x816126),
+        OUTPOST("前哨站", Icon.OUTPOST, 0xe8e1d7, 0x8a6951, 0x463831),
+        MINE("废弃矿井", Icon.MINE, 0xdce1e6, 0xa97843, 0x44494e),
+        PORTAL("传送门", Icon.PORTAL, 0xeee6ff, 0x8151d2, 0x4a326d),
+        SHIP("沉船", Icon.SHIP, 0xe1f0f7, 0x3f87a4, 0x35525f),
+        CITY("城市", Icon.CITY, 0xe8ebee, 0x7e8994, 0x434950),
+        FORTRESS("要塞 / 堡垒", Icon.FORTRESS, 0xead9d3, 0xa65347, 0x5c342d),
+        OTHER("其他结构", Icon.STAR, 0xfff2c7, 0xe4b13c, 0x735a24);
 
         final String label;
         final Icon defaultIcon;
+        final int defaultPrimary;
+        final int defaultAccent;
+        final int defaultLine;
 
-        StructurePreset(String label, Icon defaultIcon) {
+        StructurePreset(
+                String label, Icon defaultIcon,
+                int defaultPrimary, int defaultAccent, int defaultLine) {
             this.label = label;
             this.defaultIcon = defaultIcon;
+            this.defaultPrimary = defaultPrimary;
+            this.defaultAccent = defaultAccent;
+            this.defaultLine = defaultLine;
         }
     }
 
@@ -174,6 +182,9 @@ final class MapMarkerStore {
                 if (!valid(marker)) continue;
                 if (marker.origin == Origin.AUTO && !marker.modifiedAuto) {
                     marker.icon = defaultStructureIcon(marker.structureId);
+                    marker.primaryColor = defaultStructurePrimaryColor(marker.structureId);
+                    marker.color = defaultStructureColor(marker.structureId);
+                    marker.lineColor = defaultStructureLineColor(marker.structureId);
                 }
                 UUID id = marker.uuid();
                 MARKERS.put(id, marker);
@@ -235,9 +246,9 @@ final class MapMarkerStore {
                         marker.z = hit.z();
                         marker.name = nextName;
                         marker.icon = nextIcon;
-                        marker.primaryColor = DEFAULT_PRIMARY_COLOR;
+                        marker.primaryColor = defaultStructurePrimaryColor(hit.structureId());
                         marker.color = defaultStructureColor(hit.structureId());
-                        marker.lineColor = DEFAULT_LINE_COLOR;
+                        marker.lineColor = defaultStructureLineColor(hit.structureId());
                         marker.description = defaultStructureDescription(hit.structureId());
                         marker.structureId = hit.structureId();
                         changed = true;
@@ -254,9 +265,9 @@ final class MapMarkerStore {
             marker.z = hit.z();
             marker.name = defaultStructureName(hit.structureId());
             marker.icon = defaultStructureIcon(hit.structureId());
-            marker.primaryColor = DEFAULT_PRIMARY_COLOR;
+            marker.primaryColor = defaultStructurePrimaryColor(hit.structureId());
             marker.color = defaultStructureColor(hit.structureId());
-            marker.lineColor = DEFAULT_LINE_COLOR;
+            marker.lineColor = defaultStructureLineColor(hit.structureId());
             marker.description = defaultStructureDescription(hit.structureId());
             marker.origin = Origin.AUTO;
             marker.autoKey = autoKey;
@@ -346,9 +357,9 @@ final class MapMarkerStore {
         if (marker == null || marker.origin != Origin.AUTO) return;
         marker.name = defaultStructureName(marker.structureId);
         marker.icon = defaultStructureIcon(marker.structureId);
-        marker.primaryColor = DEFAULT_PRIMARY_COLOR;
+        marker.primaryColor = defaultStructurePrimaryColor(marker.structureId);
         marker.color = defaultStructureColor(marker.structureId);
-        marker.lineColor = DEFAULT_LINE_COLOR;
+        marker.lineColor = defaultStructureLineColor(marker.structureId);
         marker.description = defaultStructureDescription(marker.structureId);
         marker.modifiedAuto = false;
         marker.deleted = false;
@@ -455,20 +466,43 @@ final class MapMarkerStore {
     static synchronized void applyStructurePreset(StructurePreset preset) {
         if (preset == null) return;
         Icon nextIcon = MapUiSettings.structurePresetIcon(preset);
+        int nextPrimary = MapUiSettings.structurePresetPrimaryColor(preset);
+        int nextAccent = MapUiSettings.structurePresetAccentColor(preset);
+        int nextLine = MapUiSettings.structurePresetLineColor(preset);
         boolean changed = false;
         for (Marker marker : MARKERS.values()) {
             if (marker.origin != Origin.AUTO || marker.modifiedAuto) continue;
             if (structurePreset(marker.structureId) != preset) continue;
-            if (marker.icon != nextIcon) {
+            if (marker.icon != nextIcon
+                    || marker.primary() != nextPrimary
+                    || marker.accent() != nextAccent
+                    || marker.line() != nextLine) {
                 marker.icon = nextIcon;
+                marker.primaryColor = nextPrimary;
+                marker.color = nextAccent;
+                marker.lineColor = nextLine;
                 changed = true;
             }
         }
         if (changed) saveAsync();
     }
 
+    static synchronized void applyAllStructurePresets() {
+        for (StructurePreset preset : StructurePreset.values()) {
+            applyStructurePreset(preset);
+        }
+    }
+
+    static int defaultStructurePrimaryColor(String id) {
+        return MapUiSettings.structurePresetPrimaryColor(structurePreset(id));
+    }
+
     static int defaultStructureColor(String id) {
-        return DEFAULT_ACCENT_COLOR;
+        return MapUiSettings.structurePresetAccentColor(structurePreset(id));
+    }
+
+    static int defaultStructureLineColor(String id) {
+        return MapUiSettings.structurePresetLineColor(structurePreset(id));
     }
 
     static String defaultStructureDescription(String id) {

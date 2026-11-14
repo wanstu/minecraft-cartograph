@@ -20,6 +20,7 @@ final class MapUiSettings {
     private static final int DEFAULT_SIZE = 12;
     private static final int DEFAULT_REQUEST_BATCH = 64;
     private static final int DEFAULT_LIVE_SCAN_INTERVAL = 10;
+    private static final int STRUCTURE_PRESET_VERSION = 2;
 
     private static boolean loaded;
     private static MarkerType markerType = MarkerType.ARROW;
@@ -33,6 +34,12 @@ final class MapUiSettings {
     private static int liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
     private static final EnumMap<MapMarkerStore.StructurePreset, MapMarkerStore.Icon>
             STRUCTURE_PRESET_ICONS = new EnumMap<>(MapMarkerStore.StructurePreset.class);
+    private static final EnumMap<MapMarkerStore.StructurePreset, Integer>
+            STRUCTURE_PRESET_PRIMARY = new EnumMap<>(MapMarkerStore.StructurePreset.class);
+    private static final EnumMap<MapMarkerStore.StructurePreset, Integer>
+            STRUCTURE_PRESET_ACCENT = new EnumMap<>(MapMarkerStore.StructurePreset.class);
+    private static final EnumMap<MapMarkerStore.StructurePreset, Integer>
+            STRUCTURE_PRESET_LINE = new EnumMap<>(MapMarkerStore.StructurePreset.class);
 
     private MapUiSettings() {}
 
@@ -87,6 +94,28 @@ final class MapUiSettings {
         ensureLoaded();
         if (preset == null) return MapMarkerStore.Icon.STAR;
         return STRUCTURE_PRESET_ICONS.getOrDefault(preset, preset.defaultIcon);
+    }
+
+
+    static synchronized int structurePresetPrimaryColor(
+            MapMarkerStore.StructurePreset preset) {
+        ensureLoaded();
+        if (preset == null) return MapMarkerStore.DEFAULT_PRIMARY_COLOR;
+        return STRUCTURE_PRESET_PRIMARY.getOrDefault(preset, preset.defaultPrimary);
+    }
+
+    static synchronized int structurePresetAccentColor(
+            MapMarkerStore.StructurePreset preset) {
+        ensureLoaded();
+        if (preset == null) return MapMarkerStore.DEFAULT_ACCENT_COLOR;
+        return STRUCTURE_PRESET_ACCENT.getOrDefault(preset, preset.defaultAccent);
+    }
+
+    static synchronized int structurePresetLineColor(
+            MapMarkerStore.StructurePreset preset) {
+        ensureLoaded();
+        if (preset == null) return MapMarkerStore.DEFAULT_LINE_COLOR;
+        return STRUCTURE_PRESET_LINE.getOrDefault(preset, preset.defaultLine);
     }
 
     static synchronized void setMarkerType(MarkerType next) {
@@ -150,6 +179,40 @@ final class MapUiSettings {
         ensureLoaded();
         if (preset == null || icon == null) return;
         STRUCTURE_PRESET_ICONS.put(preset, icon);
+        save();
+    }
+
+
+    static synchronized void setStructurePresetPrimaryColor(
+            MapMarkerStore.StructurePreset preset, int rgb) {
+        ensureLoaded();
+        if (preset == null) return;
+        STRUCTURE_PRESET_PRIMARY.put(preset, rgb & 0x00ffffff);
+        save();
+    }
+
+    static synchronized void setStructurePresetAccentColor(
+            MapMarkerStore.StructurePreset preset, int rgb) {
+        ensureLoaded();
+        if (preset == null) return;
+        STRUCTURE_PRESET_ACCENT.put(preset, rgb & 0x00ffffff);
+        save();
+    }
+
+    static synchronized void setStructurePresetLineColor(
+            MapMarkerStore.StructurePreset preset, int rgb) {
+        ensureLoaded();
+        if (preset == null) return;
+        STRUCTURE_PRESET_LINE.put(preset, rgb & 0x00ffffff);
+        save();
+    }
+
+    static synchronized void resetStructurePresets() {
+        ensureLoaded();
+        STRUCTURE_PRESET_ICONS.clear();
+        STRUCTURE_PRESET_PRIMARY.clear();
+        STRUCTURE_PRESET_ACCENT.clear();
+        STRUCTURE_PRESET_LINE.clear();
         save();
     }
 
@@ -218,15 +281,42 @@ final class MapUiSettings {
             } catch (NumberFormatException ignored) {
                 liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
             }
-            for (MapMarkerStore.StructurePreset preset
-                    : MapMarkerStore.StructurePreset.values()) {
-                String raw = props.getProperty("structurePreset." + preset.name());
-                if (raw == null || raw.isBlank()) continue;
-                try {
-                    STRUCTURE_PRESET_ICONS.put(preset, MapMarkerStore.Icon.valueOf(raw));
-                } catch (IllegalArgumentException ignored) {}
+            int presetVersion = 0;
+            try {
+                presetVersion = Integer.parseInt(
+                        props.getProperty("structurePresetVersion", "0"));
+            } catch (NumberFormatException ignored) {}
+            if (presetVersion >= STRUCTURE_PRESET_VERSION) {
+                for (MapMarkerStore.StructurePreset preset
+                        : MapMarkerStore.StructurePreset.values()) {
+                    String prefix = "structurePreset." + preset.name();
+                    String rawIcon = props.getProperty(prefix + ".icon");
+                    if (rawIcon != null && !rawIcon.isBlank()) {
+                        try {
+                            STRUCTURE_PRESET_ICONS.put(
+                                    preset, MapMarkerStore.Icon.valueOf(rawIcon));
+                        } catch (IllegalArgumentException ignored) {}
+                    }
+                    loadPresetColor(props, prefix + ".primary",
+                            STRUCTURE_PRESET_PRIMARY, preset);
+                    loadPresetColor(props, prefix + ".accent",
+                            STRUCTURE_PRESET_ACCENT, preset);
+                    loadPresetColor(props, prefix + ".line",
+                            STRUCTURE_PRESET_LINE, preset);
+                }
             }
         } catch (IOException ignored) {}
+    }
+
+    private static void loadPresetColor(
+            Properties props, String key,
+            EnumMap<MapMarkerStore.StructurePreset, Integer> target,
+            MapMarkerStore.StructurePreset preset) {
+        String raw = props.getProperty(key);
+        if (raw == null || raw.isBlank()) return;
+        try {
+            target.put(preset, Integer.parseInt(raw) & 0x00ffffff);
+        } catch (NumberFormatException ignored) {}
     }
 
     private static void save() {
@@ -240,11 +330,19 @@ final class MapUiSettings {
         props.setProperty("structureLayerEnabled", Boolean.toString(structureLayerEnabled));
         props.setProperty("requestBatchSize", Integer.toString(requestBatchSize));
         props.setProperty("liveScanIntervalTicks", Integer.toString(liveScanIntervalTicks));
+        props.setProperty(
+                "structurePresetVersion",
+                Integer.toString(STRUCTURE_PRESET_VERSION));
         for (MapMarkerStore.StructurePreset preset
                 : MapMarkerStore.StructurePreset.values()) {
-            props.setProperty(
-                    "structurePreset." + preset.name(),
-                    structurePresetIcon(preset).name());
+            String prefix = "structurePreset." + preset.name();
+            props.setProperty(prefix + ".icon", structurePresetIcon(preset).name());
+            props.setProperty(prefix + ".primary",
+                    Integer.toString(structurePresetPrimaryColor(preset)));
+            props.setProperty(prefix + ".accent",
+                    Integer.toString(structurePresetAccentColor(preset)));
+            props.setProperty(prefix + ".line",
+                    Integer.toString(structurePresetLineColor(preset)));
         }
 
         Path path = path();
