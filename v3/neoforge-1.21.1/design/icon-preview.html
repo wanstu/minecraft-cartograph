@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cartograph V3 图标系统预览</title>
+<style>
+:root{
+  --bg:#0b1016;--panel:#121922;--panel2:#171f29;--line:#2a3542;
+  --text:#edf2f7;--muted:#8f9dac;--gold:#f2bd45;--blue:#63b7ff;
+  --green:#72cf7d;--red:#ff6767;--shadow:0 18px 50px rgba(0,0,0,.32);
+  --icon-size:42px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:
+  radial-gradient(circle at 76% -10%,#15304e 0,transparent 32%),
+  linear-gradient(180deg,#0c1219,#090d12 72%);
+  color:var(--text);font:14px/1.5 Inter,"Segoe UI","Microsoft YaHei",sans-serif;min-height:100vh}
+button,input{font:inherit}
+.shell{max-width:1580px;margin:0 auto;padding:18px 24px 42px}
+.hero{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:10px 4px 18px;border-bottom:1px solid #243140}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{width:46px;height:46px;filter:drop-shadow(0 4px 12px rgba(242,189,69,.24))}
+h1{font-size:30px;line-height:1;margin:0;letter-spacing:.3px}
+h1 b{color:var(--gold)}
+.sub{color:var(--muted);margin-top:7px}
+.badge{border:1px solid #426b99;background:#102035;color:#9cd2ff;padding:6px 12px;border-radius:10px}
+.toolbar{position:sticky;top:0;z-index:20;margin:14px 0;padding:10px;
+  display:flex;gap:9px;align-items:center;flex-wrap:wrap;
+  background:rgba(11,16,22,.92);backdrop-filter:blur(14px);border:1px solid #24303d;border-radius:14px}
+.tab,.size-btn{border:1px solid #2d3946;background:#141b23;color:#c8d1db;border-radius:9px;padding:8px 12px;cursor:pointer}
+.tab:hover,.size-btn:hover{background:#1d2732}
+.tab.active{border-color:#755d25;background:linear-gradient(#312816,#211c12);color:#ffd76e}
+.search{min-width:240px;flex:1;border:1px solid #303c49;background:#0e141b;color:white;border-radius:9px;padding:9px 12px;outline:none}
+.search:focus{border-color:#527da9}
+.group{margin:14px 0 0;background:linear-gradient(180deg,#131a22,#10161d);border:1px solid #28333f;border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+.group-head{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid #222d38}
+.group-head h2{font-size:17px;margin:0}
+.group-head small{color:var(--muted)}
+.group-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:10px;padding:14px}
+.card{position:relative;min-height:112px;border:1px solid #2b3642;border-radius:11px;background:#151d26;
+ display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 8px 9px;transition:.16s ease;cursor:default}
+.card:hover{transform:translateY(-2px);border-color:#46586b;background:#1a242f}
+.card.recommended{border-color:#8b6d26;box-shadow:inset 0 0 0 1px rgba(242,189,69,.12)}
+.icon-wrap{height:58px;display:grid;place-items:center}
+.icon-svg{width:var(--icon-size);height:var(--icon-size);overflow:visible;color:#e8eef5;filter:drop-shadow(0 3px 5px rgba(0,0,0,.24))}
+.icon-svg .stroke{fill:none;stroke:currentColor;stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
+.icon-svg .thin{fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.icon-svg .fill{fill:currentColor;stroke:none}
+.icon-svg .soft{fill:rgba(255,255,255,.13);stroke:currentColor;stroke-width:2.4}
+.icon-svg .gold{fill:#f3bd44;stroke:#ffd66f;stroke-width:1.5}
+.icon-svg .blue{fill:#54aef5;stroke:#92d3ff;stroke-width:1.5}
+.icon-svg .green{fill:#69bd62;stroke:#9ee28f;stroke-width:1.5}
+.icon-svg .brown{fill:#b88045;stroke:#e3ae71;stroke-width:1.5}
+.icon-svg .purple{fill:#8e62d9;stroke:#c4a5ff;stroke-width:1.5}
+.icon-svg .water{fill:#38aee7;stroke:#8ddcff;stroke-width:1.5}
+.icon-svg .sand{fill:#e8bd66;stroke:#f6d794;stroke-width:1.5}
+.icon-svg .stone{fill:#8b98a6;stroke:#c7d0d9;stroke-width:1.5}
+.name{font-weight:650;margin-top:3px;text-align:center}
+.meta{font-size:11px;color:#7e8a97;margin-top:2px;text-align:center}
+.rec{position:absolute;top:7px;right:7px;color:#1a1406;background:#f2bd45;border-radius:999px;padding:1px 6px;font-size:10px;font-weight:800}
+.preview{margin-top:16px;border:1px solid #4e5d40;border-radius:14px;overflow:hidden;background:#111820}
+.preview-head{padding:12px 15px;border-bottom:1px solid #27323d;display:flex;align-items:center;gap:8px}
+.fake-map{height:250px;position:relative;overflow:hidden;background:
+  linear-gradient(135deg,transparent 0 36%,rgba(33,95,142,.9) 37% 43%,transparent 44%),
+  radial-gradient(circle at 80% 30%,#b9a879 0 9%,transparent 10%),
+  repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 2px,transparent 2px 5px),
+  linear-gradient(135deg,#435d3a,#2e4735 58%,#544b38)}
+.sample{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:5px}
+.sample .icon-svg{width:42px;height:42px}
+.sample span{background:rgba(8,12,16,.88);border:1px solid #7f6d3c;color:#fff;border-radius:5px;padding:3px 8px;white-space:nowrap}
+.note{color:#92a0ad;font-size:12px;margin-left:auto}
+.hidden{display:none!important}
+footer{color:#74818f;text-align:center;padding-top:18px}
+@media(max-width:720px){.shell{padding:12px}.group-grid{grid-template-columns:repeat(3,1fr)}.card{min-width:0}.hero{align-items:flex-start}.badge{display:none}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="hero">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 3 40 24 61 32 40 40 32 61 24 40 3 32 24 24Z" fill="#f2bd45" stroke="#ffe39b" stroke-width="2"/>
+        <circle cx="32" cy="32" r="8" fill="#142333" stroke="#fff1bd" stroke-width="2"/>
+      </svg>
+      <div><h1>Cartograph V3 <b>图标预览</b></h1><div class="sub">Minecraft 地图模组 · SVG 图标系统高保真 HTML 原型</div></div>
+    </div>
+    <div class="badge">V3 · ICON SYSTEM</div>
+  </header>
+
+  <div class="toolbar">
+    <button class="tab active" data-filter="all">全部</button>
+    <button class="tab" data-filter="player">玩家</button>
+    <button class="tab" data-filter="menu">菜单</button>
+    <button class="tab" data-filter="structure">结构</button>
+    <button class="tab" data-filter="custom">自定义标点</button>
+    <button class="tab" data-filter="geo">地理要素</button>
+    <input id="search" class="search" placeholder="搜索：矿井 / 大河 / 山脉 / 港口 / 工厂…">
+    <button class="size-btn" data-size="32">小</button>
+    <button class="size-btn" data-size="42">中</button>
+    <button class="size-btn" data-size="52">大</button>
+  </div>
+
+  <main id="app"></main>
+
+  <section class="preview">
+    <div class="preview-head"><b>地图内效果示例</b><span class="note">名称固定在图标下方，不与图标本体重叠；普通图标随地图倍率有限缩放，玩家图标固定屏幕尺寸</span></div>
+    <div class="fake-map" id="mapPreview"></div>
+  </section>
+  <footer>单文件原型 · 所有图标均为内联 SVG · 可直接作为后续 Minecraft PNG/SVG 源图设计参考</footer>
+</div>
+
+<script>
+const I=(body)=>'<svg class="icon-svg" viewBox="0 0 64 64" aria-hidden="true">'+body+'</svg>';
+const icons = [
+{g:'player',group:'玩家图标',desc:'当前位置、朝向与定位',name:'导航箭头',meta:'推荐 · 固定屏幕尺寸',rec:1,svg:I('<path class="gold" d="M31 4 53 55 35 46 24 59 10 18Z"/><path class="thin" d="M31 4 35 46"/>')},
+{g:'player',group:'玩家图标',name:'箭头 · 蓝',meta:'备选',svg:I('<path class="blue" d="M31 5 52 54 34 45 23 58 11 18Z"/>')},
+{g:'player',group:'玩家图标',name:'箭头 · 绿',meta:'备选',svg:I('<path class="green" d="M31 5 52 54 34 45 23 58 11 18Z"/>')},
+{g:'player',group:'玩家图标',name:'箭头 · 线框',meta:'轻量',svg:I('<path class="stroke" d="M31 5 52 54 34 45 23 58 11 18Z"/>')},
+{g:'player',group:'玩家图标',name:'十字准星',meta:'无方向',svg:I('<circle class="stroke" cx="32" cy="32" r="14"/><path class="stroke" d="M32 8v12m0 24v12M8 32h12m24 0h12"/><circle class="fill" cx="32" cy="32" r="3"/>')},
+
+{g:'menu',group:'菜单图标',desc:'界面与常用操作',name:'菜单',svg:I('<path class="stroke" d="M14 18h36M14 32h36M14 46h36"/>')},
+{g:'menu',group:'菜单图标',name:'设置',svg:I('<path class="stroke" d="M32 11v7m0 28v7M11 32h7m28 0h7M17 17l5 5m20 20 5 5M47 17l-5 5M22 42l-5 5"/><circle class="stroke" cx="32" cy="32" r="11"/><circle class="fill" cx="32" cy="32" r="4"/>')},
+{g:'menu',group:'菜单图标',name:'图层',svg:I('<path class="stroke" d="m32 10 21 11-21 11L11 21Zm-18 22 18 10 18-10M14 43l18 10 18-10"/>')},
+{g:'menu',group:'菜单图标',name:'定位',svg:I('<circle class="stroke" cx="32" cy="32" r="14"/><circle class="fill" cx="32" cy="32" r="4"/><path class="stroke" d="M32 7v9m0 32v9M7 32h9m32 0h9"/>')},
+{g:'menu',group:'菜单图标',name:'关闭',svg:I('<path class="stroke" d="M16 16l32 32M48 16 16 48"/>')},
+{g:'menu',group:'菜单图标',name:'添加',svg:I('<circle class="stroke" cx="32" cy="32" r="22"/><path class="stroke" d="M32 20v24M20 32h24"/>')},
+{g:'menu',group:'菜单图标',name:'编辑',svg:I('<path class="stroke" d="m13 47 4-13 23-23 13 13-23 23Z"/><path class="thin" d="m36 15 13 13M13 47l13-4"/>')},
+{g:'menu',group:'菜单图标',name:'删除',svg:I('<path class="stroke" d="M19 21h26l-3 33H22Zm-4-7h34M25 14l2-6h10l2 6M27 28v17m10-17v17"/>')},
+{g:'menu',group:'菜单图标',name:'恢复',svg:I('<path class="stroke" d="M20 18H9v-11M10 18c7-10 23-13 34-5 12 9 13 26 3 36-8 8-21 9-31 3"/>')},
+{g:'menu',group:'菜单图标',name:'传送',svg:I('<path class="stroke" d="M32 7c-9 0-16 7-16 16 0 13 16 31 16 31s16-18 16-31c0-9-7-16-16-16Z"/><circle class="stroke" cx="32" cy="23" r="6"/><ellipse class="thin" cx="32" cy="55" rx="18" ry="5"/>')},
+
+{g:'structure',group:'结构图标',desc:'自动识别的游戏结构',name:'村庄',svg:I('<path class="brown" d="M8 30 20 19l11 9 11-12 14 14v24H8Z"/><path class="gold" d="m6 31 14-14 13 11 9-14 16 16-3 3-13-13-9 14-13-10L10 34Z"/><path class="soft" d="M16 38h10v16H16Zm27-8h8v10h-8Z"/>')},
+{g:'structure',group:'结构图标',name:'林地府邸',svg:I('<path class="brown" d="M8 27h48v29H8Z"/><path class="gold" d="m6 28 12-13 8 7 7-10 8 9 5-6 12 13"/><path class="soft" d="M15 34h8v8h-8Zm13 0h8v8h-8Zm13 0h8v8h-8ZM27 45h10v11H27Z"/>')},
+{g:'structure',group:'结构图标',name:'前哨站',svg:I('<path class="brown" d="M19 18h26l-3 38H22Z"/><path class="stroke" d="M14 19h36M21 32h22M23 45h18"/><path class="gold" d="M31 8h19l-6 7 6 7H31Z"/>')},
+{g:'structure',group:'结构图标',name:'废弃矿井',svg:I('<path class="stone" d="M8 48c0-20 10-34 24-34s24 14 24 34v8H8Z"/><path d="M17 48c0-13 6-23 15-23s15 10 15 23v8H17Z" fill="#111820"/><path class="brown" d="M18 32h28v5H18Zm5-9h5v33h-5Zm13 0h5v33h-5Z"/><path class="gold" d="m13 13 6-6 31 31-6 6Z"/>')},
+{g:'structure',group:'结构图标',name:'下界传送门',svg:I('<rect class="stone" x="13" y="8" width="38" height="50" rx="4"/><rect x="21" y="16" width="22" height="34" rx="3" fill="#4b1b78" stroke="#c18aff" stroke-width="3"/><path class="purple" d="M27 20c8 6-3 9 7 14s-2 9 3 13M38 18c-7 7 4 10-5 16"/>')},
+{g:'structure',group:'结构图标',name:'神殿',svg:I('<path class="sand" d="m32 7 25 18H7Z"/><path class="gold" d="M10 25h44v7H10Z"/><path class="sand" d="M15 32h7v21h-7Zm14 0h7v21h-7Zm14 0h7v21h-7ZM9 53h46v5H9Z"/>')},
+{g:'structure',group:'结构图标',name:'高塔',svg:I('<path class="stone" d="M18 11h28l-2 47H20Z"/><path class="soft" d="M16 11h8V5h6v6h8V5h6v6h6v8H14v-8Z"/><path class="stroke" d="M25 30h14M24 43h16"/>')},
+{g:'structure',group:'结构图标',name:'港口',svg:I('<path class="water" d="M7 49c8-5 15 5 23 0s15 5 27 0v9H7Z"/><path class="brown" d="M9 35h34v7H9Zm6-13h7v20h-7Zm23 5h7v15h-7Z"/><path class="stroke" d="M48 12v28m-9-18h18M48 12c-5 0-8 3-8 7m8-7c5 0 8 3 8 7"/>')},
+{g:'structure',group:'结构图标',name:'营地',svg:I('<path class="gold" d="M10 51 31 15l23 36Z"/><path d="M24 51 32 34l9 17Z" fill="#3a2a19"/><path class="brown" d="M45 15c8-5 12 3 8 8 6 2 6 10 0 12-2 5-9 5-11 0-6-2-6-10 0-12-3-4-1-7 3-8Z"/>')},
+{g:'structure',group:'结构图标',name:'农场',svg:I('<path class="green" d="M7 28h50v28H7Z"/><path class="gold" d="M10 30h5v24h-5Zm13 0h5v24h-5Zm13 0h5v24h-5Zm13 0h5v24h-5Z"/><path class="stroke" d="M6 28h52M8 20c4-9 8-9 12 0m4 0c4-9 8-9 12 0m4 0c4-9 8-9 12 0"/>')},
+{g:'structure',group:'结构图标',name:'铁路',svg:I('<path class="stroke" d="M19 7 13 57M45 7l6 50M16 17h32M15 28h34M14 39h36M13 50h38"/>')},
+{g:'structure',group:'结构图标',name:'船只',svg:I('<path class="brown" d="M7 43h50l-7 12H15Z"/><path class="stroke" d="M32 8v35"/><path class="gold" d="M34 12v24h18Z"/><path class="blue" d="M30 15v20H14Z"/><path class="water" d="M7 58c9-5 15 4 24 0s16 4 26 0"/>')},
+{g:'structure',group:'结构图标',name:'商店',svg:I('<path class="brown" d="M10 28h44v29H10Z"/><path class="gold" d="M7 18h50l-5 12H12Z"/><path class="soft" d="M16 35h13v12H16Zm21 0h11v22H37Z"/>')},
+{g:'structure',group:'结构图标',name:'海底神殿',svg:I('<path class="water" d="M6 55h52"/><path class="stone" d="M12 47h40l-4-20H16Z"/><path class="gold" d="M25 27 32 12l7 15Z"/><path class="stroke" d="M19 36h26M22 47V36m20 11V36"/>')},
+{g:'structure',group:'结构图标',name:'远古城市',svg:I('<path class="stone" d="M8 55V31h9V18h8v13h8V11h9v20h14v24Z"/><path class="blue" d="M27 43h10v12H27Z"/><path class="stroke" d="M7 55h50"/>')},
+
+{g:'custom',group:'自定义标点',desc:'玩家手动添加的兴趣点',name:'住宅',svg:I('<path class="gold" d="m8 31 24-20 24 20-4 5-20-16-20 16Z"/><path class="brown" d="M14 32h36v25H14Z"/><path class="soft" d="M26 42h12v15H26Z"/>')},
+{g:'custom',group:'自定义标点',name:'基地',svg:I('<path class="stone" d="M9 25h46v32H9Z"/><path class="soft" d="M7 25h10v-9h8v9h14v-9h8v9h10v8H7Z"/><path class="stroke" d="M27 45h10v12"/>')},
+{g:'custom',group:'自定义标点',name:'星标',svg:I('<path class="gold" d="m32 6 8 17 19 2-14 13 4 19-17-9-17 9 4-19L5 25l19-2Z"/>')},
+{g:'custom',group:'自定义标点',name:'旗帜',svg:I('<path class="stroke" d="M18 7v51"/><path class="gold" d="M20 10h31l-8 9 8 10H20Z"/>')},
+{g:'custom',group:'自定义标点',name:'危险',svg:I('<path class="gold" d="M32 7 59 55H5Z"/><path d="M32 22v17" stroke="#1b160b" stroke-width="5" stroke-linecap="round"/><circle cx="32" cy="47" r="3" fill="#1b160b"/>')},
+{g:'custom',group:'自定义标点',name:'信息',svg:I('<circle class="blue" cx="32" cy="32" r="25"/><circle cx="32" cy="20" r="4" fill="#0d2233"/><path d="M32 29v18" stroke="#0d2233" stroke-width="5" stroke-linecap="round"/>')},
+{g:'custom',group:'自定义标点',name:'洞穴',svg:I('<path class="stone" d="M6 55c5-26 15-42 26-42s21 16 26 42Z"/><path d="M18 55c2-17 7-28 14-28s12 11 14 28Z" fill="#0c1117"/>')},
+{g:'custom',group:'自定义标点',name:'工厂',svg:I('<path class="stone" d="M7 57V32l16-9v9l16-9v9l18-10v35Z"/><path class="brown" d="M44 8h8v20h-8Z"/><path class="soft" d="M15 41h8v8h-8Zm14 0h8v8h-8Zm14 0h8v8h-8Z"/>')},
+{g:'custom',group:'自定义标点',name:'城市',svg:I('<path class="stone" d="M8 57V34h12v23M24 57V18h16v39M44 57V29h12v28"/><path class="blue" d="M29 25h6v7h-6Zm0 12h6v7h-6Z"/><path class="stroke" d="M6 57h52"/>')},
+{g:'custom',group:'自定义标点',name:'食物',svg:I('<path class="stroke" d="M18 8v48M10 8v14c0 6 4 10 8 10s8-4 8-10V8M46 8v48M38 8c0 12 2 19 8 22"/>')},
+{g:'custom',group:'自定义标点',name:'树木',svg:I('<path class="green" d="m32 6 17 23H40l13 18H37v11H27V47H11l13-18h-9Z"/>')},
+{g:'custom',group:'自定义标点',name:'水源',svg:I('<path class="blue" d="M32 6c8 12 18 23 18 34 0 11-8 19-18 19S14 51 14 40C14 29 24 18 32 6Z"/><path class="thin" d="M25 43c2 5 6 7 11 7"/>')},
+{g:'custom',group:'自定义标点',name:'宝箱',svg:I('<path class="brown" d="M9 24h46v30H9Z"/><path class="gold" d="M9 24c0-10 8-16 23-16s23 6 23 16Z"/><path class="stroke" d="M9 34h46"/><rect x="28" y="31" width="8" height="11" rx="2" fill="#f2bd45"/>')},
+{g:'custom',group:'自定义标点',name:'资源点',svg:I('<path class="gold" d="m32 7 7 17 18 2-14 12 5 18-16-9-16 9 5-18L7 26l18-2Z"/><circle cx="32" cy="32" r="5" fill="#8a6210"/>')},
+
+{g:'geo',group:'地理要素',desc:'自然地形、水系与区域标记',name:'湖泊',svg:I('<path class="water" d="M8 39c0-13 11-20 25-20 13 0 23 7 23 18 0 12-10 19-25 19C18 56 8 50 8 39Z"/><path class="green" d="M9 32c4-9 9-12 17-14l-3-6 6 5 7-8 1 8c8 1 15 5 19 12"/>')},
+{g:'geo',group:'地理要素',name:'河流',svg:I('<path class="water" d="M7 14c10 8 18 5 27 14s14 6 23 19l-8 7C40 43 34 46 24 35S12 28 5 21Z"/>')},
+{g:'geo',group:'地理要素',name:'大河',svg:I('<path class="water" d="M5 21c10-8 19 8 29 0s18 7 25-1v9c-9 9-17-6-26 2S14 24 5 33Zm0 17c10-8 19 8 29 0s18 7 25-1v9c-9 9-17-6-26 2S14 41 5 50Z"/>')},
+{g:'geo',group:'地理要素',name:'小河',svg:I('<path class="stroke" style="stroke:#61c8ff;stroke-width:5" d="M7 39c10-16 18 6 30-9s16 3 21-10"/>')},
+{g:'geo',group:'地理要素',name:'山峰',svg:I('<path class="stone" d="m6 55 25-44 27 44Z"/><path fill="#f2f5f7" d="m31 11 9 16-7-3-5 6-6-5Z"/>')},
+{g:'geo',group:'地理要素',name:'山脉',svg:I('<path class="stone" d="M3 55 20 27l8 12L40 14l21 41Z"/><path fill="#f2f5f7" d="m20 27 5 8-5-2-4 4Zm20-13 8 14-7-4-5 6-4-4Z"/>')},
+{g:'geo',group:'地理要素',name:'丘陵',svg:I('<path class="green" d="M4 55c8-21 21-28 32-11 6-13 16-15 24 11Z"/><path class="thin" d="M11 52c8-13 16-15 23-6"/>')},
+{g:'geo',group:'地理要素',name:'盆地',svg:I('<path class="sand" d="M5 24h54c-3 18-12 31-27 31S8 42 5 24Z"/><path class="green" d="M15 30h34c-4 9-9 14-17 14s-13-5-17-14Z"/>')},
+{g:'geo',group:'地理要素',name:'海岸',svg:I('<path class="sand" d="M5 8h28c-8 11-5 21 5 30 7 7 9 13 8 20H5Z"/><path class="water" d="M33 8h26v50H46c1-8-2-15-9-22-9-9-12-18-4-28Z"/><path class="thin" d="M33 8c-8 11-5 21 5 30 7 7 9 13 8 20"/>')},
+{g:'geo',group:'地理要素',name:'沙滩',svg:I('<path class="sand" d="M5 11h54v46H5Z"/><path class="water" d="M5 42c12-8 21 8 33 0s14 5 21 0v15H5Z"/><path class="green" d="M22 14c7-8 16-4 17 2-8-2-11 1-14 5Zm5 5 3 19h-5Z"/>')},
+{g:'geo',group:'地理要素',name:'森林',svg:I('<path class="green" d="m15 10 10 16h-6l9 13h-9v15H11V39H3l9-13H6Zm27-4 12 19h-7l10 14H47v15H37V39H27l10-14h-7Z"/>')},
+{g:'geo',group:'地理要素',name:'沼泽',svg:I('<path class="water" d="M7 45c8-5 15 5 23 0s15 5 27 0v10H7Z"/><path class="green" d="M12 41h18c-4-8-14-8-18 0Zm27 2h14c-3-7-11-7-14 0Z"/><path class="stroke" d="M17 12v24m7-18v18m23-22v25"/>')},
+{g:'geo',group:'地理要素',name:'沙漠',svg:I('<path class="sand" d="M4 47c11-16 22-12 31-4 8-10 16-12 25 4v11H4Z"/><path class="green" d="M47 12h5v15h7v5h-7v13h-5V34h-8v-5h8Z"/>')},
+{g:'geo',group:'地理要素',name:'火山',svg:I('<path class="stone" d="M8 56 25 24h14l17 32Z"/><path fill="#ef6a3a" d="m26 24 6 8 7-8-4-7 6-7-8 2-5-7-1 9-8 3Z"/><path class="thin" d="M24 40c5 4 11 4 16 0"/>')},
+{g:'geo',group:'地理要素',name:'天坑',svg:I('<ellipse class="stone" cx="32" cy="32" rx="26" ry="17"/><ellipse cx="32" cy="34" rx="16" ry="9" fill="#0b1016"/><path class="thin" d="M12 29c12 5 28 5 40 0"/>')},
+{g:'geo',group:'地理要素',name:'岛屿',svg:I('<path class="water" d="M4 48c8-5 15 5 23 0s17 5 33 0v10H4Z"/><path class="sand" d="M14 45c4-14 13-20 25-18 8 1 13 7 15 18Z"/><path class="green" d="M20 37c5-9 11-12 18-10 7 2 10 6 12 10Z"/>')},
+{g:'geo',group:'地理要素',name:'三角洲',svg:I('<path class="water" d="M29 6h7v20l19 26-6 5-16-22-6 22-7-2 8-29Z"/><path class="thin" d="m33 28-15 22m17-19 7 21"/>')},
+{g:'geo',group:'地理要素',name:'瀑布',svg:I('<path class="stone" d="M7 12h24v10H17v35H7Z"/><path class="water" d="M17 22h14v35H17Z"/><path class="thin" d="M12 58c10-6 19 5 31 0s13 3 17 1"/>')}
+];
+
+const groups=['player','menu','structure','custom','geo'];
+const groupNames={player:'玩家图标',menu:'菜单图标',structure:'结构图标',custom:'自定义标点',geo:'地理要素'};
+const groupDesc={player:'玩家当前位置、朝向与定位',menu:'界面与常用操作',structure:'自动识别的主要游戏结构',custom:'玩家手动添加的常用标记',geo:'水系、山地、海岸与区域要素'};
+
+function render(filter='all',query=''){
+  const q=query.trim().toLowerCase();
+  const app=document.getElementById('app'); app.innerHTML='';
+  groups.forEach(g=>{
+    if(filter!=='all'&&filter!==g)return;
+    const list=icons.filter(x=>x.g===g && (!q||(x.name+x.meta).toLowerCase().includes(q)));
+    if(!list.length)return;
+    const sec=document.createElement('section'); sec.className='group'; sec.dataset.group=g;
+    sec.innerHTML='<div class="group-head"><h2>'+groupNames[g]+'</h2><small>'+groupDesc[g]+'</small></div><div class="group-grid"></div>';
+    const grid=sec.querySelector('.group-grid');
+    list.forEach(x=>{
+      const card=document.createElement('div');card.className='card'+(x.rec?' recommended':'');
+      card.innerHTML=(x.rec?'<span class="rec">推荐</span>':'')+'<div class="icon-wrap">'+x.svg+'</div><div class="name">'+x.name+'</div><div class="meta">'+(x.meta||'SVG')+'</div>';
+      grid.appendChild(card);
+    });
+    app.appendChild(sec);
+  });
+}
+let active='all';
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');active=b.dataset.filter;render(active,search.value)});
+document.querySelectorAll('.size-btn').forEach(b=>b.onclick=()=>document.documentElement.style.setProperty('--icon-size',b.dataset.size+'px'));
+const search=document.getElementById('search');search.oninput=()=>render(active,search.value);
+render();
+
+const samples=[
+  {x:18,y:42,label:'玩家位置',svg:icons.find(x=>x.name==='导航箭头').svg},
+  {x:43,y:57,label:'废弃矿井',svg:icons.find(x=>x.name==='废弃矿井').svg},
+  {x:67,y:34,label:'资源点',svg:icons.find(x=>x.name==='资源点').svg},
+  {x:83,y:66,label:'大河',svg:icons.find(x=>x.name==='大河').svg}
+];
+const mp=document.getElementById('mapPreview');
+samples.forEach(s=>{const el=document.createElement('div');el.className='sample';el.style.left=s.x+'%';el.style.top=s.y+'%';el.innerHTML=s.svg+'<span>'+s.label+'</span>';mp.appendChild(el)});
+</script>
+</body>
+</html>
