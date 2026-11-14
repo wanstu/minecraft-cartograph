@@ -201,9 +201,16 @@ public final class MapScreenV3 extends Screen {
         }
 
         if (count == 0) return 0;
-        red = (red + count / 2) / count;
-        green = (green + count / 2) / count;
-        blue = (blue + count / 2) / count;
+
+        // Missing samples are genuinely unknown map data. Blend their share
+        // with the map background instead of stretching known terrain into it.
+        final int backgroundRed = 0x11;
+        final int backgroundGreen = 0x14;
+        final int backgroundBlue = 0x17;
+        int missing = 4 - count;
+        red = (red + backgroundRed * missing + 2) / 4;
+        green = (green + backgroundGreen * missing + 2) / 4;
+        blue = (blue + backgroundBlue * missing + 2) / 4;
         return 0xff000000 | (red << 16) | (green << 8) | blue;
     }
 
