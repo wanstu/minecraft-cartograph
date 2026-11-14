@@ -365,7 +365,8 @@ public final class MapScreenV3 extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (keyCode == GLFW.GLFW_KEY_M || keyCode == GLFW.GLFW_KEY_ESCAPE) {
+        if (CartographV3Client.matchesOpenKey(keyCode, scanCode)
+                || keyCode == GLFW.GLFW_KEY_ESCAPE) {
             onClose();
             return true;
         }

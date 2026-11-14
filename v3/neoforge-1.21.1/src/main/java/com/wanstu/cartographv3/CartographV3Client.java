@@ -29,6 +29,10 @@ public final class CartographV3Client {
         event.register(OPEN);
     }
 
+    static boolean matchesOpenKey(int keyCode, int scanCode) {
+        return OPEN.matches(keyCode, scanCode);
+    }
+
     private static void tick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         MapClientCache.ensureWorld(mc.level);
