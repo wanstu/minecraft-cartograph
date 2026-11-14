@@ -58,7 +58,7 @@ final class MapUiControls {
     }
 
 
-    enum IconType { MENU, CLOSE, SETTINGS, TELEPORT, CHEVRON_RIGHT }
+    enum IconType { MENU, CLOSE, SETTINGS, TELEPORT, CHEVRON_RIGHT, LOCATE }
 
     static final class Icon extends Control {
         private IconType type;
@@ -86,8 +86,10 @@ final class MapUiControls {
 
             switch (type) {
                 case MENU -> {
+                    int half = Math.max(4, Math.min(7, s));
                     for (int dy : new int[] {-4, 0, 4}) {
-                        graphics.fill(cx - s, cy + dy - 1, cx + s + 1, cy + dy + 1, color);
+                        graphics.fill(cx - half, cy + dy, cx + half + 1, cy + dy + 2, 0xaa000000);
+                        graphics.fill(cx - half, cy + dy - 1, cx + half + 1, cy + dy + 1, color);
                     }
                 }
                 case CLOSE -> {
@@ -112,6 +114,25 @@ final class MapUiControls {
                         int offset = Math.abs(i);
                         graphics.fill(cx + offset - 1, cy + i, cx + offset + 1, cy + i + 2, color);
                     }
+                }
+                case LOCATE -> {
+                    int r = Math.max(4, Math.min(7, s));
+                    graphics.fill(cx - 1, cy - r - 2, cx + 2, cy - r + 1, color);
+                    graphics.fill(cx - 1, cy + r - 1, cx + 2, cy + r + 2, color);
+                    graphics.fill(cx - r - 2, cy - 1, cx - r + 1, cy + 2, color);
+                    graphics.fill(cx + r - 1, cy - 1, cx + r + 2, cy + 2, color);
+
+                    graphics.fill(cx - r, cy - r, cx - r + 2, cy - 2, color);
+                    graphics.fill(cx - r, cy - r, cx - 2, cy - r + 2, color);
+                    graphics.fill(cx + r - 1, cy - r, cx + r + 1, cy - 2, color);
+                    graphics.fill(cx + 2, cy - r, cx + r + 1, cy - r + 2, color);
+                    graphics.fill(cx - r, cy + 2, cx - r + 2, cy + r + 1, color);
+                    graphics.fill(cx - r, cy + r - 1, cx - 2, cy + r + 1, color);
+                    graphics.fill(cx + r - 1, cy + 2, cx + r + 1, cy + r + 1, color);
+                    graphics.fill(cx + 2, cy + r - 1, cx + r + 1, cy + r + 1, color);
+
+                    graphics.fill(cx - 2, cy - 2, cx + 3, cy + 3, 0xaa000000);
+                    graphics.fill(cx - 1, cy - 1, cx + 2, cy + 2, color);
                 }
             }
         }
@@ -564,6 +585,9 @@ final class MapUiControls {
             graphics.fill(cx - 1, y + 11, cx + 2, y + 12, 0xffdbe1e6);
 
             if (!open) return;
+
+            graphics.pose().pushPose();
+            graphics.pose().translate(0.0f, 0.0f, 120.0f);
             int oy = y + height + 2;
             for (int i = 0; i < options.size(); i++) {
                 int itemY = oy + i * height;
@@ -574,6 +598,7 @@ final class MapUiControls {
                 graphics.drawString(font, options.get(i).label(), x + 7, itemY + 7,
                         Objects.equals(options.get(i).value(), value) ? 0xffffd166 : 0xffedf1f4, false);
             }
+            graphics.pose().popPose();
         }
 
         @Override
@@ -839,6 +864,8 @@ final class MapUiControls {
             hexInput.render(graphics, font, mouseX, mouseY);
             if (!open) return;
 
+            graphics.pose().pushPose();
+            graphics.pose().translate(0.0f, 0.0f, 140.0f);
             int px = pickerX();
             int py = y + height + 3;
             graphics.fill(px, py, px + PICKER_W, py + PICKER_H, 0xf522282e);
@@ -874,6 +901,7 @@ final class MapUiControls {
 
             graphics.fill(px + 8, py + 96, px + 40, py + 108, 0xff000000 | rgb);
             graphics.drawString(font, hex(rgb), px + 48, py + 98, 0xffe8edf1, false);
+            graphics.pose().popPose();
         }
 
         @Override
