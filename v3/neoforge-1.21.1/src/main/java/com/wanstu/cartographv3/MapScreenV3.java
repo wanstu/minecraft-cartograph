@@ -17,6 +17,7 @@ public final class MapScreenV3 extends Screen {
     private double centerZ;
     private double zoom = 2.0;
     private boolean dragging;
+    private boolean initialized;
 
     private double[] downsampleX0 = new double[0];
     private double[] downsampleX1 = new double[0];
@@ -33,14 +34,17 @@ public final class MapScreenV3 extends Screen {
     @Override
     protected void init() {
         MapClientCache.ensureWorld(minecraft.level);
-        MapClientCache.beginMapSession();
-        if (minecraft.player != null) {
-            // Initial viewport only. No player marker or player-position layer exists.
-            centerX = minecraft.player.getX();
-            centerZ = minecraft.player.getZ();
+        if (!initialized) {
+            MapClientCache.beginMapSession();
+            if (minecraft.player != null) {
+                // Initial viewport only. No player marker or player-position layer exists.
+                centerX = minecraft.player.getX();
+                centerZ = minecraft.player.getZ();
+            }
+            initialized = true;
+            LOG.info("V3_MAP_OPEN dimension={} center={},{} zoom={}",
+                    dimension(), Math.floor(centerX), Math.floor(centerZ), zoom);
         }
-        LOG.info("V3_MAP_OPEN dimension={} center={},{} zoom={}",
-                dimension(), Math.floor(centerX), Math.floor(centerZ), zoom);
         requestVisible();
     }
 
