@@ -22,5 +22,6 @@ public final class CartographV3Mod {
 
     private static void serverStopped(ServerStoppedEvent event) {
         SurfaceService.clear(event.getServer());
+        WorldIdentity.clear(event.getServer());
     }
 }

@@ -13,6 +13,27 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 public final class MapProtocol {
     private MapProtocol() {}
 
+    public record RequestWorldInfo() implements CustomPacketPayload {
+        public static final Type<RequestWorldInfo> TYPE = new Type<>(
+                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "request_world_info"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, RequestWorldInfo> CODEC =
+                StreamCodec.of((buf, value) -> {}, buf -> new RequestWorldInfo());
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    public record WorldInfo(String worldId, String dimension) implements CustomPacketPayload {
+        public static final Type<WorldInfo> TYPE = new Type<>(
+                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "world_info"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, WorldInfo> CODEC =
+                StreamCodec.of(
+                        (buf, value) -> {
+                            buf.writeUtf(value.worldId(), 36);
+                            buf.writeUtf(value.dimension(), 128);
+                        },
+                        buf -> new WorldInfo(buf.readUtf(36), buf.readUtf(128)));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
     public record RequestTile(String dimension, int chunkX, int chunkZ)
             implements CustomPacketPayload {
         public static final Type<RequestTile> TYPE = new Type<>(
@@ -66,7 +87,14 @@ public final class MapProtocol {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("1");
+        var registrar = event.registrar("2");
+        registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
+                context.enqueueWork(() -> {
+                    if (!(context.player() instanceof ServerPlayer player)) return;
+                    PacketDistributor.sendToPlayer(player, new WorldInfo(
+                            WorldIdentity.get(player.server).toString(),
+                            player.serverLevel().dimension().location().toString()));
+                }));
         registrar.playToServer(RequestTile.TYPE, RequestTile.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
@@ -91,6 +119,10 @@ public final class MapProtocol {
                             }));
                 }));
 
+        registrar.playToClient(WorldInfo.TYPE, WorldInfo.CODEC, (info, context) ->
+                context.enqueueWork(() -> {
+                    if (FMLEnvironment.dist == Dist.CLIENT) MapClientCache.accept(info);
+                }));
         registrar.playToClient(Tile.TYPE, Tile.CODEC, (tile, context) ->
                 context.enqueueWork(() -> {
                     if (FMLEnvironment.dist == Dist.CLIENT) MapClientCache.accept(tile);

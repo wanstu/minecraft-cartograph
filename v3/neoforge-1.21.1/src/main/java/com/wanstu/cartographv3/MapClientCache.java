@@ -12,6 +12,8 @@ public final class MapClientCache {
     private static final Set<ChunkKey> PENDING = new HashSet<>();
     private static final Map<ChunkKey, Integer> MISSING_AT = new HashMap<>();
     private static ClientLevel world;
+    private static java.util.UUID worldId;
+    private static boolean worldInfoRequested;
     private static int ticks;
     private static long firstRequestNanos;
     private static int received;
@@ -21,15 +23,30 @@ public final class MapClientCache {
     public static void ensureWorld(ClientLevel level) {
         if (level == world) return;
         world = level;
+        worldId = null;
+        worldInfoRequested = false;
         TILES.clear();
         PENDING.clear();
         MISSING_AT.clear();
         ticks = 0;
         firstRequestNanos = 0L;
         received = 0;
+        if (level != null) requestWorldInfo();
     }
 
-    public static void tick() { ticks++; }
+    private static void requestWorldInfo() {
+        if (world == null || worldInfoRequested) return;
+        worldInfoRequested = true;
+        PacketDistributor.sendToServer(new MapProtocol.RequestWorldInfo());
+    }
+
+    public static void tick() {
+        ticks++;
+        if (world != null && worldId == null && ticks % 20 == 0) {
+            worldInfoRequested = false;
+            requestWorldInfo();
+        }
+    }
 
     public static SurfaceTile tile(ChunkKey key) {
         return TILES.get(key);
@@ -40,13 +57,41 @@ public final class MapClientCache {
     }
 
     public static void request(ChunkKey key) {
-        if (world == null || PENDING.contains(key) || TILES.containsKey(key)) return;
+        if (world == null || worldId == null || PENDING.contains(key) || TILES.containsKey(key)) return;
+        java.util.Optional<SurfaceTile> disk = PersistentTileStore.load(worldId, key);
+        if (disk.isPresent()) {
+            TILES.put(key, disk.get());
+            int restored = TILES.size();
+            if (restored == 1 || restored % 64 == 0)
+                LOG.info("V3_MAP_CACHE_RESTORE restored={} example={},{}",
+                        restored, key.x(), key.z());
+            return;
+        }
         Integer missing = MISSING_AT.get(key);
         if (missing != null && ticks - missing < 40) return;
         PENDING.add(key);
         if (firstRequestNanos == 0L) firstRequestNanos = System.nanoTime();
         PacketDistributor.sendToServer(new MapProtocol.RequestTile(
                 key.dimension(), key.x(), key.z()));
+    }
+
+    public static void accept(MapProtocol.WorldInfo info) {
+        if (world == null) return;
+        String current = world.dimension().location().toString();
+        if (!current.equals(info.dimension())) return;
+        try {
+            java.util.UUID next = java.util.UUID.fromString(info.worldId());
+            if (worldId != null && !worldId.equals(next)) {
+                TILES.clear();
+                PENDING.clear();
+                MISSING_AT.clear();
+            }
+            worldId = next;
+            LOG.info("V3_WORLD_ID world={} dimension={}", worldId, current);
+        } catch (IllegalArgumentException invalid) {
+            worldId = null;
+            worldInfoRequested = false;
+        }
     }
 
     public static void accept(MapProtocol.Tile packet) {
@@ -60,7 +105,9 @@ public final class MapClientCache {
             return;
         }
         MISSING_AT.remove(key);
-        TILES.put(key, new SurfaceTile(key, packet.rgb()));
+        SurfaceTile tile = new SurfaceTile(key, packet.rgb());
+        TILES.put(key, tile);
+        if (worldId != null) PersistentTileStore.save(worldId, tile);
         received++;
         if (received == 1 || received % 64 == 0) {
             long elapsed = firstRequestNanos == 0L ? -1L
