@@ -144,33 +144,35 @@ public final class MapScreenV3 extends Screen {
                                 MapUiSettings.setStructurePresetIcon(preset, icon);
                                 MapMarkerStore.applyStructurePreset(preset);
                             }));
-            structurePrimaryInputs.put(
-                    preset,
-                    new MapUiControls.ColorInput(
-                            82,
-                            MapUiSettings.structurePresetPrimaryColor(preset),
-                            color -> {
-                                MapUiSettings.setStructurePresetPrimaryColor(preset, color);
-                                MapMarkerStore.applyStructurePreset(preset);
-                            }));
-            structureAccentInputs.put(
-                    preset,
-                    new MapUiControls.ColorInput(
-                            82,
-                            MapUiSettings.structurePresetAccentColor(preset),
-                            color -> {
-                                MapUiSettings.setStructurePresetAccentColor(preset, color);
-                                MapMarkerStore.applyStructurePreset(preset);
-                            }));
-            structureLineInputs.put(
-                    preset,
-                    new MapUiControls.ColorInput(
-                            82,
-                            MapUiSettings.structurePresetLineColor(preset),
-                            color -> {
-                                MapUiSettings.setStructurePresetLineColor(preset, color);
-                                MapMarkerStore.applyStructurePreset(preset);
-                            }));
+            MapUiControls.ColorInput primary = new MapUiControls.ColorInput(
+                    24,
+                    MapUiSettings.structurePresetPrimaryColor(preset),
+                    color -> {
+                        MapUiSettings.setStructurePresetPrimaryColor(preset, color);
+                        MapMarkerStore.applyStructurePreset(preset);
+                    });
+            primary.setCompact(true);
+            structurePrimaryInputs.put(preset, primary);
+
+            MapUiControls.ColorInput accent = new MapUiControls.ColorInput(
+                    24,
+                    MapUiSettings.structurePresetAccentColor(preset),
+                    color -> {
+                        MapUiSettings.setStructurePresetAccentColor(preset, color);
+                        MapMarkerStore.applyStructurePreset(preset);
+                    });
+            accent.setCompact(true);
+            structureAccentInputs.put(preset, accent);
+
+            MapUiControls.ColorInput line = new MapUiControls.ColorInput(
+                    24,
+                    MapUiSettings.structurePresetLineColor(preset),
+                    color -> {
+                        MapUiSettings.setStructurePresetLineColor(preset, color);
+                        MapMarkerStore.applyStructurePreset(preset);
+                    });
+            line.setCompact(true);
+            structureLineInputs.put(preset, line);
         }
         var resetStructureLabel = new MapUiControls.Span("恢复默认");
         resetStructureLabel.setCentered(true);
@@ -697,7 +699,7 @@ public final class MapScreenV3 extends Screen {
 
         if (settingsTab == SettingsTab.PLAYER) {
             graphics.drawString(font, "玩家图标", contentX, contentY, 0xfff0f3f5, false);
-            graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
+            graphics.fill(contentX, contentY + 15, contentRight, contentY + 16, 0xff39424a);
 
             layoutSettingsControls();
             markerTypeSelect.setValue(MapUiSettings.markerType());
@@ -706,60 +708,59 @@ public final class MapScreenV3 extends Screen {
             markerLineColorInput.setValue(MapUiSettings.markerLineColor());
             markerSizeSlider.setValue(MapUiSettings.markerSize());
 
-            int row1 = contentY + 38;
-            int row2 = contentY + 76;
-            int row3 = contentY + 114;
-            int row4 = contentY + 152;
-            int row5 = contentY + 194;
+            int row1 = contentY + 24;
+            int row2 = contentY + 52;
+            int row3 = contentY + 80;
+            int row4 = contentY + 108;
+            int row5 = contentY + 140;
 
             graphics.drawString(font, "图标类型", contentX, row1 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "主色", contentX, row2 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "辅色", contentX, row3 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "线条色", contentX, row4 + 7, 0xffd8dde2, false);
-            graphics.drawString(font, "图标大小（6～48 px）",
-                    contentX, row5 + 6, 0xffd8dde2, false);
-            int sizeValueX = Math.min(contentRight - 82, contentX + 380);
-            graphics.drawString(font, "当前 " + MapUiSettings.markerSize() + " px",
-                    sizeValueX, row5 + 6, 0xffd7dde2, false);
+            graphics.drawString(font, "图标大小", contentX, row5 + 5, 0xffd8dde2, false);
 
             markerTypeSelect.render(graphics, font, mouseX, mouseY);
             markerPrimaryColorInput.render(graphics, font, mouseX, mouseY);
             markerColorInput.render(graphics, font, mouseX, mouseY);
             markerLineColorInput.render(graphics, font, mouseX, mouseY);
             markerSizeSlider.render(graphics, font, mouseX, mouseY);
+
+            String sizeText = MapUiSettings.markerSize() + " px";
+            graphics.drawString(
+                    font, sizeText,
+                    Math.max(contentX, contentRight - font.width(sizeText)),
+                    row5 + 5, 0xffd7dde2, false);
         } else if (settingsTab == SettingsTab.STRUCTURE) {
             graphics.drawString(font, "结构预设", contentX, contentY, 0xfff0f3f5, false);
-            graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
+            graphics.fill(contentX, contentY + 15, contentRight, contentY + 16, 0xff39424a);
             graphics.drawString(
                     font,
-                    "自动结构可分别设置图标与三色；修改会应用到未被手工编辑的自动标点。",
-                    contentX, contentY + 28, 0xff8f989f, false);
+                    "自动结构的默认图标和配色；只影响未手工编辑的自动标点。",
+                    contentX, contentY + 22, 0xff8f989f, false);
 
             layoutStructurePresetSettings();
             structureResetTable.render(graphics, font, mouseX, mouseY);
 
             int listTop = structureListTop();
             int listBottom = structureListBottom();
-            int available = Math.max(180, contentRight - contentX);
-            int iconX = contentX + Math.min(82, Math.max(64, available / 3));
-            int colorsX = contentX;
-            int colorGap = 3;
-            int colorW = Math.max(66, (available - colorGap * 2) / 3);
-
-            graphics.drawString(font, "结构 / 图标", contentX, listTop - 12, 0xffaeb7be, false);
-            graphics.drawString(font, "主色", colorsX, listTop + 15, 0xff8f989f, false);
-            graphics.drawString(font, "辅色", colorsX + colorW + colorGap,
-                    listTop + 15, 0xff8f989f, false);
-            graphics.drawString(font, "线条色", colorsX + (colorW + colorGap) * 2,
-                    listTop + 15, 0xff8f989f, false);
+            int[] columns = structureColumns();
+            graphics.drawString(font, "结构", columns[0], listTop - 12, 0xffaeb7be, false);
+            graphics.drawString(font, "图标", columns[1], listTop - 12, 0xffaeb7be, false);
+            graphics.drawCenteredString(font, "主", columns[2] + 11, listTop - 12, 0xffaeb7be);
+            graphics.drawCenteredString(font, "辅", columns[3] + 11, listTop - 12, 0xffaeb7be);
+            graphics.drawCenteredString(font, "线", columns[4] + 11, listTop - 12, 0xffaeb7be);
 
             int row = 0;
             for (MapMarkerStore.StructurePreset preset : MapMarkerStore.StructurePreset.values()) {
                 int rowY = structureRowY(row);
-                if (rowY + 50 >= listTop && rowY <= listBottom) {
+                if (rowY >= listTop && rowY + 22 <= listBottom) {
+                    if ((row & 1) == 1) {
+                        graphics.fill(contentX, rowY - 2, contentRight, rowY + 24, 0x182f373e);
+                    }
                     graphics.drawString(
                             font, preset.label,
-                            contentX, rowY + 7, 0xffd8dde2, false);
+                            columns[0], rowY + 7, 0xffd8dde2, false);
 
                     MapUiControls.MarkerIconSelect select = structurePresetSelects.get(preset);
                     MapUiControls.ColorInput primary = structurePrimaryInputs.get(preset);
@@ -839,65 +840,75 @@ public final class MapScreenV3 extends Screen {
     private void layoutSettingsControls() {
         int contentX = SETTINGS_TAB_W + 28;
         int contentY = 58;
-        int controlX = Math.min(width - 230, contentX + 180);
-        int controlW = Math.max(150, Math.min(220, width - controlX - 28));
+        int controlX = Math.min(width - 210, contentX + 110);
+        int controlW = Math.max(120, Math.min(210, width - controlX - 28));
 
-        markerTypeSelect.setBounds(controlX, contentY + 38, controlW, 22);
-        markerPrimaryColorInput.setBounds(controlX, contentY + 76, controlW, 22);
-        markerColorInput.setBounds(controlX, contentY + 114, controlW, 22);
-        markerLineColorInput.setBounds(controlX, contentY + 152, controlW, 22);
-        markerSizeSlider.setBounds(controlX, contentY + 194, Math.min(180, controlW), 18);
+        markerTypeSelect.setBounds(controlX, contentY + 24, controlW, 22);
+        markerPrimaryColorInput.setBounds(controlX, contentY + 52, controlW, 22);
+        markerColorInput.setBounds(controlX, contentY + 80, controlW, 22);
+        markerLineColorInput.setBounds(controlX, contentY + 108, controlW, 22);
+        markerSizeSlider.setBounds(controlX, contentY + 140, Math.min(150, controlW), 18);
     }
 
     private int structureListTop() {
-        return 58 + 46;
+        return 112;
     }
 
     private int structureListBottom() {
-        return Math.max(structureListTop() + 72, height - 12);
+        return Math.max(structureListTop() + 28, height - 10);
     }
 
     private int structureRowY(int row) {
-        return structureListTop() + 30 + row * 52 - structureSettingsScroll;
+        return structureListTop() + row * 28 - structureSettingsScroll;
     }
 
     private int structureMaxScroll() {
-        int viewport = Math.max(1, structureListBottom() - (structureListTop() + 30));
-        int content = MapMarkerStore.StructurePreset.values().length * 52;
+        int viewport = Math.max(1, structureListBottom() - structureListTop());
+        int content = MapMarkerStore.StructurePreset.values().length * 28;
         return Math.max(0, content - viewport);
     }
 
     private boolean structureRowVisible(int row) {
         int rowY = structureRowY(row);
-        return rowY + 50 >= structureListTop() && rowY <= structureListBottom();
+        return rowY >= structureListTop() && rowY + 22 <= structureListBottom();
+    }
+
+    private int[] structureColumns() {
+        int contentX = SETTINGS_TAB_W + 28;
+        int contentRight = width - 28;
+        int available = Math.max(220, contentRight - contentX);
+        int nameW = Math.min(88, Math.max(64, available / 4));
+        int colorBlock = 28;
+        int colorsTotal = colorBlock * 3;
+        int iconW = Math.max(88, available - nameW - colorsTotal - 12);
+        int iconX = contentX + nameW;
+        int colorX = iconX + iconW + 4;
+        return new int[] {
+                contentX,
+                iconX,
+                colorX,
+                colorX + colorBlock,
+                colorX + colorBlock * 2,
+                iconW
+        };
     }
 
     private void layoutStructurePresetSettings() {
         int contentX = SETTINGS_TAB_W + 28;
-        int contentY = 58;
         int contentRight = width - 28;
-        int available = Math.max(180, contentRight - contentX);
-        int labelW = Math.min(82, Math.max(64, available / 3));
-        int iconX = contentX + labelW;
-        int iconW = Math.max(96, available - labelW);
-        int colorGap = 3;
-        int colorW = Math.max(66, (available - colorGap * 2) / 3);
+        int[] c = structureColumns();
 
         structureSettingsScroll = clamp(
                 structureSettingsScroll, 0, structureMaxScroll());
-        structureResetTable.setBounds(contentRight - 70, contentY - 3, 70, 20);
+        structureResetTable.setBounds(contentRight - 70, 53, 70, 20);
 
         int row = 0;
         for (MapMarkerStore.StructurePreset preset : MapMarkerStore.StructurePreset.values()) {
             int rowY = structureRowY(row);
-            structurePresetSelects.get(preset).setBounds(
-                    iconX, rowY, iconW, 22);
-            structurePrimaryInputs.get(preset).setBounds(
-                    contentX, rowY + 26, colorW, 22);
-            structureAccentInputs.get(preset).setBounds(
-                    contentX + colorW + colorGap, rowY + 26, colorW, 22);
-            structureLineInputs.get(preset).setBounds(
-                    contentX + (colorW + colorGap) * 2, rowY + 26, colorW, 22);
+            structurePresetSelects.get(preset).setBounds(c[1], rowY, c[5], 22);
+            structurePrimaryInputs.get(preset).setBounds(c[2], rowY, 22, 22);
+            structureAccentInputs.get(preset).setBounds(c[3], rowY, 22, 22);
+            structureLineInputs.get(preset).setBounds(c[4], rowY, 22, 22);
             row++;
         }
     }
@@ -1345,7 +1356,7 @@ public final class MapScreenV3 extends Screen {
                 int steps = Math.max(1, (int) Math.round(Math.abs(scrollY)));
                 structureSettingsScroll = clamp(
                         structureSettingsScroll
-                                + (scrollY > 0 ? -steps * 36 : steps * 36),
+                                + (scrollY > 0 ? -steps * 28 : steps * 28),
                         0, structureMaxScroll());
                 closeStructurePresetPopups();
             }

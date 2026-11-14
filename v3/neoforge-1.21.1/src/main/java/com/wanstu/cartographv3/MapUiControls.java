@@ -1098,6 +1098,7 @@ final class MapUiControls {
         private float value;
         private boolean open;
         private int dragMode;
+        private boolean compact;
 
         ColorInput(int width, int initialRgb, Consumer<Integer> onChange) {
             super(width, 22);
@@ -1111,6 +1112,10 @@ final class MapUiControls {
         }
 
         int value() { return rgb; }
+
+        void setCompact(boolean compact) {
+            this.compact = compact;
+        }
 
         void setValue(int next) {
             int normalized = next & 0x00ffffff;
@@ -1132,9 +1137,12 @@ final class MapUiControls {
         @Override
         void render(GuiGraphics graphics, Font font, int mouseX, int mouseY) {
             if (!visible) return;
-            graphics.fill(x, y, x + 24, y + height, 0xff48515a);
-            graphics.fill(x + 2, y + 2, x + 22, y + height - 2, 0xff000000 | rgb);
-            hexInput.render(graphics, font, mouseX, mouseY);
+            int swatchW = compact ? Math.max(18, Math.min(width, height)) : 24;
+            graphics.fill(x, y, x + swatchW, y + height, 0xff48515a);
+            graphics.fill(x + 2, y + 2, x + swatchW - 2, y + height - 2, 0xff000000 | rgb);
+            if (!compact) {
+                hexInput.render(graphics, font, mouseX, mouseY);
+            }
             if (!open) return;
 
             graphics.pose().pushPose();
@@ -1180,8 +1188,9 @@ final class MapUiControls {
         @Override
         boolean mouseClicked(double mouseX, double mouseY, int button) {
             if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT || !enabled) return false;
-            if (hexInput.mouseClicked(mouseX, mouseY, button)) return true;
-            if (mouseX >= x && mouseX < x + 24 && mouseY >= y && mouseY < y + height) {
+            if (!compact && hexInput.mouseClicked(mouseX, mouseY, button)) return true;
+            int swatchW = compact ? Math.max(18, Math.min(width, height)) : 24;
+            if (mouseX >= x && mouseX < x + swatchW && mouseY >= y && mouseY < y + height) {
                 open = !open;
                 return true;
             }
@@ -1221,12 +1230,12 @@ final class MapUiControls {
 
         @Override
         boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-            return hexInput.keyPressed(keyCode, scanCode, modifiers);
+            return !compact && hexInput.keyPressed(keyCode, scanCode, modifiers);
         }
 
         @Override
         boolean charTyped(char codePoint, int modifiers) {
-            return hexInput.charTyped(codePoint, modifiers);
+            return !compact && hexInput.charTyped(codePoint, modifiers);
         }
 
         @Override
