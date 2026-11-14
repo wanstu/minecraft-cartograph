@@ -5,6 +5,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -50,6 +51,22 @@ public final class MapProtocol {
                         },
                         buf -> new RequestTile(buf.readUtf(128), buf.readInt(), buf.readInt(),
                                 buf.readBoolean(), buf.readLong()));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    public record TeleportRequest(String dimension, int blockX, int blockZ)
+            implements CustomPacketPayload {
+        public static final Type<TeleportRequest> TYPE = new Type<>(
+                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "teleport"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, TeleportRequest> CODEC =
+                StreamCodec.of(
+                        (buf, value) -> {
+                            buf.writeUtf(value.dimension(), 128);
+                            buf.writeInt(value.blockX());
+                            buf.writeInt(value.blockZ());
+                        },
+                        buf -> new TeleportRequest(
+                                buf.readUtf(128), buf.readInt(), buf.readInt()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
@@ -170,7 +187,7 @@ public final class MapProtocol {
     }
 
     public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("5");
+        var registrar = event.registrar("6");
         registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
@@ -178,6 +195,22 @@ public final class MapProtocol {
                             WorldIdentity.get(player.server).toString(),
                             player.serverLevel().dimension().location().toString()));
                 }));
+        registrar.playToServer(TeleportRequest.TYPE, TeleportRequest.CODEC, (request, context) ->
+                context.enqueueWork(() -> {
+                    if (!(context.player() instanceof ServerPlayer player)) return;
+                    var level = player.serverLevel();
+                    if (!level.dimension().location().toString().equals(request.dimension())) return;
+                    if (!player.server.isSingleplayerOwner(player.getGameProfile())
+                            && !player.hasPermissions(2)) return;
+
+                    int x = request.blockX();
+                    int z = request.blockZ();
+                    int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) + 1;
+                    player.teleportTo(
+                            level, x + 0.5, y, z + 0.5,
+                            player.getYRot(), player.getXRot());
+                }));
+
         registrar.playToServer(RequestTile.TYPE, RequestTile.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
