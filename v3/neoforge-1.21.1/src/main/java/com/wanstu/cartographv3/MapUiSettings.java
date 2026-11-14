@@ -15,6 +15,8 @@ final class MapUiSettings {
 
     private static final int DEFAULT_COLOR = 0xe53935;
     private static final int DEFAULT_SIZE = 12;
+    private static final int DEFAULT_REQUEST_BATCH = 64;
+    private static final int DEFAULT_LIVE_SCAN_INTERVAL = 10;
 
     private static boolean loaded;
     private static MarkerType markerType = MarkerType.ARROW;
@@ -22,6 +24,8 @@ final class MapUiSettings {
     private static int markerSize = DEFAULT_SIZE;
     private static boolean markerLayerEnabled = true;
     private static boolean structureLayerEnabled = true;
+    private static int requestBatchSize = DEFAULT_REQUEST_BATCH;
+    private static int liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
 
     private MapUiSettings() {}
 
@@ -48,6 +52,16 @@ final class MapUiSettings {
     static synchronized boolean structureLayerEnabled() {
         ensureLoaded();
         return structureLayerEnabled;
+    }
+
+    static synchronized int requestBatchSize() {
+        ensureLoaded();
+        return requestBatchSize;
+    }
+
+    static synchronized int liveScanIntervalTicks() {
+        ensureLoaded();
+        return liveScanIntervalTicks;
     }
 
     static synchronized void setMarkerType(MarkerType next) {
@@ -77,6 +91,18 @@ final class MapUiSettings {
     static synchronized void setStructureLayerEnabled(boolean enabled) {
         ensureLoaded();
         structureLayerEnabled = enabled;
+        save();
+    }
+
+    static synchronized void setRequestBatchSize(int value) {
+        ensureLoaded();
+        requestBatchSize = Math.max(8, Math.min(256, value));
+        save();
+    }
+
+    static synchronized void setLiveScanIntervalTicks(int value) {
+        ensureLoaded();
+        liveScanIntervalTicks = Math.max(5, Math.min(100, value));
         save();
     }
 
@@ -113,6 +139,20 @@ final class MapUiSettings {
                     props.getProperty("markerLayerEnabled", "true"));
             structureLayerEnabled = Boolean.parseBoolean(
                     props.getProperty("structureLayerEnabled", "true"));
+            try {
+                requestBatchSize = Math.max(8, Math.min(256,
+                        Integer.parseInt(props.getProperty(
+                                "requestBatchSize", Integer.toString(DEFAULT_REQUEST_BATCH)))));
+            } catch (NumberFormatException ignored) {
+                requestBatchSize = DEFAULT_REQUEST_BATCH;
+            }
+            try {
+                liveScanIntervalTicks = Math.max(5, Math.min(100,
+                        Integer.parseInt(props.getProperty(
+                                "liveScanIntervalTicks", Integer.toString(DEFAULT_LIVE_SCAN_INTERVAL)))));
+            } catch (NumberFormatException ignored) {
+                liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
+            }
         } catch (IOException ignored) {}
     }
 
@@ -123,6 +163,8 @@ final class MapUiSettings {
         props.setProperty("markerSize", Integer.toString(markerSize));
         props.setProperty("markerLayerEnabled", Boolean.toString(markerLayerEnabled));
         props.setProperty("structureLayerEnabled", Boolean.toString(structureLayerEnabled));
+        props.setProperty("requestBatchSize", Integer.toString(requestBatchSize));
+        props.setProperty("liveScanIntervalTicks", Integer.toString(liveScanIntervalTicks));
 
         Path path = path();
         try {

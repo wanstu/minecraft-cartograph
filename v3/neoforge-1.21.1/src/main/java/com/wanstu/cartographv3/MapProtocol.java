@@ -1,5 +1,7 @@
 package com.wanstu.cartographv3;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -22,13 +24,20 @@ public final class MapProtocol {
         }
     }
 
-    public record MapViewState(boolean open) implements CustomPacketPayload {
+    public record MapViewState(boolean open, int liveScanIntervalTicks)
+            implements CustomPacketPayload {
+        public MapViewState {
+            liveScanIntervalTicks = Math.max(5, Math.min(100, liveScanIntervalTicks));
+        }
         public static final Type<MapViewState> TYPE = new Type<>(
                 ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "map_view_state"));
         public static final StreamCodec<RegistryFriendlyByteBuf, MapViewState> CODEC =
                 StreamCodec.of(
-                        (buf, value) -> buf.writeBoolean(value.open()),
-                        buf -> new MapViewState(buf.readBoolean()));
+                        (buf, value) -> {
+                            buf.writeBoolean(value.open());
+                            buf.writeVarInt(value.liveScanIntervalTicks());
+                        },
+                        buf -> new MapViewState(buf.readBoolean(), buf.readVarInt()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
@@ -227,6 +236,39 @@ public final class MapProtocol {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
+    private static int findSafeTeleportY(
+            net.minecraft.server.level.ServerLevel level, int x, int z) {
+        int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        int worldSurface = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+        int start = Math.min(level.getMaxBuildHeight() - 2, Math.max(surface, worldSurface) + 4);
+        int min = level.getMinBuildHeight() + 1;
+
+        BlockPos.MutableBlockPos support = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos feet = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos head = new BlockPos.MutableBlockPos();
+
+        for (int y = start; y >= min; y--) {
+            support.set(x, y - 1, z);
+            feet.set(x, y, z);
+            head.set(x, y + 1, z);
+
+            var supportState = level.getBlockState(support);
+            var feetState = level.getBlockState(feet);
+            var headState = level.getBlockState(head);
+
+            boolean solidSupport = supportState.isFaceSturdy(level, support, Direction.UP);
+            boolean clearFeet = feetState.getCollisionShape(level, feet).isEmpty()
+                    && feetState.getFluidState().isEmpty();
+            boolean clearHead = headState.getCollisionShape(level, head).isEmpty()
+                    && headState.getFluidState().isEmpty();
+
+            if (solidSupport && clearFeet && clearHead) return y;
+        }
+
+        // Last-resort fallback: first air above the motion-blocking surface.
+        return Math.max(min, Math.min(level.getMaxBuildHeight() - 2, surface));
+    }
+
     static void pushChanged(ServerPlayer player, SurfaceTile tile) {
         PacketDistributor.sendToPlayer(player, Tile.changed(tile));
     }
@@ -236,8 +278,11 @@ public final class MapProtocol {
         registrar.playToServer(MapViewState.TYPE, MapViewState.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
-                    if (request.open()) LiveSurfaceUpdates.open(player);
-                    else LiveSurfaceUpdates.close(player);
+                    if (request.open()) {
+                        LiveSurfaceUpdates.open(player, request.liveScanIntervalTicks());
+                    } else {
+                        LiveSurfaceUpdates.close(player);
+                    }
                 }));
         registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
@@ -256,7 +301,11 @@ public final class MapProtocol {
 
                     int x = request.blockX();
                     int z = request.blockZ();
-                    int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) + 1;
+
+                    // Force the target chunk to exist before consulting heightmaps.
+                    level.getChunk(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
+                    int y = findSafeTeleportY(level, x, z);
+
                     player.teleportTo(
                             level, x + 0.5, y, z + 0.5,
                             player.getYRot(), player.getXRot());

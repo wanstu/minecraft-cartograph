@@ -4,6 +4,8 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
 
+import java.util.Locale;
+
 final class MapIconAtlas {
     enum UiIcon {
         MENU("menu"),
@@ -70,39 +72,12 @@ final class MapIconAtlas {
     static void drawMarker(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
             int centerX, int centerY, int size, int rgb, boolean hovered) {
-        ResourceLocation texture = switch (icon) {
-            case PIN -> PIN;
-            case VILLAGE -> VILLAGE;
-            case MANSION -> MANSION;
-            case TEMPLE -> TEMPLE;
-            case OUTPOST -> OUTPOST;
-            case MINE -> MINE;
-            case PORTAL -> PORTAL;
-            case SHIP -> SHIP;
-            case CITY -> CITY;
-            case FORTRESS -> FORTRESS;
-            case HOME -> HOME;
-            case FLAG -> FLAG;
-            case CAMP -> CAMP;
-            case FARM -> FARM;
-            case SHOP -> SHOP;
-            case RAIL -> RAIL;
-            case HARBOR -> HARBOR;
-            case FACTORY -> FACTORY;
-            case TOWER -> TOWER;
-            case CAVE -> CAVE;
-            case MOUNTAIN -> MOUNTAIN;
-            case TREE -> TREE;
-            case WATER -> WATER;
-            case DANGER -> DANGER;
-            case INFO -> INFO;
-            case FOOD -> FOOD;
-            case STAR -> STAR;
-        };
+        ResourceLocation markerTexture =
+                texture("marker/" + icon.name().toLowerCase(Locale.ROOT));
         if (hovered) {
-            draw(graphics, texture, centerX, centerY, size + 4, 0xffffff, 0.95f);
+            draw(graphics, markerTexture, centerX, centerY, size + 4, 0xffffff, 0.95f);
         }
-        draw(graphics, texture, centerX, centerY, size, rgb, 1.0f);
+        draw(graphics, markerTexture, centerX, centerY, size, rgb, 1.0f);
     }
 
     private static void draw(

@@ -59,7 +59,7 @@ final class MapUiControls {
     }
 
 
-    enum IconType { MENU, CLOSE, SETTINGS, TELEPORT, ADD, CHEVRON_RIGHT, LOCATE }
+    enum IconType { MENU, CLOSE, SETTINGS, TELEPORT, ADD, EDIT, TRASH, CHEVRON_RIGHT, LOCATE }
 
     static final class Icon extends Control {
         private IconType type;
@@ -97,6 +97,10 @@ final class MapUiControls {
                         graphics, MapIconAtlas.UiIcon.TELEPORT, cx, cy, size, rgb);
                 case ADD -> MapIconAtlas.drawUi(
                         graphics, MapIconAtlas.UiIcon.ADD, cx, cy, size, rgb);
+                case EDIT -> MapIconAtlas.drawUi(
+                        graphics, MapIconAtlas.UiIcon.EDIT, cx, cy, size, rgb);
+                case TRASH -> MapIconAtlas.drawUi(
+                        graphics, MapIconAtlas.UiIcon.TRASH, cx, cy, size, rgb);
                 case LOCATE -> MapIconAtlas.drawUi(
                         graphics, MapIconAtlas.UiIcon.LOCATE, cx, cy, size, rgb);
                 case CHEVRON_RIGHT -> {
@@ -643,7 +647,7 @@ final class MapUiControls {
     }
 
     static final class MarkerIconSelect extends Control {
-        private static final int COLUMNS = 6;
+        private static final int COLUMNS = 8;
         private static final int CELL = 26;
         private static final int LABEL_H = 18;
 

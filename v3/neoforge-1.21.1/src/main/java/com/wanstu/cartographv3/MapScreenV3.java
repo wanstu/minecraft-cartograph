@@ -35,8 +35,7 @@ public final class MapScreenV3 extends Screen {
     private static final int ZOOM_HUD_H = 16;
     private static final int LOCATE_HUD_SIZE = 12;
 
-    private static final int MAX_REQUESTS_PER_PASS = 64;
-    private static final int MAX_PENDING_REQUESTS = 128;
+    private static final int MIN_PENDING_REQUESTS = 32;
 
     private static final float Z_MAP_MARKERS = 80.0f;
     private static final float Z_PLAYER = 100.0f;
@@ -81,12 +80,19 @@ public final class MapScreenV3 extends Screen {
     private int contextY;
     private int contextBlockX;
     private int contextBlockZ;
+    private MapMarkerStore.Marker contextMarker;
 
     private final MapUiControls.Select<MapUiSettings.MarkerType> markerTypeSelect;
     private final MapUiControls.ColorInput markerColorInput;
     private final MapUiControls.Slider markerSizeSlider;
 
-    private final MapUiControls.Table contextMenuTable;
+    private final MapUiControls.Table mapContextMenuTable;
+    private final MapUiControls.Table markerContextMenuTable;
+
+    private final MapUiControls.Slider requestBatchSlider;
+    private final MapUiControls.Slider liveScanIntervalSlider;
+    private final MapUiControls.P requestBatchHelp;
+    private final MapUiControls.P liveScanHelp;
 
     private final MapUiControls.Slider zoomSlider;
     private final MapUiControls.Span zoomLabel;
@@ -119,15 +125,51 @@ public final class MapScreenV3 extends Screen {
         var addMarkerLabel = new MapUiControls.Span("增加标点");
         var teleportIcon = new MapUiControls.Icon(12, MapUiControls.IconType.TELEPORT);
         var teleportLabel = new MapUiControls.Span("传送");
-        contextMenuTable = new MapUiControls.Table(CONTEXT_W)
+        mapContextMenuTable = new MapUiControls.Table(CONTEXT_W)
                 .background(0xf21f242a)
                 .hoverBackground(0xff343c45)
                 .padding(7)
                 .columnGap(5);
-        contextMenuTable.addRow(new MapUiControls.Table.Row(
+        mapContextMenuTable.addRow(new MapUiControls.Table.Row(
                 CONTEXT_H, true, this::addContextMarker, addMarkerIcon, addMarkerLabel));
-        contextMenuTable.addRow(new MapUiControls.Table.Row(
+        mapContextMenuTable.addRow(new MapUiControls.Table.Row(
                 CONTEXT_H, true, this::teleportToContext, teleportIcon, teleportLabel));
+
+        var markerTeleportIcon = new MapUiControls.Icon(12, MapUiControls.IconType.TELEPORT);
+        var markerTeleportLabel = new MapUiControls.Span("传送");
+        var markerEditIcon = new MapUiControls.Icon(12, MapUiControls.IconType.EDIT);
+        var markerEditLabel = new MapUiControls.Span("编辑");
+        var markerDeleteIcon = new MapUiControls.Icon(12, MapUiControls.IconType.TRASH);
+        var markerDeleteLabel = new MapUiControls.Span("删除");
+        markerContextMenuTable = new MapUiControls.Table(CONTEXT_W)
+                .background(0xf21f242a)
+                .hoverBackground(0xff343c45)
+                .padding(7)
+                .columnGap(5);
+        markerContextMenuTable.addRow(new MapUiControls.Table.Row(
+                CONTEXT_H, true, this::teleportToContext, markerTeleportIcon, markerTeleportLabel));
+        markerContextMenuTable.addRow(new MapUiControls.Table.Row(
+                CONTEXT_H, true, this::editContextMarker, markerEditIcon, markerEditLabel));
+        markerContextMenuTable.addRow(new MapUiControls.Table.Row(
+                CONTEXT_H, true, this::deleteContextMarker, markerDeleteIcon, markerDeleteLabel));
+
+        requestBatchSlider = new MapUiControls.Slider(
+                180, 8, 256, MapUiSettings.requestBatchSize(), MapUiSettings::setRequestBatchSize);
+        liveScanIntervalSlider = new MapUiControls.Slider(
+                180, 5, 100, MapUiSettings.liveScanIntervalTicks(), value -> {
+                    MapUiSettings.setLiveScanIntervalTicks(value);
+                    if (initialized) {
+                        PacketDistributor.sendToServer(new MapProtocol.MapViewState(true, value));
+                    }
+                });
+        requestBatchHelp = new MapUiControls.P(
+                420, 42,
+                "每批请求区块数越大，地图空白区域补全越快，但会增加网络、磁盘读取和服务器瞬时压力。默认 64；通常建议 32～64，机器性能较弱时可继续降低。");
+        requestBatchHelp.setColor(0xff8f989f);
+        liveScanHelp = new MapUiControls.P(
+                420, 42,
+                "实时扫描间隔决定已加载区块多久检查一次地表变化。数值越小更新越及时，但会增加服务器 tick 压力。默认 10 tick（0.5 秒）；若实体/TNT 变慢，应优先调高。");
+        liveScanHelp.setColor(0xff8f989f);
 
         zoomLabel = new MapUiControls.Span(formatZoom(zoom));
         zoomLabel.setCentered(true);
@@ -174,7 +216,8 @@ public final class MapScreenV3 extends Screen {
     @Override
     protected void init() {
         MapClientCache.ensureWorld(minecraft.level);
-        PacketDistributor.sendToServer(new MapProtocol.MapViewState(true));
+        PacketDistributor.sendToServer(new MapProtocol.MapViewState(
+                true, MapUiSettings.liveScanIntervalTicks()));
         if (!initialized) {
             MapClientCache.beginMapSession();
             if (minecraft.player != null) {
@@ -192,7 +235,8 @@ public final class MapScreenV3 extends Screen {
     public void tick() {
         MapClientCache.tick();
         requestTicks++;
-        if (!dragging && MapClientCache.pendingCount() < MAX_PENDING_REQUESTS) {
+        int pendingLimit = maxPendingRequests();
+        if (!dragging && MapClientCache.pendingCount() < pendingLimit) {
             requestVisible(requestTicks % 5 == 0);
         }
     }
@@ -239,14 +283,15 @@ public final class MapScreenV3 extends Screen {
         int maxRadius = Math.max(
                 Math.max(Math.abs(minChunkX - centerChunkX), Math.abs(maxChunkX - centerChunkX)),
                 Math.max(Math.abs(minChunkZ - centerChunkZ), Math.abs(maxChunkZ - centerChunkZ)));
+        int requestBatch = MapUiSettings.requestBatchSize();
         int requestBudget = Math.min(
-                MAX_REQUESTS_PER_PASS,
-                Math.max(0, MAX_PENDING_REQUESTS - MapClientCache.pendingCount()));
+                requestBatch,
+                Math.max(0, maxPendingRequests() - MapClientCache.pendingCount()));
         if (requestBudget <= 0) return;
 
         int requested = 0;
         int scanned = 0;
-        int scanBudget = MAX_REQUESTS_PER_PASS * 8;
+        int scanBudget = requestBatch * 8;
 
         while (requested < requestBudget
                 && scanned < scanBudget
@@ -551,7 +596,11 @@ public final class MapScreenV3 extends Screen {
     }
 
     private void layoutContextMenu() {
-        contextMenuTable.setBounds(contextX, contextY, CONTEXT_W, CONTEXT_H);
+        if (contextMarker == null) {
+            mapContextMenuTable.setBounds(contextX, contextY, CONTEXT_W, CONTEXT_H * 2);
+        } else {
+            markerContextMenuTable.setBounds(contextX, contextY, CONTEXT_W, CONTEXT_H * 3);
+        }
     }
 
     private void renderSettings(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -599,11 +648,29 @@ public final class MapScreenV3 extends Screen {
             markerTypeSelect.render(graphics, font, mouseX, mouseY);
             markerColorInput.render(graphics, font, mouseX, mouseY);
         } else if (settingsTab == SettingsTab.MAP) {
-            graphics.drawString(font, "地图", contentX, contentY, 0xfff0f3f5, false);
+            graphics.drawString(font, "地图性能", contentX, contentY, 0xfff0f3f5, false);
             graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
-            emptyTabText.setBounds(contentX, contentY + 38,
-                    Math.max(120, contentRight - contentX), 80);
-            emptyTabText.render(graphics, font, mouseX, mouseY);
+
+            layoutPerformanceSettings();
+            requestBatchSlider.setValue(MapUiSettings.requestBatchSize());
+            liveScanIntervalSlider.setValue(MapUiSettings.liveScanIntervalTicks());
+
+            int row1 = contentY + 38;
+            int row2 = contentY + 112;
+            graphics.drawString(font, "每批请求区块数", contentX, row1 + 6, 0xffd8dde2, false);
+            graphics.drawString(font, Integer.toString(MapUiSettings.requestBatchSize()),
+                    contentX + 350, row1 + 6, 0xffb8c0c7, false);
+            requestBatchSlider.render(graphics, font, mouseX, mouseY);
+            requestBatchHelp.render(graphics, font, mouseX, mouseY);
+
+            graphics.drawString(font, "实时扫描间隔", contentX, row2 + 6, 0xffd8dde2, false);
+            double seconds = MapUiSettings.liveScanIntervalTicks() / 20.0;
+            graphics.drawString(font,
+                    MapUiSettings.liveScanIntervalTicks() + " tick / "
+                            + String.format(java.util.Locale.ROOT, "%.2f s", seconds),
+                    contentX + 300, row2 + 6, 0xffb8c0c7, false);
+            liveScanIntervalSlider.render(graphics, font, mouseX, mouseY);
+            liveScanHelp.render(graphics, font, mouseX, mouseY);
         } else {
             graphics.drawString(font, "操作", contentX, contentY, 0xfff0f3f5, false);
             graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
@@ -640,9 +707,34 @@ public final class MapScreenV3 extends Screen {
         markerSizeSlider.setBounds(controlX, contentY + 118, Math.min(180, controlW), 18);
     }
 
+    private void layoutPerformanceSettings() {
+        int contentX = SETTINGS_TAB_W + 28;
+        int contentY = 58;
+        int controlX = Math.min(width - 230, contentX + 180);
+        int controlW = Math.max(140, Math.min(180, width - controlX - 28));
+
+        requestBatchSlider.setBounds(controlX, contentY + 38, controlW, 18);
+        requestBatchHelp.setBounds(
+                contentX, contentY + 62,
+                Math.max(160, width - contentX - 28), 42);
+
+        liveScanIntervalSlider.setBounds(controlX, contentY + 112, controlW, 18);
+        liveScanHelp.setBounds(
+                contentX, contentY + 136,
+                Math.max(160, width - contentX - 28), 42);
+    }
+
+    private int maxPendingRequests() {
+        return Math.max(MIN_PENDING_REQUESTS, MapUiSettings.requestBatchSize() * 2);
+    }
+
     private void renderContextMenu(GuiGraphics graphics, int mouseX, int mouseY) {
-        contextMenuTable.setBounds(contextX, contextY, CONTEXT_W, CONTEXT_H);
-        contextMenuTable.render(graphics, font, mouseX, mouseY);
+        layoutContextMenu();
+        if (contextMarker == null) {
+            mapContextMenuTable.render(graphics, font, mouseX, mouseY);
+        } else {
+            markerContextMenuTable.render(graphics, font, mouseX, mouseY);
+        }
     }
 
     private void addContextMarker() {
@@ -654,6 +746,19 @@ public final class MapScreenV3 extends Screen {
         PacketDistributor.sendToServer(new MapProtocol.TeleportRequest(
                 dimension(), contextBlockX, contextBlockZ));
         contextOpen = false;
+        contextMarker = null;
+    }
+
+    private void editContextMarker() {
+        if (contextMarker != null) markerUi.openEdit(contextMarker);
+        contextOpen = false;
+        contextMarker = null;
+    }
+
+    private void deleteContextMarker() {
+        if (contextMarker != null) MapMarkerStore.delete(contextMarker.uuid());
+        contextOpen = false;
+        contextMarker = null;
     }
 
     @Override
@@ -691,8 +796,12 @@ public final class MapScreenV3 extends Screen {
                                     MapUiSettings.structureLayerEnabled())
                             : Optional.empty();
             if (marker.isPresent()) {
-                markerUi.openEdit(marker.get());
-                contextOpen = false;
+                contextMarker = marker.get();
+                contextBlockX = contextMarker.x;
+                contextBlockZ = contextMarker.z;
+                contextX = Math.max(4, Math.min(width - CONTEXT_W - 4, mx));
+                contextY = Math.max(4, Math.min(height - CONTEXT_H * 3 - 4, my));
+                contextOpen = true;
                 menuExpanded = false;
                 menuSection = MenuSection.NONE;
                 dragging = false;
@@ -701,6 +810,7 @@ public final class MapScreenV3 extends Screen {
 
             double worldX = centerX + (mouseX - width * 0.5) / zoom;
             double worldZ = centerZ + (mouseY - height * 0.5) / zoom;
+            contextMarker = null;
             contextBlockX = (int) Math.floor(worldX);
             contextBlockZ = (int) Math.floor(worldZ);
             contextX = Math.max(4, Math.min(width - CONTEXT_W - 4, mx));
@@ -717,8 +827,11 @@ public final class MapScreenV3 extends Screen {
         }
 
         if (contextOpen) {
-            if (contextMenuTable.mouseClicked(mouseX, mouseY, button)) return true;
+            MapUiControls.Table activeContext =
+                    contextMarker == null ? mapContextMenuTable : markerContextMenuTable;
+            if (activeContext.mouseClicked(mouseX, mouseY, button)) return true;
             contextOpen = false;
+            contextMarker = null;
         }
 
         if (handleTopMenuClick(mx, my)) return true;
@@ -757,6 +870,16 @@ public final class MapScreenV3 extends Screen {
                 markerColorInput.closePopup();
                 return true;
             }
+        } else if (settingsTab == SettingsTab.MAP) {
+            layoutPerformanceSettings();
+            if (requestBatchSlider.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                return true;
+            }
+            if (liveScanIntervalSlider.mouseClicked(
+                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                return true;
+            }
         }
 
         if (settingsCloseIcon.contains(mouseX, mouseY)) {
@@ -787,6 +910,9 @@ public final class MapScreenV3 extends Screen {
         if (settingsOpen && settingsTab == SettingsTab.PLAYER) {
             if (markerColorInput.mouseReleased(mouseX, mouseY, button)) return true;
             if (markerSizeSlider.mouseReleased(mouseX, mouseY, button)) return true;
+        } else if (settingsOpen && settingsTab == SettingsTab.MAP) {
+            if (requestBatchSlider.mouseReleased(mouseX, mouseY, button)) return true;
+            if (liveScanIntervalSlider.mouseReleased(mouseX, mouseY, button)) return true;
         }
 
         layoutBottomHud();
@@ -812,6 +938,11 @@ public final class MapScreenV3 extends Screen {
                 if (markerColorInput.mouseDragged(
                         mouseX, mouseY, button, dragX, dragY)) return true;
                 if (markerSizeSlider.mouseDragged(
+                        mouseX, mouseY, button, dragX, dragY)) return true;
+            } else if (settingsTab == SettingsTab.MAP) {
+                if (requestBatchSlider.mouseDragged(
+                        mouseX, mouseY, button, dragX, dragY)) return true;
+                if (liveScanIntervalSlider.mouseDragged(
                         mouseX, mouseY, button, dragX, dragY)) return true;
             }
             return true;
@@ -959,7 +1090,8 @@ public final class MapScreenV3 extends Screen {
 
     @Override
     public void removed() {
-        PacketDistributor.sendToServer(new MapProtocol.MapViewState(false));
+        PacketDistributor.sendToServer(new MapProtocol.MapViewState(
+                false, MapUiSettings.liveScanIntervalTicks()));
         regionTextures.close();
     }
 

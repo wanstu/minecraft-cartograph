@@ -20,13 +20,14 @@ final class LiveSurfaceUpdates {
     private static final Logger LOG = LoggerFactory.getLogger("cartograph.v3.live");
 
     private static final int MAX_WATCHED_PER_PLAYER = 512;
-    private static final int REFRESH_INTERVAL_TICKS = 10;
     private static final int REFRESH_BUDGET_PER_PLAYER = 8;
     private static final int MAX_SCAN_ATTEMPTS_PER_PLAYER = 64;
 
     private static final class WatchState {
         final LinkedHashMap<ChunkKey, Long> watched = new LinkedHashMap<>();
         int cursor;
+        int intervalTicks = 10;
+        long nextRefreshTick;
     }
 
     private static final Map<UUID, WatchState> WATCHERS = new HashMap<>();
@@ -35,9 +36,10 @@ final class LiveSurfaceUpdates {
 
     private LiveSurfaceUpdates() {}
 
-    static void open(ServerPlayer player) {
-        WatchState state = new WatchState();
-        WATCHERS.put(player.getUUID(), state);
+    static void open(ServerPlayer player, int intervalTicks) {
+        WatchState state = WATCHERS.computeIfAbsent(player.getUUID(), ignored -> new WatchState());
+        state.intervalTicks = Math.max(5, Math.min(100, intervalTicks));
+        state.nextRefreshTick = tickCounter;
     }
 
     static void close(ServerPlayer player) {
@@ -63,7 +65,6 @@ final class LiveSurfaceUpdates {
 
     static void tick(ServerTickEvent.Post event) {
         tickCounter++;
-        if (tickCounter % REFRESH_INTERVAL_TICKS != 0) return;
 
         var server = event.getServer();
         WATCHERS.keySet().removeIf(uuid -> server.getPlayerList().getPlayer(uuid) == null);
@@ -74,6 +75,8 @@ final class LiveSurfaceUpdates {
 
             WatchState state = watcher.getValue();
             if (state.watched.isEmpty()) continue;
+            if (tickCounter < state.nextRefreshTick) continue;
+            state.nextRefreshTick = tickCounter + state.intervalTicks;
 
             ServerLevel level = player.serverLevel();
             String dimension = level.dimension().location().toString();
