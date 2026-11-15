@@ -3,114 +3,147 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cartograph V3 · 高保真地图 UI</title>
+<title>Cartograph V3 · High Fidelity</title>
 <style>
 :root{
-  --bg:#101418;--panel:#1b2228ee;--panel2:#232c33f2;--panel3:#2c363e;
-  --line:#46515a;--line2:#59656f;--text:#eef2f4;--muted:#aeb7bd;
-  --soft:#7f8a92;--accent:#f4c84f;--accent2:#d8ad35;--danger:#db625d;
-  --shadow:0 18px 50px #0008;--radius:5px;--icon:#f3f5f6;
+  --bg:#0f1519;--top:#111a20f4;--panel:#182228f2;--panel2:#202b32f2;--panel3:#28353d;
+  --line:#46555f;--line2:#5d6b75;--text:#f2f5f7;--muted:#aab5bc;--soft:#7f8c94;
+  --accent:#f3c94f;--accent2:#d5a936;--blue:#68b5f7;--danger:#df6d68;--good:#71d797;
+  --shadow:0 18px 52px #0009;--radius:8px;--header:62px;
 }
-*{box-sizing:border-box} html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0c1013;color:var(--text);font-family:"Microsoft YaHei","Noto Sans SC",sans-serif}
-button,input,select,textarea{font:inherit}
-button{color:inherit}
-svg.icon{width:1.2em;height:1.2em;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1013;color:var(--text);font-family:"Microsoft YaHei","Noto Sans SC",Arial,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{border:0}
+svg.icon{width:1.2em;height:1.2em;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block;vector-effect:non-scaling-stroke}
 svg.icon.solid{fill:currentColor;stroke:none}
-.app{position:relative;width:100vw;height:100vh;overflow:hidden;background:#12171b}
-.map{position:absolute;inset:0;overflow:hidden;background:#2c6437}
-.map svg.world{position:absolute;inset:-4%;width:108%;height:108%;filter:saturate(.9) contrast(1.03);shape-rendering:crispEdges}
-.pixel-noise{position:absolute;inset:0;pointer-events:none;opacity:.14;background-image:linear-gradient(90deg,#0002 1px,transparent 1px),linear-gradient(#0002 1px,transparent 1px);background-size:8px 8px;mix-blend-mode:multiply}
-.vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 55%,#06101533 100%)}
-.top-actions{position:absolute;top:20px;right:22px;display:flex;gap:8px;z-index:20;align-items:stretch}
-.top-actions.collapsed .action:not(.menu-btn){display:none}
-.action{height:44px;min-width:112px;padding:0 15px;border:1px solid #4b555d;background:#20272cdc;display:flex;align-items:center;justify-content:center;gap:9px;color:#edf1f3;font-size:17px;cursor:pointer;box-shadow:0 4px 14px #0003}
-.action:hover,.action.active{background:#2a3339}
-.action.active{border-bottom:3px solid var(--accent);color:#fff}
-.action .icon{width:21px;height:21px}
-.menu-btn{min-width:52px;width:52px;padding:0;color:var(--accent)}
-.map-marker{position:absolute;z-index:6;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:4px;color:#fff;cursor:pointer}
-.map-marker .mi{width:30px;height:30px;padding:2px;filter:drop-shadow(0 1px 0 #111) drop-shadow(0 0 2px #000)}
-.map-marker.structure{color:#f3d56f}.map-marker.custom{color:#7fdd9a}
-.map-marker .label{font-size:13px;background:#1b2024d9;padding:3px 6px;border:1px solid #0007;white-space:nowrap;color:#eef1f2}
-.player{position:absolute;left:51%;top:54%;z-index:8;color:#61d083;transform:translate(-50%,-50%) rotate(18deg);filter:drop-shadow(0 1px 1px #000)}
-.player .icon{width:27px;height:27px}
-.side-tools{position:absolute;right:22px;bottom:22px;z-index:15;display:flex;align-items:flex-end;gap:8px}
-.tool-col{display:flex;flex-direction:column;gap:7px}
-.icon-btn{width:42px;height:42px;border:1px solid #4b555d;background:#20272ce8;display:grid;place-items:center;cursor:pointer;box-shadow:0 4px 14px #0003}
-.icon-btn:hover{background:#2c363d}.icon-btn .icon{width:22px;height:22px}
-.zoom-box{height:42px;min-width:195px;border:1px solid #4b555d;background:#20272ce8;display:flex;align-items:center;gap:10px;padding:0 12px}
-.zoom-box input{width:96px;accent-color:var(--accent)} .zoom-value{min-width:46px;text-align:right;font-size:18px}
-.coord-chip{position:absolute;left:18px;bottom:18px;z-index:8;background:#171d22df;border:1px solid #4b555d;padding:8px 11px;font-size:13px;color:#d7dde0;line-height:1.6;box-shadow:0 4px 18px #0004}
-.scale{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:8;color:#f1f3f4;background:#171d22c9;padding:6px 10px 7px;border:1px solid #44505a;font-size:12px}
-.scale-line{width:128px;border-bottom:2px solid #f1f3f4;position:relative;margin-top:5px}.scale-line:before,.scale-line:after{content:"";position:absolute;bottom:-2px;height:8px;border-left:2px solid #f1f3f4}.scale-line:after{right:0}
+.app{position:relative;width:100vw;height:100vh;background:#142126;overflow:hidden}
+.topbar{position:absolute;z-index:80;left:0;right:0;top:0;height:var(--header);display:flex;align-items:center;background:linear-gradient(180deg,#10191eea,#111a20f6);border-bottom:1px solid #43515a;box-shadow:0 4px 20px #0005;padding:0 22px}
+.brand{display:flex;align-items:center;gap:12px;font-size:21px;font-weight:700;white-space:nowrap}.brand .icon{width:29px;height:29px}.brand small{font-size:13px;color:#98a4ac;font-weight:500;margin-left:2px}
+.sep-v{height:28px;width:1px;background:#4a5760;margin:0 18px}
+.location-info{display:flex;align-items:center;gap:10px;color:#d1d8dc;font-size:14px;white-space:nowrap}.location-info .icon{width:18px;height:18px}
+.top-spacer{flex:1}
+.nav{height:100%;display:flex;align-items:stretch}
+.nav-btn{min-width:88px;padding:7px 15px 5px;background:transparent;color:#dfe4e7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;border-bottom:3px solid transparent}
+.nav-btn:hover{background:#ffffff08}.nav-btn.active{color:#fff;border-bottom-color:var(--accent);background:#ffffff05}.nav-btn .icon{width:22px;height:22px}.nav-btn span{font-size:12px}
+.window-close{width:42px;height:42px;margin-left:8px;background:transparent;display:grid;place-items:center;cursor:pointer;color:#e7ecee}.window-close:hover{background:#ffffff0b}.window-close .icon{width:23px;height:23px}
 
-.panel,.modal{background:var(--panel);border:1px solid #4b565f;box-shadow:var(--shadow);backdrop-filter:blur(8px);color:var(--text)}
-.panel{position:absolute;z-index:35;border-radius:var(--radius)}
-.panel-head,.modal-head{height:48px;display:flex;align-items:center;gap:9px;padding:0 15px;border-bottom:1px solid #3c464e;font-weight:600}
-.panel-head .icon,.modal-head .icon{width:20px;height:20px}.panel-head .spacer,.modal-head .spacer{flex:1}
-.close{width:30px;height:30px;display:grid;place-items:center;border:0;background:transparent;cursor:pointer;color:#dce1e4}.close:hover{background:#ffffff12}.close .icon{width:18px;height:18px}
-.layers-panel{top:76px;right:22px;width:290px;display:none}
-.marker-manager{top:76px;right:22px;width:360px;max-height:560px;display:none}
+.map-stage{position:absolute;inset:var(--header) 0 0;overflow:hidden;background:#183b42;cursor:grab}
+.map-stage.dragging{cursor:grabbing}
+.world-wrap{position:absolute;left:50%;top:50%;width:1800px;height:1100px;transform-origin:50% 50%;transform:translate(-50%,-50%) scale(1)}
+.world{width:100%;height:100%;display:block}
+.world .satellite,.world .modern,.world .ancient{display:none}
+.app[data-style="satellite"] .world .satellite{display:inline}
+.app[data-style="modern"] .world .modern{display:inline}
+.app[data-style="ancient"] .world .ancient{display:inline}
+.app[data-style="satellite"] .map-stage{background:#17383c}
+.app[data-style="modern"] .map-stage{background:#d9d4bd}
+.app[data-style="ancient"] .map-stage{background:#b99f6b}
+.map-grid{position:absolute;inset:0;pointer-events:none;opacity:.16;background-image:linear-gradient(90deg,#e4edf01c 1px,transparent 1px),linear-gradient(#e4edf01c 1px,transparent 1px);background-size:256px 256px}
+.app:not([data-grid="on"]) .map-grid{display:none}
+.map-shade{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 58%,#0610153f 100%)}
+.app[data-style="modern"] .map-shade{background:radial-gradient(circle at center,transparent 62%,#8d846427 100%)}
+.app[data-style="ancient"] .map-shade{background:radial-gradient(circle at center,transparent 55%,#5d452f55 100%)}
+
+.marker-layer{position:absolute;inset:0;pointer-events:none}
+.map-marker{position:absolute;z-index:12;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;pointer-events:auto;cursor:pointer;color:white}
+.map-marker .glyph{width:31px;height:31px;filter:drop-shadow(0 2px 2px #0009)}
+.map-marker.structure{color:#fff}.map-marker.custom{color:#ffd34e}
+.map-marker .marker-label{font-size:12px;background:#12191dcc;border:1px solid #536068;padding:3px 6px;border-radius:4px;white-space:nowrap;box-shadow:0 3px 10px #0006;color:#f4f6f7}
+.app[data-labels="off"] .marker-label{display:none}
+.app[data-structures="off"] .map-marker.structure{display:none}
+.app[data-custom="off"] .map-marker.custom{display:none}
+.app[data-style="modern"] .map-marker.structure,.app[data-style="ancient"] .map-marker.structure{color:#26353b}
+.app[data-style="ancient"] .map-marker.structure{color:#3a2b22}.app[data-style="ancient"] .map-marker .marker-label{background:#d4bd8fe8;color:#2c2119;border-color:#5b4938}
+
+.player{position:absolute;z-index:20;left:50%;top:51%;color:#ffe14e;transform:translate(-50%,-50%) rotate(28deg);filter:drop-shadow(0 2px 2px #000c);pointer-events:none}
+.player .icon{width:30px;height:30px}
+.player-ring{position:absolute;width:88px;height:88px;border:1px solid #ffffff50;border-radius:50%;left:50%;top:51%;transform:translate(-50%,-50%);pointer-events:none}
+.app[data-player-ring="off"] .player-ring{display:none}
+
+.floating-panel,.modal,.context-menu{background:linear-gradient(180deg,#182228f8,#151e23f7);border:1px solid #53616a;box-shadow:var(--shadow);backdrop-filter:blur(8px);border-radius:8px;color:var(--text)}
+.floating-panel{position:absolute;z-index:40;top:84px}
+.panel-head,.modal-head{height:50px;padding:0 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #43505a;font-weight:700;font-size:16px}
+.panel-head .icon,.modal-head .icon{width:22px;height:22px}.panel-head .spacer,.modal-head .spacer{flex:1}
+.close-btn{width:30px;height:30px;background:transparent;display:grid;place-items:center;cursor:pointer;color:#e2e7ea}.close-btn:hover{background:#ffffff0d;border-radius:4px}.close-btn .icon{width:18px;height:18px}
+.layers-panel{left:16px;width:300px;display:none}
+.markers-panel{left:16px;width:345px;display:none;max-height:calc(100vh - 130px)}
 .panel-body{padding:12px}
-.layer-row,.list-row{display:flex;align-items:center;min-height:38px;gap:9px;border-bottom:1px solid #ffffff0c}
-.layer-row:last-child,.list-row:last-child{border-bottom:0}
-.check{width:18px;height:18px;border:1px solid #73808a;display:grid;place-items:center;cursor:pointer;background:#171c20}
-.check.on{background:var(--accent);border-color:var(--accent2);color:#202020}
-.check .icon{width:13px;height:13px;stroke-width:2.4}
-.layer-row .name{flex:1}.count{color:var(--muted);font-size:12px}
-.marker-list{max-height:440px;overflow:auto}
-.list-row .marker-icon{width:28px;height:28px;color:#f0cd63}.list-row .content{min-width:0;flex:1}
-.list-row .title{font-size:14px}.list-row .meta{font-size:11px;color:#87939b;margin-top:2px}
-.row-actions{display:flex;gap:3px}.mini{width:28px;height:28px;border:0;background:transparent;color:#bfc6cb;display:grid;place-items:center;cursor:pointer}.mini:hover{background:#ffffff0e}.mini.danger:hover{color:#ff8c86}
-.context{width:190px;padding:5px;display:none}
-.ctx-row{height:38px;display:flex;align-items:center;gap:10px;padding:0 10px;cursor:pointer;border-radius:3px;font-size:14px}.ctx-row:hover{background:#ffffff0e}.ctx-row.danger{color:#e98984}.ctx-row .icon{width:19px;height:19px}.sep{height:1px;background:#45515a;margin:4px 6px}
+.panel-section-title{font-size:12px;color:#98a4ab;margin:3px 0 8px}
+.layer-row{min-height:39px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #ffffff0a}
+.layer-row.indent{padding-left:28px}.layer-row .name{flex:1}.count{font-size:12px;color:#98a4ab}
+.checkbox{width:19px;height:19px;border:1px solid #7c8991;border-radius:4px;display:grid;place-items:center;cursor:pointer;background:#10171b}
+.checkbox.on{background:var(--accent);border-color:#e7bd42;color:#1a1d1f}.checkbox .icon{width:13px;height:13px;stroke-width:2.6}
+.layer-icon{width:21px;height:21px}
+.expand{width:26px;height:26px;background:transparent;display:grid;place-items:center;cursor:pointer}.expand .icon{width:15px;height:15px;transition:.15s}.expanded .expand .icon{transform:rotate(180deg)}
+.structure-children{display:block}.layer-group:not(.expanded) .structure-children{display:none}
+.marker-list{max-height:calc(100vh - 215px);overflow:auto}
+.marker-row{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #ffffff0b}
+.marker-row .mi{width:27px;height:27px;color:#ffd34e}.marker-row .info{min-width:0;flex:1}.marker-row .title{font-size:14px}.marker-row .meta{font-size:11px;color:#8f9ba2;margin-top:2px}
+.row-actions{display:flex}.mini{width:29px;height:29px;background:transparent;display:grid;place-items:center;cursor:pointer;color:#bcc5ca}.mini:hover{background:#ffffff0d}.mini.danger:hover{color:#ff8f89}.mini .icon{width:16px;height:16px}
 
-.overlay{position:absolute;inset:0;background:#06090c66;z-index:40;display:none}
-.modal{position:absolute;z-index:45;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:6px}
-.settings{width:min(980px,92vw);height:min(690px,88vh);display:none}
-.modal-head{height:56px;font-size:18px;background:#20282eea}.modal-head .icon{width:22px;height:22px}
-.settings-body{display:grid;grid-template-columns:170px 1fr;height:calc(100% - 56px)}
-.tabs{background:#151b20ad;border-right:1px solid #3b454c;padding:14px 10px}
-.tab{height:44px;display:flex;align-items:center;gap:11px;padding:0 13px;margin-bottom:4px;cursor:pointer;border-left:3px solid transparent;color:#c9d0d4}.tab:hover{background:#ffffff08}.tab.active{color:var(--accent);background:#ffffff09;border-left-color:var(--accent)}
-.tab .icon{width:19px;height:19px}
-.settings-content{padding:22px 28px;overflow:hidden}
-.setting-page{display:none;height:100%}.setting-page.active{display:flex;flex-direction:column}
-.section-title{font-size:18px;margin-bottom:8px}.section-sub{font-size:12px;color:#8f9aa1;margin-bottom:16px}
-.rule{height:1px;background:#404a52;margin-bottom:16px}
-.form-grid{display:grid;grid-template-columns:150px minmax(180px,1fr) 92px;gap:12px 14px;align-items:center}
-.form-grid .label{color:#d7dde1}.value{text-align:right;color:#b8c0c5;font-variant-numeric:tabular-nums}
-.select,.text-input,.color-control{height:38px;border:1px solid #4b5660;background:#242d34;display:flex;align-items:center;padding:0 11px;color:#e8ecee}
-.select{justify-content:space-between;cursor:pointer}.select .left{display:flex;align-items:center;gap:9px}
-.color-control{gap:10px}.swatch{width:22px;height:22px;border:1px solid #d4dae0;background:#f4c84f}.color-control input[type=color]{opacity:0;position:absolute;pointer-events:none}
-.slider{width:100%;accent-color:var(--accent)}
-.help{grid-column:2 / 4;font-size:12px;line-height:1.6;color:#89949b;margin-top:-7px;margin-bottom:8px}
-.settings-footer{margin-top:auto;padding-top:16px;border-top:1px solid #3e4850;display:flex;justify-content:space-between;align-items:center}
-.btn{height:38px;padding:0 18px;border:1px solid #4c5861;background:#2a333a;color:#edf0f2;cursor:pointer}.btn:hover{background:#364149}.btn.primary{background:#d2a83c;color:#171717;border-color:#edc75b}.btn.primary:hover{background:#e2b742}.btn.danger{color:#f2a09b}
-.structure-head,.structure-row{display:grid;grid-template-columns:150px minmax(180px,1fr) 92px;align-items:center;gap:12px}
-.structure-head{height:32px;color:#909ba2;font-size:12px;border-bottom:1px solid #3c464d}
-.structure-list{overflow:auto;min-height:0;flex:1}.structure-row{min-height:48px;border-bottom:1px solid #ffffff0b}.structure-row:nth-child(2n){background:#ffffff03}
-.structure-icon-select{height:34px;border:1px solid #45515a;background:#242d34;display:flex;align-items:center;justify-content:space-between;padding:0 10px;cursor:pointer}
-.structure-icon-select .left{display:flex;align-items:center;gap:9px}.structure-icon-select .icon{width:22px;height:22px;color:#f4c84f}
-.structure-color{display:flex;align-items:center;justify-content:flex-end;gap:8px}.structure-color .swatch{width:26px;height:26px;cursor:pointer}
-.performance-card{padding:14px 0;border-bottom:1px solid #3d474e}.performance-line{display:grid;grid-template-columns:150px 1fr 100px;gap:14px;align-items:center}.performance-line .value{text-align:right;font-size:16px}
-.performance-card p{margin:8px 0 0 164px;color:#8e999f;font-size:12px;line-height:1.65}
-.editor{width:min(650px,90vw);display:none}.editor-body{padding:18px 20px 20px}.editor-grid{display:grid;grid-template-columns:90px 1fr;gap:12px 14px;align-items:center}
-.editor-grid textarea{height:90px;resize:none;padding:10px;border:1px solid #4b5660;background:#222a30;color:#edf1f3}.editor-grid input[type=text]{height:38px;border:1px solid #4b5660;background:#222a30;color:#edf1f3;padding:0 10px}
-.editor-actions{display:flex;justify-content:space-between;margin-top:18px}.editor-actions .right{display:flex;gap:8px}
-.toast{position:absolute;z-index:80;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);opacity:0;background:#1a2025e8;border:1px solid #53606a;padding:9px 14px;transition:.18s;pointer-events:none}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-.small-note{font-size:12px;color:#839098}
-@media(max-width:780px){
- .action{min-width:auto}.action span{display:none}.settings-body{grid-template-columns:120px 1fr}.form-grid{grid-template-columns:110px 1fr 72px}.structure-head,.structure-row{grid-template-columns:110px 1fr 70px}.performance-line{grid-template-columns:110px 1fr 72px}.performance-card p{margin-left:124px}
+.right-controls{position:absolute;z-index:35;right:18px;bottom:20px;display:flex;gap:8px;align-items:flex-end}
+.control-stack{display:flex;flex-direction:column;gap:7px}
+.square-btn{width:44px;height:44px;background:#182228ef;border:1px solid #53616a;border-radius:7px;display:grid;place-items:center;cursor:pointer;box-shadow:0 8px 22px #0005}.square-btn:hover{background:#263139}.square-btn .icon{width:22px;height:22px}
+.zoom-control{height:44px;display:flex;align-items:center;background:#182228ef;border:1px solid #53616a;border-radius:7px;box-shadow:0 8px 22px #0005;overflow:hidden}
+.zoom-control button{width:44px;height:100%;background:transparent;cursor:pointer;font-size:24px}.zoom-control button:hover{background:#ffffff0d}.zoom-text{min-width:78px;text-align:center;font-size:17px;font-weight:700;border-left:1px solid #46545e;border-right:1px solid #46545e;height:100%;display:grid;place-items:center}
+.scale-box{position:absolute;left:18px;bottom:20px;z-index:30;background:#172126e8;border:1px solid #53616a;border-radius:7px;padding:8px 12px;text-align:center;font-size:12px;box-shadow:0 8px 20px #0005}
+.scale-line{width:145px;border-bottom:2px solid #f1f3f4;position:relative;margin-top:5px}.scale-line:before,.scale-line:after{content:"";position:absolute;bottom:-2px;height:8px;border-left:2px solid #f1f3f4}.scale-line:after{right:0}
+.coord-box{position:absolute;left:18px;bottom:82px;z-index:30;background:#172126e8;border:1px solid #53616a;border-radius:7px;padding:9px 12px;font-size:12px;line-height:1.75;box-shadow:0 8px 20px #0005}
+.coord-line{display:flex;align-items:center;gap:8px}.coord-line .icon{width:16px;height:16px}
+
+.context-menu{position:absolute;z-index:75;width:218px;padding:6px;display:none}
+.ctx-item{height:39px;padding:0 9px;display:flex;align-items:center;gap:10px;border-radius:5px;cursor:pointer;font-size:14px}.ctx-item:hover{background:#ffffff0d}.ctx-item.disabled{opacity:.4;pointer-events:none}.ctx-item.danger{color:#f08b85}.ctx-item .icon{width:19px;height:19px}.ctx-sep{height:1px;background:#43505a;margin:5px 7px}.ctx-meta{padding:7px 9px 4px;color:#aeb7bc;font-size:12px;display:flex;align-items:center;gap:8px}.ctx-meta .icon{width:16px;height:16px}
+
+.overlay{position:absolute;z-index:60;inset:var(--header) 0 0;background:#05080b4f;display:none}
+.modal{position:absolute;z-index:70;left:50%;top:50%;transform:translate(-50%,-50%);display:none}
+.settings-modal{width:min(1030px,94vw);height:min(710px,89vh)}
+.modal-head{height:54px;font-size:18px;background:#172127f7}
+.settings-layout{display:grid;grid-template-columns:190px 1fr;height:calc(100% - 54px)}
+.settings-nav{padding:13px 10px;background:#11191ed6;border-right:1px solid #3f4c55}
+.settings-nav-item{height:43px;display:flex;align-items:center;gap:11px;padding:0 12px;border-left:3px solid transparent;border-radius:4px;cursor:pointer;color:#cbd2d6;margin-bottom:3px}.settings-nav-item:hover{background:#ffffff08}.settings-nav-item.active{background:#334856;color:#fff;border-left-color:var(--blue)}.settings-nav-item .icon{width:19px;height:19px}
+.settings-main{padding:18px 22px;overflow:hidden;display:flex;flex-direction:column}
+.settings-title-row{display:flex;align-items:center;margin-bottom:13px}.settings-title{font-size:18px;font-weight:700}.settings-desc{font-size:12px;color:#8d9aa2;margin-left:12px}
+.setting-page{display:none;min-height:0;flex:1}.setting-page.active{display:flex;flex-direction:column}
+.subtabs{display:flex;gap:4px;margin-bottom:13px;border-bottom:1px solid #3e4b54}.subtab{height:38px;padding:0 18px;background:transparent;cursor:pointer;border-bottom:3px solid transparent;color:#c1c9ce;display:flex;align-items:center;gap:8px}.subtab.active{color:#fff;border-bottom-color:var(--blue);background:#ffffff05}.subtab .icon{width:17px;height:17px}
+.card{border:1px solid #3e4b54;border-radius:7px;background:#172126b5;padding:14px 16px;margin-bottom:12px}.card-title{font-size:15px;font-weight:700;margin-bottom:12px}.card-note{font-size:12px;line-height:1.6;color:#8f9ba2;margin:-4px 0 12px}
+.form-row{min-height:43px;display:grid;grid-template-columns:165px minmax(180px,1fr) 92px;gap:14px;align-items:center;border-bottom:1px solid #ffffff08}.form-row:last-child{border-bottom:0}.form-row .label{color:#d8dee1}.value{text-align:right;color:#c3cbd0;font-variant-numeric:tabular-nums}
+.select,.field,.color-field{height:34px;border:1px solid #4a5861;background:#202a31;border-radius:5px;padding:0 10px;display:flex;align-items:center;color:#eef2f4}.select{justify-content:space-between;cursor:pointer}.select .left{display:flex;align-items:center;gap:8px}.select .icon{width:16px;height:16px}.field{width:100%}
+.color-field{gap:9px;cursor:pointer;position:relative}.swatch{width:20px;height:20px;border:1px solid #dbe0e3;border-radius:3px;background:#fff}.native-color{position:absolute;opacity:0;pointer-events:auto;inset:0;width:100%;height:100%;cursor:pointer}
+.slider{width:100%;accent-color:var(--blue)}
+.switch{width:43px;height:24px;border-radius:20px;background:#66727a;position:relative;cursor:pointer;transition:.15s}.switch:after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;left:3px;top:3px;box-shadow:0 1px 3px #0006;transition:.15s}.switch.on{background:#4da1ef}.switch.on:after{left:22px}
+.choice-row{display:flex;gap:8px}.choice{height:36px;min-width:70px;padding:0 12px;border:1px solid #4a5861;background:#202a31;border-radius:5px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}.choice.active{border-color:#68b5f7;box-shadow:0 0 0 1px #68b5f7 inset;background:#263c4a}.choice .icon{width:18px;height:18px}
+.style-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.style-card{border:1px solid #44525b;background:#1e292f;border-radius:7px;overflow:hidden;cursor:pointer}.style-card.active{border-color:#6cb9fa;box-shadow:0 0 0 1px #6cb9fa inset}.style-preview{height:92px;position:relative;overflow:hidden}.style-preview.sat{background:linear-gradient(145deg,#36653c 0 45%,#ad9b65 46% 57%,#277f9a 58% 100%)}.style-preview.sat:before{content:"";position:absolute;inset:8px;background:radial-gradient(circle at 25% 30%,#6aa653 0 8%,transparent 9%),radial-gradient(circle at 63% 22%,#bfcbd0 0 8%,transparent 9%),radial-gradient(circle at 70% 65%,#2a6f39 0 12%,transparent 13%)}
+.style-preview.mod{background:#ddd8c2}.style-preview.mod:before{content:"";position:absolute;left:12px;right:12px;top:15px;height:60px;background:linear-gradient(160deg,transparent 0 20%,#83a36d 21% 48%,#7bb9c6 49% 65%,#d5c596 66%);clip-path:polygon(0 15%,22% 8%,38% 25%,55% 5%,76% 27%,100% 20%,100% 85%,80% 92%,55% 75%,30% 95%,0 80%)}.style-preview.mod:after{content:"▲ ▲  ♧ ♧  ≈≈";position:absolute;left:20px;top:34px;color:#40504b;font-family:serif;letter-spacing:8px;font-size:15px}
+.style-preview.old{background:#c7aa73}.style-preview.old:before{content:"";position:absolute;inset:10px;border:2px solid #5b452f;border-radius:48% 52% 45% 55%;background:#d1bb87}.style-preview.old:after{content:"△△  ♧♧♧  ~~~";position:absolute;left:22px;top:34px;color:#493625;font-family:serif;letter-spacing:6px;font-size:15px}
+.style-info{padding:9px 10px}.style-name{font-size:13px;font-weight:700}.style-sub{font-size:11px;color:#8e9aa1;margin-top:3px}
+.performance-row{padding:13px 0;border-bottom:1px solid #ffffff09}.performance-line{display:grid;grid-template-columns:165px 1fr 100px;gap:14px;align-items:center}.performance-help{margin:7px 0 0 179px;font-size:12px;line-height:1.6;color:#89969e}
+.structure-table{display:grid;grid-template-rows:auto 1fr;min-height:0;flex:1;border:1px solid #3e4b54;border-radius:7px;overflow:hidden}.structure-head,.structure-row{display:grid;grid-template-columns:165px 1fr 90px;align-items:center;gap:12px}.structure-head{height:38px;padding:0 12px;background:#141d22;color:#8f9ba2;font-size:12px;border-bottom:1px solid #3e4b54}.structure-scroll{overflow:auto}.structure-row{min-height:46px;padding:0 12px;border-bottom:1px solid #ffffff08}.structure-row:nth-child(2n){background:#ffffff025}.structure-select{height:32px;border:1px solid #44515a;background:#202a31;border-radius:5px;display:flex;align-items:center;justify-content:space-between;padding:0 9px;cursor:pointer}.structure-select .left{display:flex;align-items:center;gap:8px}.structure-select .icon{width:19px;height:19px}.structure-color{display:flex;justify-content:flex-end}.structure-color .swatch{width:24px;height:24px;cursor:pointer}
+.settings-footer{height:54px;margin:10px -22px -18px;padding:0 22px;border-top:1px solid #3d4a53;display:flex;align-items:center;gap:8px}.settings-footer .spacer{flex:1}
+.btn{height:36px;padding:0 16px;border-radius:5px;border:1px solid #4d5b65;background:#263139;cursor:pointer}.btn:hover{background:#334149}.btn.primary{background:#3e91dd;border-color:#64aff4;color:#fff}.btn.primary:hover{background:#4c9fe9}.btn.danger{color:#f0a09b}
+.shortcut{display:flex;align-items:center;justify-content:space-between}.key{padding:5px 10px;border:1px solid #56636c;border-bottom-width:2px;border-radius:5px;background:#202a31;color:#edf1f3;font-family:Consolas,monospace;font-size:12px}
+.advanced-warning{padding:10px 12px;border:1px solid #776d43;background:#332f1f;border-radius:6px;color:#e8d9a2;font-size:12px;line-height:1.6}
+
+.editor-modal{width:min(620px,90vw)}
+.editor-body{padding:16px 18px 18px}.editor-grid{display:grid;grid-template-columns:85px 1fr;gap:11px 13px;align-items:center}.editor-grid input[type=text],.editor-grid textarea{width:100%;border:1px solid #4a5861;background:#202a31;color:#eef2f4;border-radius:5px;padding:8px 10px}.editor-grid input[type=text]{height:36px}.editor-grid textarea{height:88px;resize:none}.editor-actions{margin-top:16px;display:flex;gap:8px}.editor-actions .spacer{flex:1}
+
+.toast{position:absolute;z-index:100;left:50%;bottom:30px;transform:translate(-50%,15px);opacity:0;background:#162026f2;border:1px solid #596771;border-radius:6px;padding:9px 14px;box-shadow:0 10px 30px #0007;transition:.18s;pointer-events:none}.toast.show{opacity:1;transform:translate(-50%,0)}
+.hidden{display:none!important}
+.small{font-size:12px;color:#8d9aa1}
+@media(max-width:900px){
+  .location-info{display:none}.nav-btn{min-width:70px;padding-inline:9px}.settings-layout{grid-template-columns:150px 1fr}.settings-nav-item{padding-inline:8px}
+  .form-row{grid-template-columns:125px 1fr 72px}.performance-line{grid-template-columns:125px 1fr 80px}.performance-help{margin-left:139px}.structure-head,.structure-row{grid-template-columns:125px 1fr 70px}
 }
 </style>
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute">
 <defs>
-<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
-<symbol id="i-markers" viewBox="0 0 24 24"><path d="M12 21s6-5.4 6-11a6 6 0 10-12 0c0 5.6 6 11 6 11z"/><circle cx="12" cy="10" r="2"/></symbol>
+<symbol id="i-map" viewBox="0 0 24 24"><path d="M3 5l5-2 8 3 5-2v15l-5 2-8-3-5 2V5zM8 3v15M16 6v15"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s6-5.4 6-11a6 6 0 10-12 0c0 5.6 6 11 6 11z"/><circle cx="12" cy="10" r="2"/></symbol>
 <symbol id="i-layers" viewBox="0 0 24 24"><path d="M4 8l8-4 8 4-8 4-8-4zM4 12l8 4 8-4M4 16l8 4 8-4"/></symbol>
 <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
 <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
 <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l4 4 10-10"/></symbol>
 <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20l4.5-1 9.5-9.5-3.5-3.5L5 15.5 4 20zM13.5 7l3.5 3.5"/></symbol>
@@ -120,8 +153,14 @@ svg.icon.solid{fill:currentColor;stroke:none}
 <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
 <symbol id="i-reset" viewBox="0 0 24 24"><path d="M5 9a8 8 0 111 7M5 9V4M5 9h5"/></symbol>
 <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M7 9l5 5 5-5"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="1"/><path d="M5 16H4V4h12v1"/></symbol>
+<symbol id="i-frame" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></symbol>
+<symbol id="i-display" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="1"/><path d="M9 21h6M12 17v4"/></symbol>
+<symbol id="i-performance" viewBox="0 0 24 24"><path d="M5 4v6M5 14v6M12 4v2M12 10v10M19 4v10M19 18v2M3 10h4M10 6h4M17 14h4"/></symbol>
+<symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M5 9h2M9 9h2M13 9h2M17 9h2M5 13h2M9 13h2M13 13h6M5 16h10"/></symbol>
+<symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14 6a5 5 0 01-6 6L3 17l4 4 5-5a5 5 0 006-6l-3 1-2-2 1-3z"/></symbol>
 <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H6v-9M9 20v-6h6v6"/></symbol>
-<symbol id="i-village" viewBox="0 0 24 24"><path d="M3 11l6-5 6 5v9H5v-7M12 9l4-3 5 4v10h-6"/><path d="M8 20v-5h4v5"/></symbol>
+<symbol id="i-village" viewBox="0 0 24 24"><path d="M3 11l6-5 6 5v9H5v-7M12 9l4-3 5 4v10h-6M8 20v-5h4v5"/></symbol>
 <symbol id="i-mansion" viewBox="0 0 24 24"><path d="M3 10h18M5 10v10h14V10M4 10l2-4h12l2 4M8 6V4h8v2M8 14h2v2H8M14 14h2v2h-2"/></symbol>
 <symbol id="i-temple" viewBox="0 0 24 24"><path d="M4 20h16M6 18h12M7 9h10M8 9v9M12 9v9M16 9v9M5 9l7-5 7 5"/></symbol>
 <symbol id="i-outpost" viewBox="0 0 24 24"><path d="M7 20h10M8 20V7h8v13M6 7h12l-2-3H8L6 7M10 10h4M10 14h4"/></symbol>
@@ -132,204 +171,445 @@ svg.icon.solid{fill:currentColor;stroke:none}
 <symbol id="i-fortress" viewBox="0 0 24 24"><path d="M5 20V9h3V6h3v3h2V6h3v3h3v11M3 20h18M9 20v-5h6v5"/></symbol>
 <symbol id="i-cave" viewBox="0 0 24 24"><path d="M3 19c3-9 6-13 9-13s6 4 9 13H3zM9 19c0-4 1-7 3-7s3 3 3 7"/></symbol>
 <symbol id="i-mountain" viewBox="0 0 24 24"><path d="M3 20l7-12 4 7 2-3 5 8H3z"/></symbol>
-<symbol id="i-river" viewBox="0 0 24 24"><path d="M7 3c6 3-2 6 4 9s-3 5 3 9"/></symbol>
-<symbol id="i-lake" viewBox="0 0 24 24"><path d="M4 13c2-5 14-5 16 0-1 6-15 6-16 0z"/></symbol>
-<symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.2 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.2 5.9-.9L12 3z"/></symbol>
 <symbol id="i-tree" viewBox="0 0 24 24"><path d="M12 4l-5 7h3l-4 5h5v4h2v-4h5l-4-5h3l-5-7z"/></symbol>
+<symbol id="i-water" viewBox="0 0 24 24"><path d="M4 10c4 3 12 3 16 0M4 15c4 3 12 3 16 0"/></symbol>
 <symbol id="i-player" viewBox="0 0 24 24"><path d="M12 2L21 21l-9-4-9 4L12 2z"/></symbol>
+<symbol id="i-cross" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/></symbol>
+<symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5V4zM8 4v6h8V4M8 20v-6h8v6"/></symbol>
 </defs>
 </svg>
 
-<div class="app" id="app">
-  <div class="map" id="map">
-    <svg class="world" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
-      <rect width="1600" height="900" fill="#4c7f45"/>
-      <path d="M-60 650 C180 580,270 520,380 420 C520 300,660 330,820 370 C1040 430,1100 250,1290 260 C1450 270,1540 360,1670 300 L1700 980 L-80 980Z" fill="#bda86b"/>
-      <path d="M-80 750 C170 650,250 610,390 515 C530 420,660 460,810 490 C1030 530,1120 350,1300 360 C1470 370,1550 440,1680 390 L1680 980 L-80 980Z" fill="#2b8ba0"/>
-      <path d="M-80 810 C170 720,270 680,420 590 C590 490,720 530,870 560 C1050 600,1170 430,1330 440 C1480 450,1570 500,1680 470" fill="none" stroke="#1f6e8b" stroke-width="90"/>
-      <path d="M70 0 C160 170 190 260 350 310 C500 355 610 280 735 315 C850 345 900 455 1030 450 C1160 445 1220 330 1380 340 C1480 350 1530 390 1620 420" fill="none" stroke="#2b91a9" stroke-width="85"/>
-      <path d="M52 0 C155 175 184 250 347 300 C505 348 610 270 738 305 C860 338 904 442 1033 438 C1168 434 1228 318 1385 328 C1490 338 1540 380 1625 410" fill="none" stroke="#d7c78c" stroke-width="105" opacity=".88"/>
-      <path d="M52 0 C155 175 184 250 347 300 C505 348 610 270 738 305 C860 338 904 442 1033 438 C1168 434 1228 318 1385 328 C1490 338 1540 380 1625 410" fill="none" stroke="#2a8fa7" stroke-width="70"/>
-      <path d="M210 90l80-90 70 65 55-95 95 120-30 70-145 40z" fill="#7a8587"/>
-      <path d="M220 78l65-70 28 25 40-58 46 65-18 28-40-17-34 32-38-22z" fill="#e7ece8"/>
-      <path d="M1060 90l85-105 65 80 45-63 70 100-36 80-125-10z" fill="#6f7b7f"/>
-      <path d="M1078 78l66-82 32 40 30-40 38 56-20 32-35-18-31 31-31-24z" fill="#e8ecea"/>
-      <g fill="#2e6338" opacity=".9">
-        <circle cx="130" cy="240" r="62"/><circle cx="260" cy="360" r="78"/><circle cx="450" cy="220" r="68"/><circle cx="620" cy="140" r="55"/>
-        <circle cx="850" cy="180" r="82"/><circle cx="1000" cy="230" r="65"/><circle cx="1250" cy="170" r="75"/><circle cx="1450" cy="210" r="92"/>
-        <circle cx="530" cy="640" r="74"/><circle cx="760" cy="690" r="90"/><circle cx="1220" cy="690" r="85"/>
-      </g>
-      <g fill="#5f8c4a" opacity=".8">
-        <rect x="80" y="320" width="70" height="40"/><rect x="330" y="190" width="80" height="48"/><rect x="700" y="120" width="100" height="60"/>
-        <rect x="1120" y="510" width="90" height="55"/><rect x="1380" y="580" width="120" height="65"/><rect x="390" y="710" width="95" height="55"/>
-      </g>
-    </svg>
-    <div class="pixel-noise"></div><div class="vignette"></div>
+<div class="app" id="app" data-style="satellite" data-grid="off" data-labels="on" data-structures="on" data-custom="on" data-player-ring="on">
+  <header class="topbar">
+    <div class="brand"><svg class="icon"><use href="#i-map"/></svg><span>地图册</span><small>Map Atlas · V3</small></div>
+    <div class="sep-v"></div>
+    <div class="location-info"><span>X: 1254</span><span>Z: -376</span><div class="sep-v" style="margin:0 4px;height:18px"></div><svg class="icon"><use href="#i-mountain"/></svg><span>草原 / 山麓</span></div>
+    <div class="top-spacer"></div>
+    <nav class="nav">
+      <button class="nav-btn active" data-nav="map"><svg class="icon"><use href="#i-map"/></svg><span>地图</span></button>
+      <button class="nav-btn" data-nav="markers"><svg class="icon"><use href="#i-pin"/></svg><span>标点</span></button>
+      <button class="nav-btn" data-nav="layers"><svg class="icon"><use href="#i-layers"/></svg><span>图层</span></button>
+      <button class="nav-btn" data-nav="settings"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button>
+      <button class="nav-btn" data-nav="about"><svg class="icon"><use href="#i-info"/></svg><span>关于</span></button>
+    </nav>
+    <div class="sep-v" style="margin-right:6px"></div>
+    <button class="window-close" title="关闭地图"><svg class="icon"><use href="#i-close"/></svg></button>
+  </header>
 
-    <div class="map-marker structure" style="left:18%;top:34%" data-name="村庄"><svg class="icon mi"><use href="#i-village"/></svg><div class="label">村庄</div></div>
-    <div class="map-marker structure" style="left:31%;top:23%" data-name="林地府邸"><svg class="icon mi"><use href="#i-mansion"/></svg><div class="label">林地府邸</div></div>
-    <div class="map-marker structure" style="left:68%;top:35%" data-name="海底神殿"><svg class="icon mi"><use href="#i-temple"/></svg><div class="label">海底神殿</div></div>
-    <div class="map-marker structure" style="left:78%;top:57%" data-name="废弃矿井"><svg class="icon mi"><use href="#i-mine"/></svg><div class="label">废弃矿井</div></div>
-    <div class="map-marker custom" style="left:42%;top:59%" data-name="临时营地"><svg class="icon mi"><use href="#i-home"/></svg><div class="label">临时营地</div></div>
-    <div class="map-marker structure" style="left:58%;top:69%" data-name="沉船"><svg class="icon mi"><use href="#i-ship"/></svg><div class="label">沉船</div></div>
+  <main class="map-stage" id="mapStage">
+    <div class="world-wrap" id="worldWrap">
+      <svg class="world" viewBox="0 0 1800 1100" preserveAspectRatio="none">
+        <defs>
+          <pattern id="satTrees" width="34" height="34" patternUnits="userSpaceOnUse">
+            <circle cx="8" cy="10" r="5" fill="#315d2b"/><circle cx="18" cy="17" r="6" fill="#3d7334"/><circle cx="27" cy="8" r="5" fill="#2b5727"/>
+          </pattern>
+          <pattern id="satRock" width="28" height="28" patternUnits="userSpaceOnUse">
+            <path d="M3 22L10 7l6 11 5-9 5 13z" fill="#778084"/><path d="M10 7l3 5 3-4 3 6" fill="none" stroke="#d8dfe1" stroke-width="2"/>
+          </pattern>
+          <pattern id="modernTrees" width="70" height="60" patternUnits="userSpaceOnUse">
+            <path d="M18 42v8M18 18l-12 22h24L18 18zM48 45v7M48 23l-10 19h20L48 23z" fill="none" stroke="#526b53" stroke-width="3"/>
+          </pattern>
+          <pattern id="ancientTrees" width="76" height="64" patternUnits="userSpaceOnUse">
+            <path d="M20 48v7M20 18c-8 8-12 15-12 22h24c0-7-4-14-12-22zM50 50v6M50 25c-7 7-10 13-10 19h20c0-6-3-12-10-19z" fill="none" stroke="#5a432c" stroke-width="2.6"/>
+          </pattern>
+        </defs>
+
+        <g class="satellite">
+          <rect width="1800" height="1100" fill="#3b7542"/>
+          <path d="M-80 720C190 650 280 545 430 500c150-45 270 30 410 65 180 45 290-80 425-70 170 13 270 128 610 20v650H-80z" fill="#ccb67b"/>
+          <path d="M-60 790c250-70 330-135 490-180 155-44 285 32 425 62 185 40 292-86 430-73 182 18 286 129 600 27v520H-60z" fill="#1781a6"/>
+          <path d="M-30 842c255-58 348-127 500-170 160-46 292 33 432 63 185 38 300-82 438-69 175 17 270 110 560 32" fill="none" stroke="#0f5f91" stroke-width="106" opacity=".65"/>
+          <path d="M90-30c68 172 120 255 260 292 173 46 253-66 410-23 135 37 172 158 316 148 134-10 192-102 340-79 124 19 214 86 340 83" fill="none" stroke="#ccb87e" stroke-width="122"/>
+          <path d="M90-30c68 172 120 255 260 292 173 46 253-66 410-23 135 37 172 158 316 148 134-10 192-102 340-79 124 19 214 86 340 83" fill="none" stroke="#2489a7" stroke-width="82"/>
+          <path d="M0 0h780v540H0zM1100 80h700v470h-700zM200 510h720v430H200z" fill="url(#satTrees)" opacity=".95"/>
+          <path d="M160 0l145 80 80-55 120 120-78 120-138 28-138-80zM1110 0l135 86 91-45 108 130-65 108-151 10-120-92z" fill="url(#satRock)"/>
+          <path d="M140 0l150 0 90 88-72 55-58-34-62 42-76-57zM1090 0h220l82 101-66 44-55-45-58 47-82-58z" fill="#eef2f1" opacity=".9"/>
+          <path d="M410 690c110-100 275-118 420-53 115 50 140 183 37 258-108 78-305 83-433 0-78-51-90-145-24-205z" fill="#627c39"/>
+          <path d="M470 720c70-58 177-70 270-28 77 35 94 106 30 154-75 56-188 59-273 7-52-32-61-86-27-133z" fill="#6f9b3f"/>
+          <path d="M1290 610c120-73 248-62 348 23 71 59 78 162 10 226-99 93-295 93-389 8-83-76-65-199 31-257z" fill="#2f6f39"/>
+          <g fill="#6e8b4b" opacity=".72"><circle cx="650" cy="180" r="74"/><circle cx="855" cy="210" r="64"/><circle cx="1010" cy="120" r="80"/><circle cx="1490" cy="270" r="88"/><circle cx="1050" cy="740" r="92"/></g>
+          <g fill="#994d36" opacity=".85"><rect x="540" y="322" width="62" height="44"/><rect x="630" y="350" width="54" height="39"/><rect x="730" y="315" width="44" height="32"/></g>
+        </g>
+
+        <g class="modern">
+          <rect width="1800" height="1100" fill="#ddd9c6"/>
+          <path d="M-60 790c250-70 330-135 490-180 155-44 285 32 425 62 185 40 292-86 430-73 182 18 286 129 600 27v520H-60z" fill="#9bcbd0" stroke="#5f8990" stroke-width="4"/>
+          <path d="M90-30c68 172 120 255 260 292 173 46 253-66 410-23 135 37 172 158 316 148 134-10 192-102 340-79 124 19 214 86 340 83" fill="none" stroke="#5f8990" stroke-width="70"/>
+          <path d="M0 0h780v540H0zM1100 80h700v470h-700zM200 510h720v430H200z" fill="url(#modernTrees)" opacity=".82"/>
+          <g fill="none" stroke="#5b6561" stroke-width="5">
+            <path d="M160 210l80-145 72 110 64-95 105 165M220 250l92-165 70 125"/>
+            <path d="M1110 220l95-170 82 125 72-110 110 180M1190 250l97-170 78 122"/>
+            <path d="M840 540l58-94 55 88 45-70 70 110"/>
+          </g>
+          <g fill="#b0c88f" stroke="#6c805f" stroke-width="3"><path d="M410 690c110-100 275-118 420-53 115 50 140 183 37 258-108 78-305 83-433 0-78-51-90-145-24-205z"/><path d="M1290 610c120-73 248-62 348 23 71 59 78 162 10 226-99 93-295 93-389 8-83-76-65-199 31-257z"/></g>
+          <g font-family="serif" font-size="34" fill="#53605d"><text x="225" y="270">北岭山脉</text><text x="610" y="210">常青林</text><text x="1170" y="285">雪岭</text><text x="1360" y="885">南部密林</text><text x="540" y="850">丘陵草原</text></g>
+        </g>
+
+        <g class="ancient">
+          <rect width="1800" height="1100" fill="#c9ad78"/>
+          <path d="M-60 790c250-70 330-135 490-180 155-44 285 32 425 62 185 40 292-86 430-73 182 18 286 129 600 27v520H-60z" fill="#a6bac1" stroke="#5a4733" stroke-width="5"/>
+          <path d="M90-30c68 172 120 255 260 292 173 46 253-66 410-23 135 37 172 158 316 148 134-10 192-102 340-79 124 19 214 86 340 83" fill="none" stroke="#657e84" stroke-width="60"/>
+          <path d="M0 0h780v540H0zM1100 80h700v470h-700zM200 510h720v430H200z" fill="url(#ancientTrees)" opacity=".72"/>
+          <g fill="none" stroke="#5a432c" stroke-width="4">
+            <path d="M165 240l75-148 70 118 63-101 92 145M220 265l90-166 72 125"/>
+            <path d="M1110 245l94-172 81 126 68-111 103 178M1180 265l100-176 77 126"/>
+            <path d="M830 575l66-105 59 93 47-76 75 118"/>
+          </g>
+          <g fill="none" stroke="#6b5439" stroke-width="3"><path d="M400 680c120-87 282-98 423-35 119 54 143 173 43 244-108 77-293 80-425 11-93-49-106-148-41-220z"/><path d="M1270 615c126-68 263-55 360 26 77 64 80 160 9 221-102 88-286 90-381 13-88-72-75-196 12-260z"/></g>
+          <g font-family="KaiTi,STKaiti,serif" font-size="40" fill="#4a3725"><text x="205" y="300">北岭</text><text x="615" y="220">苍林</text><text x="1170" y="305">雪山</text><text x="1370" y="890">南林</text><text x="515" y="865">丘原</text></g>
+          <g stroke="#7a6040" stroke-width="2" opacity=".55"><path d="M0 1020h1800M0 1030h1800M0 1040h1800"/></g>
+        </g>
+      </svg>
+    </div>
+
+    <div class="map-grid"></div><div class="map-shade"></div>
+    <div class="marker-layer" id="markerLayer">
+      <div class="map-marker structure" style="left:20%;top:32%" data-name="村庄" data-kind="structure"><svg class="icon glyph"><use href="#i-village"/></svg><div class="marker-label">村庄</div></div>
+      <div class="map-marker structure" style="left:33%;top:18%" data-name="林地府邸" data-kind="structure"><svg class="icon glyph"><use href="#i-mansion"/></svg><div class="marker-label">林地府邸</div></div>
+      <div class="map-marker structure" style="left:68%;top:29%" data-name="海底神殿" data-kind="structure"><svg class="icon glyph"><use href="#i-temple"/></svg><div class="marker-label">海底神殿</div></div>
+      <div class="map-marker structure" style="left:76%;top:60%" data-name="废弃矿井" data-kind="structure"><svg class="icon glyph"><use href="#i-mine"/></svg><div class="marker-label">废弃矿井</div></div>
+      <div class="map-marker custom" style="left:41%;top:56%" data-name="临时营地" data-kind="custom"><svg class="icon glyph"><use href="#i-home"/></svg><div class="marker-label">临时营地</div></div>
+      <div class="map-marker structure" style="left:58%;top:72%" data-name="沉船" data-kind="structure"><svg class="icon glyph"><use href="#i-ship"/></svg><div class="marker-label">沉船</div></div>
+    </div>
+    <div class="player-ring"></div>
     <div class="player"><svg class="icon solid"><use href="#i-player"/></svg></div>
 
-    <div class="top-actions collapsed" id="topActions">
-      <button class="action" data-open="markers"><svg class="icon"><use href="#i-markers"/></svg><span>标点</span></button>
-      <button class="action" data-open="layers"><svg class="icon"><use href="#i-layers"/></svg><span>图层</span></button>
-      <button class="action" data-open="settings"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button>
-      <button class="action menu-btn" id="menuBtn" title="菜单"><svg class="icon"><use href="#i-menu"/></svg></button>
-    </div>
-
-    <div class="coord-chip">X 1254　Z -376<br><span class="small-note">生物群系：草原 · Y 72</span></div>
-    <div class="scale"><div>2 km</div><div class="scale-line"></div></div>
-    <div class="side-tools">
-      <div class="tool-col"><button class="icon-btn" id="locateBtn" title="回到玩家位置"><svg class="icon"><use href="#i-locate"/></svg></button></div>
-      <div class="zoom-box"><input id="zoom" type="range" min="6" max="200" value="100"><span class="zoom-value" id="zoomValue">100%</span></div>
-    </div>
-
-    <div class="panel layers-panel" id="layersPanel">
-      <div class="panel-head"><svg class="icon"><use href="#i-layers"/></svg>图层<div class="spacer"></div><button class="close" data-close="layers"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="floating-panel layers-panel" id="layersPanel">
+      <div class="panel-head"><svg class="icon"><use href="#i-layers"/></svg>图层<div class="spacer"></div><button class="close-btn" data-panel-close><svg class="icon"><use href="#i-close"/></svg></button></div>
       <div class="panel-body">
-        <div class="layer-row"><div class="check on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon"><use href="#i-markers"/></svg><div class="name">自定义标点</div><div class="count">12</div></div>
-        <div class="layer-row"><div class="check on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon"><use href="#i-village"/></svg><div class="name">自动结构</div><div class="count">86</div></div>
-        <div class="layer-row"><div class="check on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon"><use href="#i-home"/></svg><div class="name">名称标签</div></div>
+        <div class="panel-section-title">显示内容</div>
+        <div class="layer-row"><div class="checkbox on" data-toggle="custom"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-pin"/></svg><div class="name">自定义标点</div><div class="count">12</div></div>
+        <div class="layer-group expanded" id="structureGroup">
+          <div class="layer-row"><div class="checkbox on" data-toggle="structures"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-temple"/></svg><div class="name">自然结构</div><div class="count">86</div><button class="expand" id="structureExpand"><svg class="icon"><use href="#i-chevron"/></svg></button></div>
+          <div class="structure-children">
+            <div class="layer-row indent"><div class="checkbox on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-village"/></svg><div class="name">村庄</div><div class="count">9</div></div>
+            <div class="layer-row indent"><div class="checkbox on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-mansion"/></svg><div class="name">林地府邸</div><div class="count">1</div></div>
+            <div class="layer-row indent"><div class="checkbox on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-temple"/></svg><div class="name">神殿 / 遗迹</div><div class="count">8</div></div>
+            <div class="layer-row indent"><div class="checkbox on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-mine"/></svg><div class="name">矿井 / 地下结构</div><div class="count">14</div></div>
+            <div class="layer-row indent"><div class="checkbox"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-city"/></svg><div class="name">其他结构</div><div class="count">54</div></div>
+          </div>
+        </div>
+        <div class="layer-row"><div class="checkbox on" data-toggle="labels"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-info"/></svg><div class="name">名称标签</div></div>
+        <div class="layer-row"><div class="checkbox" data-toggle="grid"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-frame"/></svg><div class="name">区块网格</div></div>
       </div>
     </div>
 
-    <div class="panel marker-manager" id="markersPanel">
-      <div class="panel-head"><svg class="icon"><use href="#i-markers"/></svg>自定义标点<div class="spacer"></div><button class="close" data-close="markers"><svg class="icon"><use href="#i-close"/></svg></button></div>
-      <div class="panel-body"><div class="marker-list" id="markerList"></div></div>
+    <div class="floating-panel markers-panel" id="markersPanel">
+      <div class="panel-head"><svg class="icon"><use href="#i-pin"/></svg>标点<div class="spacer"></div><button class="close-btn" data-panel-close><svg class="icon"><use href="#i-close"/></svg></button></div>
+      <div class="panel-body"><button class="btn primary" id="addMarkerButton" style="width:100%;margin-bottom:10px"><svg class="icon" style="display:inline-block;vertical-align:middle;width:16px"><use href="#i-add"/></svg> 添加标点</button><div class="marker-list" id="markerList"></div></div>
     </div>
 
-    <div class="panel context" id="contextMenu">
-      <div class="ctx-row" id="ctxAdd"><svg class="icon"><use href="#i-add"/></svg>添加标点</div>
-      <div class="ctx-row"><svg class="icon"><use href="#i-teleport"/></svg>传送到此处</div>
+    <div class="coord-box">
+      <div class="coord-line"><svg class="icon"><use href="#i-locate"/></svg><span>X 1254　Z -376　Y 72</span></div>
+      <div class="coord-line"><svg class="icon"><use href="#i-tree"/></svg><span>草原 / 山麓</span></div>
     </div>
-    <div class="panel context" id="markerContext">
-      <div class="ctx-row"><svg class="icon"><use href="#i-teleport"/></svg>传送</div>
-      <div class="ctx-row" id="ctxEdit"><svg class="icon"><use href="#i-edit"/></svg>编辑</div>
-      <div class="sep"></div>
-      <div class="ctx-row danger"><svg class="icon"><use href="#i-trash"/></svg>删除</div>
+    <div class="scale-box"><div id="scaleText">2 km</div><div class="scale-line"></div></div>
+    <div class="right-controls">
+      <div class="control-stack"><button class="square-btn" id="locateBtn" title="回到玩家"><svg class="icon"><use href="#i-locate"/></svg></button><button class="square-btn" id="homeBtn" title="回到出生点"><svg class="icon"><use href="#i-home"/></svg></button></div>
+      <div class="zoom-control"><button id="zoomOut">−</button><div class="zoom-text" id="zoomText">100%</div><button id="zoomIn">＋</button></div>
     </div>
-  </div>
+
+    <div class="context-menu" id="mapContext">
+      <div class="ctx-item" id="ctxAdd"><svg class="icon"><use href="#i-pin"/></svg>添加标点…</div>
+      <div class="ctx-item"><svg class="icon"><use href="#i-teleport"/></svg>传送至此</div>
+      <div class="ctx-item" id="ctxCopy"><svg class="icon"><use href="#i-copy"/></svg>复制坐标</div>
+      <div class="ctx-item"><svg class="icon"><use href="#i-frame"/></svg>框选区域…</div>
+      <div class="ctx-sep"></div><div class="ctx-meta"><svg class="icon"><use href="#i-info"/></svg><span>X 1254, Z -376</span></div>
+    </div>
+    <div class="context-menu" id="markerContext">
+      <div class="ctx-item"><svg class="icon"><use href="#i-teleport"/></svg>传送</div>
+      <div class="ctx-item" id="ctxEdit"><svg class="icon"><use href="#i-edit"/></svg>编辑</div>
+      <div class="ctx-item danger" id="ctxDelete"><svg class="icon"><use href="#i-trash"/></svg>删除</div>
+      <div class="ctx-sep"></div><div class="ctx-meta"><svg class="icon"><use href="#i-info"/></svg><span id="markerContextMeta">标点</span></div>
+    </div>
+  </main>
 
   <div class="overlay" id="overlay"></div>
 
-  <div class="modal settings" id="settingsModal">
-    <div class="modal-head"><svg class="icon"><use href="#i-settings"/></svg>设置<div class="spacer"></div><button class="close" data-modal-close="settings"><svg class="icon"><use href="#i-close"/></svg></button></div>
-    <div class="settings-body">
-      <div class="tabs">
-        <div class="tab active" data-tab="player"><svg class="icon solid"><use href="#i-player"/></svg>玩家</div>
-        <div class="tab" data-tab="structure"><svg class="icon"><use href="#i-village"/></svg>结构</div>
-        <div class="tab" data-tab="map"><svg class="icon"><use href="#i-layers"/></svg>地图</div>
-        <div class="tab" data-tab="operation"><svg class="icon"><use href="#i-settings"/></svg>操作</div>
-      </div>
-      <div class="settings-content">
-        <div class="setting-page active" data-page="player">
-          <div class="section-title">玩家图标</div><div class="rule"></div>
-          <div class="form-grid">
-            <div class="label">图标类型</div><div class="select"><div class="left"><svg class="icon solid" style="color:#63d481;width:21px"><use href="#i-player"/></svg>实心箭头</div><svg class="icon"><use href="#i-chevron"/></svg></div><div></div>
-            <div class="label">图标颜色</div><label class="color-control"><span class="swatch" id="playerSwatch" style="background:#63d481"></span><span id="playerColorText">#63D481</span><input type="color" id="playerColor" value="#63d481"></label><div></div>
-            <div class="label">图标大小</div><input class="slider" type="range" id="playerSize" min="8" max="48" value="22"><div class="value" id="playerSizeValue">22 px</div>
+  <div class="modal settings-modal" id="settingsModal">
+    <div class="modal-head"><svg class="icon"><use href="#i-settings"/></svg>设置<div class="spacer"></div><button class="close-btn" data-modal-close><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="settings-layout">
+      <aside class="settings-nav">
+        <div class="settings-nav-item active" data-page="general"><svg class="icon"><use href="#i-settings"/></svg>通用</div>
+        <div class="settings-nav-item" data-page="display"><svg class="icon"><use href="#i-display"/></svg>显示</div>
+        <div class="settings-nav-item" data-page="performance"><svg class="icon"><use href="#i-performance"/></svg>性能与缓存</div>
+        <div class="settings-nav-item" data-page="marker"><svg class="icon"><use href="#i-pin"/></svg>标点</div>
+        <div class="settings-nav-item" data-page="structure"><svg class="icon"><use href="#i-temple"/></svg>结构</div>
+        <div class="settings-nav-item" data-page="shortcut"><svg class="icon"><use href="#i-keyboard"/></svg>快捷键</div>
+        <div class="settings-nav-item" data-page="advanced"><svg class="icon"><use href="#i-wrench"/></svg>高级</div>
+      </aside>
+      <section class="settings-main">
+        <div class="setting-page active" data-setting-page="general">
+          <div class="settings-title-row"><div class="settings-title">通用</div><div class="settings-desc">常用设置与地图风格</div></div>
+          <div class="subtabs"><button class="subtab active" data-sub="interface"><svg class="icon"><use href="#i-display"/></svg>界面</button><button class="subtab" data-sub="mapstyle"><svg class="icon"><use href="#i-map"/></svg>地图风格</button><button class="subtab" data-sub="function"><svg class="icon"><use href="#i-settings"/></svg>功能</button></div>
+          <div class="subpage" data-subpage="interface">
+            <div class="card">
+              <div class="card-title">界面</div>
+              <div class="form-row"><div class="label">显示坐标与生物群系</div><div></div><div class="switch on" data-switch></div></div>
+              <div class="form-row"><div class="label">显示玩家位置环</div><div></div><div class="switch on" data-switch data-player-ring-switch></div></div>
+              <div class="form-row"><div class="label">显示名称标签</div><div></div><div class="switch on" data-switch data-label-switch></div></div>
+              <div class="form-row"><div class="label">界面主题</div><div class="select"><span>深色（默认）</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div>
+            </div>
+            <div class="card">
+              <div class="card-title">玩家图标</div>
+              <div class="form-row"><div class="label">图标形状</div><div class="choice-row"><button class="choice active" data-player-icon="arrow"><svg class="icon solid"><use href="#i-player"/></svg>箭头</button><button class="choice" data-player-icon="cross"><svg class="icon"><use href="#i-cross"/></svg>十字</button><button class="choice" data-player-icon="dot"><svg class="icon solid"><use href="#i-dot"/></svg>圆点</button></div><div></div></div>
+              <div class="form-row"><div class="label">图标大小</div><input id="playerSize" class="slider" type="range" min="8" max="48" value="24"><div class="value" id="playerSizeValue">24 px</div></div>
+              <div class="form-row"><div class="label">图标颜色</div><label class="color-field" id="playerColorField"><span class="swatch" id="playerSwatch" style="background:#ffe14e"></span><span id="playerColorText">#FFE14E</span><input class="native-color" id="playerColor" type="color" value="#ffe14e"></label><div></div></div>
+            </div>
           </div>
-          <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:16px"><use href="#i-reset"/></svg> 恢复默认</button><div><button class="btn" data-modal-close="settings">取消</button> <button class="btn primary" data-modal-close="settings">应用</button></div></div>
+          <div class="subpage hidden" data-subpage="mapstyle">
+            <div class="card"><div class="card-title">地图风格</div><div class="card-note">三种风格共享同一份真实地表事实；切换风格不重新扫描世界。</div>
+              <div class="style-cards">
+                <div class="style-card active" data-style-choice="satellite"><div class="style-preview sat"></div><div class="style-info"><div class="style-name">卫星 · 写实</div><div class="style-sub">按真实方块/资源包颜色绘制</div></div></div>
+                <div class="style-card" data-style-choice="modern"><div class="style-preview mod"></div><div class="style-info"><div class="style-name">手绘 · 现代</div><div class="style-sub">按地貌区域表达山脉、森林、水系</div></div></div>
+                <div class="style-card" data-style-choice="ancient"><div class="style-preview old"></div><div class="style-info"><div class="style-name">手绘 · 古式</div><div class="style-sub">羊皮纸、墨线、山水符号与古地图标注</div></div></div>
+              </div>
+            </div>
+            <div class="card"><div class="card-title">缩放范围</div><div class="form-row"><div class="label">最小 / 最大</div><div class="field">6.25% ～ 1024%</div><div></div></div><div class="form-row"><div class="label">低缩放标签密度</div><input class="slider" type="range" min="0" max="100" value="35"><div class="value">35%</div></div></div>
+          </div>
+          <div class="subpage hidden" data-subpage="function">
+            <div class="card"><div class="card-title">地图行为</div><div class="form-row"><div class="label">右键地图</div><div class="select"><span>操作菜单</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div><div class="form-row"><div class="label">右键标点</div><div class="select"><span>传送 / 编辑 / 删除</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div><div class="form-row"><div class="label">拖拽地图</div><div></div><div class="switch on" data-switch></div></div></div>
+          </div>
+          <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-reset"/></svg> 恢复默认</button><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
 
-        <div class="setting-page" data-page="structure">
-          <div style="display:flex;align-items:center"><div><div class="section-title">结构预设</div><div class="section-sub">每一种自动结构使用单色简约图标；手工编辑后的结构标点不受全局预设影响。</div></div><div style="flex:1"></div><button class="btn">恢复默认</button></div>
-          <div class="structure-head"><div>结构</div><div>默认图标</div><div style="text-align:right">颜色</div></div>
-          <div class="structure-list" id="structureList"></div>
+        <div class="setting-page" data-setting-page="display">
+          <div class="settings-title-row"><div class="settings-title">显示</div><div class="settings-desc">地图覆盖层与可视信息</div></div>
+          <div class="card"><div class="card-title">地图覆盖</div>
+            <div class="form-row"><div class="label">自定义标点</div><div></div><div class="switch on" data-switch data-app-toggle="custom"></div></div>
+            <div class="form-row"><div class="label">自动结构</div><div></div><div class="switch on" data-switch data-app-toggle="structures"></div></div>
+            <div class="form-row"><div class="label">名称标签</div><div></div><div class="switch on" data-switch data-app-toggle="labels"></div></div>
+            <div class="form-row"><div class="label">区块网格</div><div></div><div class="switch" data-switch data-app-toggle="grid"></div></div>
+          </div>
+          <div class="card"><div class="card-title">图标显示</div><div class="form-row"><div class="label">图标随地图缩放</div><input class="slider" type="range" min="0" max="100" value="35"><div class="value">轻微</div></div><div class="form-row"><div class="label">玩家图标固定屏幕大小</div><div></div><div class="switch on" data-switch></div></div></div>
+          <div class="settings-footer"><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
 
-        <div class="setting-page" data-page="map">
-          <div class="section-title">地图性能</div><div class="section-sub">客户端预取和服务器实际处理分离，避免地图工作挤占游戏 tick。</div><div class="rule"></div>
-          <div class="performance-card">
-            <div class="performance-line"><div>每批请求区块数</div><input class="slider" id="requestRange" type="range" min="16" max="256" step="16" value="64"><div class="value" id="requestValue">64</div></div>
-            <p>控制客户端一次预取多少区块。服务端仍按独立安全预算逐 tick 处理；提高到 256 不会在单个 tick 同步扫描 256 个区块。</p>
+        <div class="setting-page" data-setting-page="performance">
+          <div class="settings-title-row"><div class="settings-title">性能与缓存</div><div class="settings-desc">控制预取、实时扫描与缓存恢复</div></div>
+          <div class="card">
+            <div class="performance-row"><div class="performance-line"><div>每批请求区块数</div><input id="requestRange" class="slider" type="range" min="16" max="256" step="16" value="64"><div class="value" id="requestValue">64</div></div><div class="performance-help">只控制客户端预取宽度；服务端按独立预算逐 tick 处理，不会把 256 个区块塞进同一个 tick。</div></div>
+            <div class="performance-row"><div class="performance-line"><div>实时扫描间隔</div><input id="scanRange" class="slider" type="range" min="5" max="100" step="5" value="10"><div class="value" id="scanValue">10 tick / 0.50 s</div></div><div class="performance-help">决定地表变化检查的平均频率；扫描会平摊到多个 server tick，避免实体 AI / TNT 周期性变慢。</div></div>
+            <div class="performance-row"><div class="performance-line"><div>缓存预热范围</div><input class="slider" type="range" min="128" max="2048" step="128" value="1024"><div class="value">1024 区块</div></div><div class="performance-help">进入存档后主动恢复玩家附近已经绘制的地图，打开地图时尽量直接显示。</div></div>
           </div>
-          <div class="performance-card">
-            <div class="performance-line"><div>实时扫描间隔</div><input class="slider" id="scanRange" type="range" min="5" max="100" step="5" value="10"><div class="value" id="scanValue">10 tick / 0.50 s</div></div>
-            <p>控制实时地表变化检查的平均频率。扫描自动平摊到多个 server tick，每 tick 限量执行，避免集中扫描拖慢实体或 TNT。</p>
-          </div>
-          <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:16px"><use href="#i-reset"/></svg> 恢复默认</button><div><button class="btn" data-modal-close="settings">取消</button> <button class="btn primary" data-modal-close="settings">应用</button></div></div>
+          <div class="card"><div class="card-title">缓存</div><div class="form-row"><div class="label">已渲染 RGB 缓存</div><div class="small">与地表事实同时保存；资源包变化时只重新着色</div><div class="switch on" data-switch></div></div><div class="form-row"><div class="label">刷新全部已覆盖地图</div><button class="btn" id="refreshAll">立即刷新</button><div></div></div></div>
+          <div class="settings-footer"><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
 
-        <div class="setting-page" data-page="operation">
-          <div class="section-title">操作</div><div class="rule"></div>
-          <div class="form-grid">
-            <div class="label">右键地图</div><div class="select"><span>打开“添加标点 / 传送”菜单</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div>
-            <div class="label">右键标点</div><div class="select"><span>打开“传送 / 编辑 / 删除”菜单</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div>
-          </div>
-          <div class="settings-footer"><div></div><div><button class="btn" data-modal-close="settings">取消</button> <button class="btn primary" data-modal-close="settings">应用</button></div></div>
+        <div class="setting-page" data-setting-page="marker">
+          <div class="settings-title-row"><div class="settings-title">标点</div><div class="settings-desc">自定义标点默认行为</div></div>
+          <div class="card"><div class="card-title">默认标点</div><div class="form-row"><div class="label">默认图标</div><div class="select"><div class="left"><svg class="icon"><use href="#i-pin"/></svg>定位点</div><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div><div class="form-row"><div class="label">默认颜色</div><div class="color-field"><span class="swatch" style="background:#ffd34e"></span><span>#FFD34E</span></div><div></div></div><div class="form-row"><div class="label">图标大小</div><input class="slider" type="range" min="8" max="32" value="16"><div class="value">16 px</div></div></div>
+          <div class="card"><div class="card-title">名称标签</div><div class="form-row"><div class="label">25% 以下隐藏标签</div><div></div><div class="switch on" data-switch></div></div><div class="form-row"><div class="label">标签避让</div><div></div><div class="switch on" data-switch></div></div></div>
+          <div class="settings-footer"><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
-      </div>
+
+        <div class="setting-page" data-setting-page="structure">
+          <div class="settings-title-row"><div class="settings-title">结构预设</div><div class="settings-desc">自动结构统一使用单色图标；手工编辑后的结构保持自定义</div><div class="top-spacer"></div><button class="btn">恢复默认</button></div>
+          <div class="structure-table"><div class="structure-head"><div>结构</div><div>默认图标</div><div style="text-align:right">颜色</div></div><div class="structure-scroll" id="structureList"></div></div>
+          <div class="settings-footer"><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
+        </div>
+
+        <div class="setting-page" data-setting-page="shortcut">
+          <div class="settings-title-row"><div class="settings-title">快捷键</div><div class="settings-desc">只保留真正高频动作</div></div>
+          <div class="card"><div class="form-row"><div class="label">打开地图</div><div class="shortcut"><span>打开 / 关闭地图</span><span class="key">M</span></div><div></div></div><div class="form-row"><div class="label">回到玩家</div><div class="shortcut"><span>地图视野回到玩家</span><span class="key">R</span></div><div></div></div><div class="form-row"><div class="label">添加标点</div><div class="shortcut"><span>在视野中心添加标点</span><span class="key">Shift + M</span></div><div></div></div></div>
+          <div class="settings-footer"><button class="btn">恢复默认</button><div class="spacer"></div><button class="btn primary" data-modal-close>应用</button></div>
+        </div>
+
+        <div class="setting-page" data-setting-page="advanced">
+          <div class="settings-title-row"><div class="settings-title">高级</div><div class="settings-desc">调试与边界选项</div></div>
+          <div class="advanced-warning">高级选项会直接影响扫描和缓存行为。正常游玩通常不需要修改。</div>
+          <div class="card" style="margin-top:12px"><div class="form-row"><div class="label">强制重新着色缓存</div><button class="btn">执行</button><div></div></div><div class="form-row"><div class="label">清除 GPU 地图纹理</div><button class="btn">执行</button><div></div></div><div class="form-row"><div class="label">显示调试统计</div><div></div><div class="switch" data-switch></div></div></div>
+          <div class="settings-footer"><div class="spacer"></div><button class="btn primary" data-modal-close>完成</button></div>
+        </div>
+      </section>
     </div>
   </div>
 
-  <div class="modal editor" id="editorModal">
-    <div class="modal-head"><svg class="icon"><use href="#i-edit"/></svg><span id="editorTitle">添加标点</span><div class="spacer"></div><button class="close" data-modal-close="editor"><svg class="icon"><use href="#i-close"/></svg></button></div>
+  <div class="modal editor-modal" id="editorModal">
+    <div class="modal-head"><svg class="icon"><use href="#i-pin"/></svg><span id="editorTitle">添加标点</span><div class="spacer"></div><button class="close-btn" data-editor-close><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div class="editor-body">
       <div class="editor-grid">
-        <div>名称</div><input type="text" id="markerName" value="临时营地">
+        <div>名称</div><input id="markerName" type="text" value="临时营地">
         <div>图标</div><div class="select"><div class="left"><svg class="icon"><use href="#i-home"/></svg>营地</div><svg class="icon"><use href="#i-chevron"/></svg></div>
-        <div>颜色</div><label class="color-control"><span class="swatch" style="background:#f4c84f"></span><span>#F4C84F</span></label>
+        <div>颜色</div><label class="color-field" id="markerColorField"><span class="swatch" id="markerSwatch" style="background:#ffd34e"></span><span id="markerColorText">#FFD34E</span><input class="native-color" id="markerColor" type="color" value="#ffd34e"></label>
         <div>简介</div><textarea>临时驻点，附近有平地与水源。</textarea>
-        <div>位置</div><div class="small-note">X 1254　Z -376</div>
+        <div>坐标</div><div class="small">X 1254　Z -376</div>
       </div>
-      <div class="editor-actions"><button class="btn danger" id="editorDelete">删除</button><div class="right"><button class="btn" data-modal-close="editor">取消</button><button class="btn primary" data-modal-close="editor">保存</button></div></div>
+      <div class="editor-actions"><button class="btn danger" id="deleteMarkerButton">删除</button><div class="spacer"></div><button class="btn" data-editor-close>取消</button><button class="btn primary" id="saveMarkerButton"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-save"/></svg> 保存</button></div>
     </div>
   </div>
-  <div class="toast" id="toast">已回到玩家位置</div>
+
+  <div class="toast" id="toast">已完成</div>
 </div>
 
 <script>
-const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const topActions=$('#topActions'), overlay=$('#overlay'), settings=$('#settingsModal'), editor=$('#editorModal');
-const closePanels=()=>{$('#layersPanel').style.display='none';$('#markersPanel').style.display='none';$('#contextMenu').style.display='none';$('#markerContext').style.display='none';$$('.action').forEach(x=>x.classList.remove('active'))};
-$('#menuBtn').onclick=()=>topActions.classList.toggle('collapsed');
-$$('.action[data-open]').forEach(btn=>btn.onclick=()=>{
-  const which=btn.dataset.open; closePanels();
-  if(which==='settings'){overlay.style.display='block';settings.style.display='block';return}
-  const p=which==='layers'?$('#layersPanel'):$('#markersPanel');p.style.display='block';btn.classList.add('active');
-});
-$$('[data-close]').forEach(b=>b.onclick=()=>closePanels());
-$$('[data-modal-close]').forEach(b=>b.onclick=()=>{overlay.style.display='none';settings.style.display='none';editor.style.display='none'});
-overlay.onclick=()=>{overlay.style.display='none';settings.style.display='none';editor.style.display='none'};
+(function(){
+  const q=function(s){return document.querySelector(s)}, qa=function(s){return Array.from(document.querySelectorAll(s))};
+  const app=q('#app'), overlay=q('#overlay'), settings=q('#settingsModal'), editor=q('#editorModal');
+  const layers=q('#layersPanel'), markers=q('#markersPanel'), mapCtx=q('#mapContext'), markerCtx=q('#markerContext');
+  const worldWrap=q('#worldWrap'), mapStage=q('#mapStage');
+  let zoom=1, panX=0, panY=0, dragging=false, dragStartX=0, dragStartY=0, basePanX=0, basePanY=0;
+  let selectedMarker=null;
 
-$$('.tab').forEach(t=>t.onclick=()=>{
-  $$('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');
-  $$('.setting-page').forEach(x=>x.classList.remove('active'));$('[data-page="'+t.dataset.tab+'"]').classList.add('active');
-});
+  function toast(text){
+    const el=q('#toast'); el.textContent=text; el.classList.add('show');
+    setTimeout(function(){el.classList.remove('show')},1200);
+  }
+  function hidePanels(){
+    layers.style.display='none'; markers.style.display='none';
+    mapCtx.style.display='none'; markerCtx.style.display='none';
+    qa('.nav-btn').forEach(function(b){b.classList.remove('active')});
+    q('[data-nav="map"]').classList.add('active');
+  }
+  function openPanel(which){
+    hidePanels();q('[data-nav="map"]').classList.remove('active');
+    if(which==='layers'){layers.style.display='block';q('[data-nav="layers"]').classList.add('active')}
+    if(which==='markers'){markers.style.display='block';q('[data-nav="markers"]').classList.add('active')}
+  }
+  function openSettings(page){
+    hidePanels();q('[data-nav="map"]').classList.remove('active'); overlay.style.display='block'; settings.style.display='block';
+    q('[data-nav="settings"]').classList.add('active');
+    if(page) activateSettingsPage(page);
+  }
+  function closeModal(){
+    overlay.style.display='none';settings.style.display='none';editor.style.display='none';
+    qa('.nav-btn').forEach(function(b){b.classList.remove('active')});q('[data-nav="map"]').classList.add('active');
+  }
+  function activateSettingsPage(page){
+    qa('.settings-nav-item').forEach(function(x){x.classList.toggle('active',x.dataset.page===page)});
+    qa('[data-setting-page]').forEach(function(x){x.classList.toggle('active',x.dataset.settingPage===page)});
+  }
+  function positionMenu(el,x,y){
+    el.style.display='block'; const r=el.getBoundingClientRect();
+    el.style.left=Math.max(8,Math.min(innerWidth-r.width-8,x))+'px';
+    el.style.top=Math.max(70,Math.min(innerHeight-r.height-8,y))+'px';
+  }
+  function updateTransform(){
+    worldWrap.style.transform='translate(calc(-50% + '+panX+'px),calc(-50% + '+panY+'px)) scale('+zoom+')';
+    const percent=Math.round(zoom*10000)/100;
+    q('#zoomText').textContent=percent+'%';
+    q('#scaleText').textContent=zoom<.25?'8 km':zoom<.5?'4 km':zoom<1?'3 km':zoom<2?'2 km':'1 km';
+  }
+  function setZoom(next,cx,cy){
+    next=Math.max(.0625,Math.min(10.24,next));
+    zoom=next;updateTransform();
+  }
+  function openEditor(title,name){
+    mapCtx.style.display='none';markerCtx.style.display='none';overlay.style.display='block';editor.style.display='block';
+    q('#editorTitle').textContent=title;q('#markerName').value=name||'新标点';
+    q('#deleteMarkerButton').style.visibility=title==='添加标点'?'hidden':'visible';
+  }
 
-const positionMenu=(el,x,y)=>{el.style.display='block';const r=el.getBoundingClientRect();el.style.left=Math.min(innerWidth-r.width-8,x)+'px';el.style.top=Math.min(innerHeight-r.height-8,y)+'px'};
-$('#map').addEventListener('contextmenu',e=>{e.preventDefault();closePanels();positionMenu($('#contextMenu'),e.clientX,e.clientY)});
-$$('.map-marker').forEach(m=>m.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();closePanels();$('#markerName').value=m.dataset.name;$('#editorTitle').textContent='编辑标点';positionMenu($('#markerContext'),e.clientX,e.clientY)}));
-$('#ctxAdd').onclick=()=>{closePanels();$('#editorTitle').textContent='添加标点';$('#markerName').value='新标点';overlay.style.display='block';editor.style.display='block'};
-$('#ctxEdit').onclick=()=>{closePanels();overlay.style.display='block';editor.style.display='block'};
+  qa('.nav-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      const n=btn.dataset.nav;
+      if(n==='map'){hidePanels();return}
+      if(n==='markers'||n==='layers'){openPanel(n);return}
+      if(n==='settings'){openSettings('general');return}
+      if(n==='about'){toast('Map Atlas V3 · 高保真交互原型')}
+    })
+  });
+  qa('[data-panel-close]').forEach(function(b){b.onclick=hidePanels});
+  qa('[data-modal-close]').forEach(function(b){b.onclick=closeModal});
+  qa('[data-editor-close]').forEach(function(b){b.onclick=closeModal});
+  overlay.onclick=function(e){if(e.target===overlay)closeModal()};
 
-$$('.check').forEach(c=>c.onclick=()=>c.classList.toggle('on'));
-const toast=(txt)=>{const t=$('#toast');t.textContent=txt;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1200)};
-$('#locateBtn').onclick=()=>toast('已回到玩家位置');
-$('#zoom').oninput=e=>$('#zoomValue').textContent=e.target.value+'%';
-$('#requestRange').oninput=e=>$('#requestValue').textContent=e.target.value;
-$('#scanRange').oninput=e=>$('#scanValue').textContent=e.target.value+' tick / '+(e.target.value/20).toFixed(2)+' s';
-$('#playerSize').oninput=e=>{const v=e.target.value;$('#playerSizeValue').textContent=v+' px';document.querySelector('.player .icon').style.width=v+'px';document.querySelector('.player .icon').style.height=v+'px'};
-$('#playerColor').oninput=e=>{const c=e.target.value;$('#playerSwatch').style.background=c;$('#playerColorText').textContent=c.toUpperCase();document.querySelector('.player').style.color=c};
-$('#playerSwatch').onclick=()=>$('#playerColor').click();
+  q('#structureExpand').onclick=function(){q('#structureGroup').classList.toggle('expanded')};
+  qa('.checkbox').forEach(function(cb){cb.onclick=function(){
+    cb.classList.toggle('on');const key=cb.dataset.toggle;if(key)app.dataset[key]=cb.classList.contains('on')?'on':'off';
+  }});
+  qa('[data-switch]').forEach(function(sw){sw.onclick=function(){
+    sw.classList.toggle('on');
+    if(sw.hasAttribute('data-player-ring-switch'))app.dataset.playerRing=sw.classList.contains('on')?'on':'off';
+    if(sw.hasAttribute('data-label-switch'))app.dataset.labels=sw.classList.contains('on')?'on':'off';
+    const key=sw.dataset.appToggle;if(key)app.dataset[key]=sw.classList.contains('on')?'on':'off';
+  }});
 
-const markerRows=[
-  ['临时营地','1254, -376','i-home'],['码头','1418, -642','i-ship'],['北山入口','882, -1012','i-mountain'],['矿区 A','1690, -188','i-mine']
-];
-$('#markerList').innerHTML=markerRows.map(([n,p,i])=>`
-<div class="list-row"><svg class="icon marker-icon"><use href="#${i}"/></svg><div class="content"><div class="title">${n}</div><div class="meta">${p}</div></div><div class="row-actions"><button class="mini"><svg class="icon"><use href="#i-edit"/></svg></button><button class="mini danger"><svg class="icon"><use href="#i-trash"/></svg></button></div></div>`).join('');
+  qa('.settings-nav-item').forEach(function(item){item.onclick=function(){activateSettingsPage(item.dataset.page)}});
+  qa('.subtab').forEach(function(tab){tab.onclick=function(){
+    qa('.subtab').forEach(function(x){x.classList.remove('active')});tab.classList.add('active');
+    qa('[data-subpage]').forEach(function(x){x.classList.toggle('hidden',x.dataset.subpage!==tab.dataset.sub)});
+  }});
+  qa('.style-card').forEach(function(card){card.onclick=function(){
+    qa('.style-card').forEach(function(x){x.classList.remove('active')});card.classList.add('active');
+    app.dataset.style=card.dataset.styleChoice;toast('地图风格：'+card.querySelector('.style-name').textContent);
+  }});
 
-const structures=[
-['村庄','i-village','#F4C84F'],['林地府邸','i-mansion','#E7D7C0'],['沙漠神殿','i-temple','#E3B754'],['丛林神庙','i-temple','#8FCB73'],['沼泽小屋','i-home','#A6B17F'],['雪屋','i-home','#E9F1F5'],['海底神殿','i-temple','#70C7CE'],['掠夺者前哨站','i-outpost','#C89A76'],['废弃矿井','i-mine','#C08A55'],['废弃传送门','i-portal','#A77CE8'],['沉船','i-ship','#6EB5D1'],['海底废墟','i-lake','#64C0D3'],['埋藏的宝藏','i-star','#F3D66A'],['古迹废墟','i-temple','#BA9673'],['试炼密室','i-temple','#D6A06A'],['远古城市','i-city','#6DABA8'],['要塞','i-fortress','#B7ADA0'],['下界要塞','i-fortress','#B8554E'],['堡垒遗迹','i-fortress','#84695A'],['下界化石','i-cave','#D7C2A3'],['末地城','i-city','#C7A3D5'],['其他结构','i-star','#D7B85D']
-];
-$('#structureList').innerHTML=structures.map(([n,i,c])=>`
-<div class="structure-row"><div>${n}</div><div class="structure-icon-select"><div class="left"><svg class="icon"><use href="#${i}"/></svg>${n}</div><svg class="icon"><use href="#i-chevron"/></svg></div><div class="structure-color"><span class="swatch" style="background:${c}"></span></div></div>`).join('');
-$$('.structure-color .swatch').forEach(s=>s.onclick=()=>toast('原型：点击后打开单色取色器'));
+  qa('[data-player-icon]').forEach(function(btn){btn.onclick=function(){
+    qa('[data-player-icon]').forEach(function(x){x.classList.remove('active')});btn.classList.add('active');
+    const icon=q('.player .icon');const kind=btn.dataset.playerIcon;
+    icon.classList.toggle('solid',kind!=='cross');
+    icon.querySelector('use').setAttribute('href',kind==='arrow'?'#i-player':kind==='cross'?'#i-cross':'#i-dot');
+  }});
+  q('#playerSize').oninput=function(e){
+    const v=e.target.value;q('#playerSizeValue').textContent=v+' px';const i=q('.player .icon');i.style.width=v+'px';i.style.height=v+'px';
+  };
+  q('#playerColor').oninput=function(e){q('#playerSwatch').style.background=e.target.value;q('#playerColorText').textContent=e.target.value.toUpperCase();q('.player').style.color=e.target.value};
+  q('#markerColor').oninput=function(e){q('#markerSwatch').style.background=e.target.value;q('#markerColorText').textContent=e.target.value.toUpperCase()};
+
+  q('#requestRange').oninput=function(e){q('#requestValue').textContent=e.target.value};
+  q('#scanRange').oninput=function(e){q('#scanValue').textContent=e.target.value+' tick / '+(e.target.value/20).toFixed(2)+' s'};
+  q('#refreshAll').onclick=function(){toast('原型：刷新全部已覆盖地图')};
+
+  q('#zoomIn').onclick=function(){setZoom(zoom*1.25)};q('#zoomOut').onclick=function(){setZoom(zoom/1.25)};
+  q('#locateBtn').onclick=function(){panX=0;panY=0;setZoom(1);toast('已回到玩家位置')};
+  q('#homeBtn').onclick=function(){panX=180;panY=-80;setZoom(.8);toast('已回到出生点')};
+  mapStage.addEventListener('wheel',function(e){e.preventDefault();setZoom(e.deltaY<0?zoom*1.12:zoom/1.12)},{passive:false});
+  mapStage.addEventListener('pointerdown',function(e){if(e.button!==0||e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box,.map-marker'))return;dragging=true;mapStage.classList.add('dragging');dragStartX=e.clientX;dragStartY=e.clientY;basePanX=panX;basePanY=panY;mapStage.setPointerCapture(e.pointerId)});
+  mapStage.addEventListener('pointermove',function(e){if(!dragging)return;panX=basePanX+(e.clientX-dragStartX);panY=basePanY+(e.clientY-dragStartY);updateTransform()});
+  mapStage.addEventListener('pointerup',function(){dragging=false;mapStage.classList.remove('dragging')});
+
+  mapStage.addEventListener('contextmenu',function(e){
+    if(e.target.closest('.map-marker'))return;
+    e.preventDefault();mapCtx.style.display='none';markerCtx.style.display='none';positionMenu(mapCtx,e.clientX,e.clientY);
+  });
+  qa('.map-marker').forEach(function(m){m.addEventListener('contextmenu',function(e){
+    e.preventDefault();e.stopPropagation();selectedMarker=m;mapCtx.style.display='none';q('#markerContextMeta').textContent=m.dataset.name;positionMenu(markerCtx,e.clientX,e.clientY);
+  })});
+  q('#ctxAdd').onclick=function(){openEditor('添加标点','新标点')};
+  q('#ctxEdit').onclick=function(){openEditor('编辑标点',selectedMarker?(selectedMarker.dataset.name||selectedMarker.querySelector&&selectedMarker.querySelector('.title')?.textContent):'标点')};
+  q('#ctxDelete').onclick=function(){if(selectedMarker){selectedMarker.remove();markerCtx.style.display='none';toast('标点已删除')}};
+  q('#ctxCopy').onclick=function(){toast('已复制坐标：1254, -376')};
+  q('#addMarkerButton').onclick=function(){openEditor('添加标点','新标点')};
+
+  q('#saveMarkerButton').onclick=function(){
+    const name=q('#markerName').value.trim()||'未命名标点';
+    if(selectedMarker){
+      if(selectedMarker.classList&&selectedMarker.classList.contains('map-marker')){
+        selectedMarker.dataset.name=name;const label=selectedMarker.querySelector('.marker-label');if(label)label.textContent=name;
+      }else if(selectedMarker.querySelector){
+        const title=selectedMarker.querySelector('.title');if(title)title.textContent=name;
+      }
+    }
+    closeModal();toast('标点已保存');
+  };
+  q('#deleteMarkerButton').onclick=function(){if(selectedMarker&&selectedMarker.remove)selectedMarker.remove();closeModal();toast('标点已删除')};
+
+  const markerRows=[['临时营地','1254, -376','i-home'],['矿区 A','1690, -188','i-mine'],['北岭入口','882, -1012','i-mountain'],['河口码头','1418, -642','i-ship']];
+  q('#markerList').innerHTML=markerRows.map(function(r){return '<div class="marker-row"><svg class="icon mi"><use href="#'+r[2]+'"/></svg><div class="info"><div class="title">'+r[0]+'</div><div class="meta">'+r[1]+'</div></div><div class="row-actions"><button class="mini edit-row"><svg class="icon"><use href="#i-edit"/></svg></button><button class="mini danger"><svg class="icon"><use href="#i-trash"/></svg></button></div></div>'}).join('');
+  qa('.edit-row').forEach(function(b){b.onclick=function(){const name=b.closest('.marker-row').querySelector('.title').textContent;selectedMarker=b.closest('.marker-row');openEditor('编辑标点',name)}});
+  qa('.marker-row .mini.danger').forEach(function(b){b.onclick=function(){b.closest('.marker-row').remove();toast('标点已删除')}});
+
+  const structures=[
+    ['村庄','i-village','#F4C84F'],['林地府邸','i-mansion','#E7D7C0'],['沙漠神殿','i-temple','#DDB85E'],['丛林神庙','i-temple','#8FCB73'],
+    ['沼泽小屋','i-home','#A6B17F'],['雪屋','i-home','#EDF4F6'],['海底神殿','i-temple','#70C7CE'],['掠夺者前哨站','i-outpost','#C89A76'],
+    ['废弃矿井','i-mine','#C08A55'],['废弃传送门','i-portal','#A77CE8'],['沉船','i-ship','#6EB5D1'],['海底废墟','i-water','#64C0D3'],
+    ['埋藏的宝藏','i-pin','#F3D66A'],['古迹废墟','i-temple','#BA9673'],['试炼密室','i-temple','#D6A06A'],['远古城市','i-city','#6DABA8'],
+    ['要塞','i-fortress','#B7ADA0'],['下界要塞','i-fortress','#B8554E'],['堡垒遗迹','i-fortress','#84695A'],['下界化石','i-cave','#D7C2A3'],
+    ['末地城','i-city','#C7A3D5'],['其他结构','i-pin','#D7B85D']
+  ];
+  q('#structureList').innerHTML=structures.map(function(r){return '<div class="structure-row"><div>'+r[0]+'</div><div class="structure-select"><div class="left"><svg class="icon"><use href="#'+r[1]+'"/></svg>'+r[0]+'</div><svg class="icon"><use href="#i-chevron"/></svg></div><div class="structure-color"><span class="swatch" style="background:'+r[2]+'"></span></div></div>'}).join('');
+  qa('.structure-color .swatch').forEach(function(s){s.onclick=function(){toast('原型：打开单色取色器')}});
+
+  q('.window-close').onclick=function(){toast('原型：关闭地图')};
+  const demo=new URLSearchParams(location.search).get('demo');
+  if(demo==='settings')openSettings('general');
+  if(demo==='layers')openPanel('layers');
+  if(demo==='markers')openPanel('markers');
+  if(demo==='modern'){app.dataset.style='modern';qa('.style-card').forEach(function(x){x.classList.toggle('active',x.dataset.styleChoice==='modern')})}
+  if(demo==='ancient'){app.dataset.style='ancient';qa('.style-card').forEach(function(x){x.classList.toggle('active',x.dataset.styleChoice==='ancient')})}
+})();
 </script>
 </body>
 </html>
