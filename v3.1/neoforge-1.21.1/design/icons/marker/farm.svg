@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+<style>
+svg {
+  display:block;
+  width:256px;
+  height:256px;
+  color:#e8eef5;
+  overflow:visible;
+}
+.stroke {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:2.0;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.thin {
+  fill:none;
+  stroke:#dfe7ef !important;
+  stroke-width:1.25;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.fill {
+  fill:#e8eef5 !important;
+  stroke:none;
+}
+.soft {
+  fill:rgba(232,238,245,.13) !important;
+  stroke:#dfe7ef !important;
+  stroke-width:1.0;
+}
+.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {
+  fill:#f2bd45 !important;
+  stroke:none !important;
+}
+</style>
+<path class="green" d="M7 28h50v28H7Z"/><path class="gold" d="M10 30h5v24h-5Zm13 0h5v24h-5Zm13 0h5v24h-5Zm13 0h5v24h-5Z"/><path class="stroke" d="M6 28h52M8 20c4-9 8-9 12 0m4 0c4-9 8-9 12 0m4 0c4-9 8-9 12 0"/>
+</svg>
