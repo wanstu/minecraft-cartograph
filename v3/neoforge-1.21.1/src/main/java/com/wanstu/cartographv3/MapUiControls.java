@@ -740,7 +740,9 @@ final class MapUiControls {
         }
 
         private static String label(MapUiSettings.MarkerType type) {
-            return type == MapUiSettings.MarkerType.CROSS ? "十字" : "箭头";
+            if (type == MapUiSettings.MarkerType.CROSS) return "十字";
+            if (type == MapUiSettings.MarkerType.DOT) return "圆点";
+            return "箭头";
         }
 
         private static void drawType(
@@ -753,6 +755,12 @@ final class MapUiControls {
             if (type == MapUiSettings.MarkerType.CROSS) {
                 MapIconAtlas.drawPlayerCross(
                         graphics, cx, cy, size, primary, accent, line);
+            } else if (type == MapUiSettings.MarkerType.DOT) {
+                int r = Math.max(2, size / 4);
+                graphics.fill(cx - r - 1, cy - r - 1, cx + r + 2, cy + r + 2,
+                        0xff000000 | line);
+                graphics.fill(cx - r, cy - r, cx + r + 1, cy + r + 1,
+                        0xff000000 | accent);
             } else {
                 MapIconAtlas.drawPlayerArrow(
                         graphics, cx, cy, size, primary, accent, line);

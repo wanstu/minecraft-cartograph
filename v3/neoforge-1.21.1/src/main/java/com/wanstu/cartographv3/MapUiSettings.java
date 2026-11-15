@@ -12,7 +12,8 @@ import java.util.EnumMap;
 import java.util.Properties;
 
 final class MapUiSettings {
-    enum MarkerType { ARROW, CROSS }
+    enum MarkerType { ARROW, CROSS, DOT }
+    private static final int SCHEMA_VERSION = 4;
 
     private static final int DEFAULT_PRIMARY_COLOR = MapMarkerStore.DEFAULT_PRIMARY_COLOR;
     private static final int DEFAULT_COLOR = 0xe53935;
@@ -20,7 +21,9 @@ final class MapUiSettings {
     private static final int DEFAULT_SIZE = 12;
     private static final int DEFAULT_REQUEST_BATCH = 64;
     private static final int DEFAULT_LIVE_SCAN_INTERVAL = 10;
-    private static final int STRUCTURE_PRESET_VERSION = 3;
+    private static final int DEFAULT_MARKER_SCALE = 35;
+    private static final int DEFAULT_CUSTOM_MARKER_SIZE = 22;
+    private static final int DEFAULT_CUSTOM_MARKER_COLOR = 0xffd34e;
 
     private static boolean loaded;
     private static MarkerType markerType = MarkerType.ARROW;
@@ -30,6 +33,17 @@ final class MapUiSettings {
     private static int markerSize = DEFAULT_SIZE;
     private static boolean markerLayerEnabled = true;
     private static boolean structureLayerEnabled = true;
+    private static boolean showCoords = true;
+    private static boolean playerRing = true;
+    private static boolean labels = true;
+    private static boolean grid = false;
+    private static boolean dragMap = true;
+    private static boolean hideLabelsLowZoom = true;
+    private static boolean avoidLabels = true;
+    private static int markerScalePercent = DEFAULT_MARKER_SCALE;
+    private static MapMarkerStore.Icon customMarkerDefaultIcon = MapMarkerStore.Icon.PIN;
+    private static int customMarkerDefaultColor = DEFAULT_CUSTOM_MARKER_COLOR;
+    private static int customMarkerDefaultSize = DEFAULT_CUSTOM_MARKER_SIZE;
     private static int requestBatchSize = DEFAULT_REQUEST_BATCH;
     private static int liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
     private static final EnumMap<MapMarkerStore.StructurePreset, MapMarkerStore.Icon>
@@ -40,6 +54,8 @@ final class MapUiSettings {
             STRUCTURE_PRESET_ACCENT = new EnumMap<>(MapMarkerStore.StructurePreset.class);
     private static final EnumMap<MapMarkerStore.StructurePreset, Integer>
             STRUCTURE_PRESET_LINE = new EnumMap<>(MapMarkerStore.StructurePreset.class);
+    private static final EnumMap<MapMarkerStore.StructurePreset, Boolean>
+            STRUCTURE_VISIBLE = new EnumMap<>(MapMarkerStore.StructurePreset.class);
 
     private MapUiSettings() {}
 
@@ -76,6 +92,28 @@ final class MapUiSettings {
     static synchronized boolean structureLayerEnabled() {
         ensureLoaded();
         return structureLayerEnabled;
+    }
+
+    static synchronized boolean showCoords() { ensureLoaded(); return showCoords; }
+    static synchronized boolean playerRing() { ensureLoaded(); return playerRing; }
+    static synchronized boolean labels() { ensureLoaded(); return labels; }
+    static synchronized boolean grid() { ensureLoaded(); return grid; }
+    static synchronized boolean dragMap() { ensureLoaded(); return dragMap; }
+    static synchronized boolean hideLabelsLowZoom() { ensureLoaded(); return hideLabelsLowZoom; }
+    static synchronized boolean avoidLabels() { ensureLoaded(); return avoidLabels; }
+    static synchronized int markerScalePercent() { ensureLoaded(); return markerScalePercent; }
+    static synchronized MapMarkerStore.Icon customMarkerDefaultIcon() {
+        ensureLoaded(); return customMarkerDefaultIcon;
+    }
+    static synchronized int customMarkerDefaultColor() {
+        ensureLoaded(); return customMarkerDefaultColor;
+    }
+    static synchronized int customMarkerDefaultSize() {
+        ensureLoaded(); return customMarkerDefaultSize;
+    }
+    static synchronized boolean structureVisible(MapMarkerStore.StructurePreset preset) {
+        ensureLoaded();
+        return preset == null || STRUCTURE_VISIBLE.getOrDefault(preset, true);
     }
 
     static synchronized int requestBatchSize() {
@@ -118,6 +156,10 @@ final class MapUiSettings {
         return STRUCTURE_PRESET_LINE.getOrDefault(preset, preset.defaultLine);
     }
 
+    static synchronized int structurePresetColor(MapMarkerStore.StructurePreset preset) {
+        return structurePresetAccentColor(preset);
+    }
+
     static synchronized void setMarkerType(MarkerType next) {
         ensureLoaded();
         markerType = next == null ? MarkerType.ARROW : next;
@@ -157,6 +199,39 @@ final class MapUiSettings {
     static synchronized void setStructureLayerEnabled(boolean enabled) {
         ensureLoaded();
         structureLayerEnabled = enabled;
+        save();
+    }
+
+    static synchronized void setShowCoords(boolean value) { ensureLoaded(); showCoords = value; save(); }
+    static synchronized void setPlayerRing(boolean value) { ensureLoaded(); playerRing = value; save(); }
+    static synchronized void setLabels(boolean value) { ensureLoaded(); labels = value; save(); }
+    static synchronized void setGrid(boolean value) { ensureLoaded(); grid = value; save(); }
+    static synchronized void setDragMap(boolean value) { ensureLoaded(); dragMap = value; save(); }
+    static synchronized void setHideLabelsLowZoom(boolean value) { ensureLoaded(); hideLabelsLowZoom = value; save(); }
+    static synchronized void setAvoidLabels(boolean value) { ensureLoaded(); avoidLabels = value; save(); }
+    static synchronized void setMarkerScalePercent(int value) {
+        ensureLoaded(); markerScalePercent = Math.max(0, Math.min(100, value)); save();
+    }
+    static synchronized void setCustomMarkerDefaultIcon(MapMarkerStore.Icon icon) {
+        ensureLoaded(); if (icon != null) customMarkerDefaultIcon = icon; save();
+    }
+    static synchronized void setCustomMarkerDefaultColor(int rgb) {
+        ensureLoaded(); customMarkerDefaultColor = rgb & 0x00ffffff; save();
+    }
+    static synchronized void setCustomMarkerDefaultSize(int value) {
+        ensureLoaded(); customMarkerDefaultSize = Math.max(8, Math.min(32, value)); save();
+    }
+    static synchronized void setStructureVisible(
+            MapMarkerStore.StructurePreset preset, boolean visible) {
+        ensureLoaded(); if (preset == null) return;
+        STRUCTURE_VISIBLE.put(preset, visible); save();
+    }
+    static synchronized void setPlayerColor(int rgb) {
+        ensureLoaded();
+        int color = rgb & 0x00ffffff;
+        markerPrimaryColor = color;
+        markerColor = color;
+        markerLineColor = color;
         save();
     }
 
@@ -207,6 +282,17 @@ final class MapUiSettings {
         save();
     }
 
+    static synchronized void setStructurePresetColor(
+            MapMarkerStore.StructurePreset preset, int rgb) {
+        ensureLoaded();
+        if (preset == null) return;
+        int color = rgb & 0x00ffffff;
+        STRUCTURE_PRESET_PRIMARY.put(preset, color);
+        STRUCTURE_PRESET_ACCENT.put(preset, color);
+        STRUCTURE_PRESET_LINE.put(preset, color);
+        save();
+    }
+
     static synchronized void resetStructurePresets() {
         ensureLoaded();
         STRUCTURE_PRESET_ICONS.clear();
@@ -225,6 +311,13 @@ final class MapUiSettings {
         Properties props = new Properties();
         try (InputStream input = Files.newInputStream(path)) {
             props.load(input);
+            int schema;
+            try {
+                schema = Integer.parseInt(props.getProperty("schemaVersion", "-1"));
+            } catch (NumberFormatException invalid) {
+                return;
+            }
+            if (schema != SCHEMA_VERSION) return;
             try {
                 markerType = MarkerType.valueOf(
                         props.getProperty("markerType", MarkerType.ARROW.name()));
@@ -267,6 +360,42 @@ final class MapUiSettings {
                     props.getProperty("markerLayerEnabled", "true"));
             structureLayerEnabled = Boolean.parseBoolean(
                     props.getProperty("structureLayerEnabled", "true"));
+            showCoords = Boolean.parseBoolean(props.getProperty("showCoords", "true"));
+            playerRing = Boolean.parseBoolean(props.getProperty("playerRing", "true"));
+            labels = Boolean.parseBoolean(props.getProperty("labels", "true"));
+            grid = Boolean.parseBoolean(props.getProperty("grid", "false"));
+            dragMap = Boolean.parseBoolean(props.getProperty("dragMap", "true"));
+            hideLabelsLowZoom = Boolean.parseBoolean(
+                    props.getProperty("hideLabelsLowZoom", "true"));
+            avoidLabels = Boolean.parseBoolean(props.getProperty("avoidLabels", "true"));
+            try {
+                markerScalePercent = Math.max(0, Math.min(100,
+                        Integer.parseInt(props.getProperty(
+                                "markerScalePercent", Integer.toString(DEFAULT_MARKER_SCALE)))));
+            } catch (NumberFormatException ignored) {
+                markerScalePercent = DEFAULT_MARKER_SCALE;
+            }
+            try {
+                customMarkerDefaultIcon = MapMarkerStore.Icon.valueOf(
+                        props.getProperty("customMarkerDefaultIcon", MapMarkerStore.Icon.PIN.name()));
+            } catch (IllegalArgumentException ignored) {
+                customMarkerDefaultIcon = MapMarkerStore.Icon.PIN;
+            }
+            try {
+                customMarkerDefaultColor = Integer.parseInt(props.getProperty(
+                        "customMarkerDefaultColor", Integer.toString(DEFAULT_CUSTOM_MARKER_COLOR)))
+                        & 0x00ffffff;
+            } catch (NumberFormatException ignored) {
+                customMarkerDefaultColor = DEFAULT_CUSTOM_MARKER_COLOR;
+            }
+            try {
+                customMarkerDefaultSize = Math.max(8, Math.min(32,
+                        Integer.parseInt(props.getProperty(
+                                "customMarkerDefaultSize",
+                                Integer.toString(DEFAULT_CUSTOM_MARKER_SIZE)))));
+            } catch (NumberFormatException ignored) {
+                customMarkerDefaultSize = DEFAULT_CUSTOM_MARKER_SIZE;
+            }
             try {
                 requestBatchSize = Math.max(8, Math.min(256,
                         Integer.parseInt(props.getProperty(
@@ -281,29 +410,25 @@ final class MapUiSettings {
             } catch (NumberFormatException ignored) {
                 liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
             }
-            int presetVersion = 0;
-            try {
-                presetVersion = Integer.parseInt(
-                        props.getProperty("structurePresetVersion", "0"));
-            } catch (NumberFormatException ignored) {}
-            if (presetVersion >= STRUCTURE_PRESET_VERSION) {
-                for (MapMarkerStore.StructurePreset preset
-                        : MapMarkerStore.StructurePreset.values()) {
-                    String prefix = "structurePreset." + preset.name();
-                    String rawIcon = props.getProperty(prefix + ".icon");
-                    if (rawIcon != null && !rawIcon.isBlank()) {
-                        try {
-                            STRUCTURE_PRESET_ICONS.put(
-                                    preset, MapMarkerStore.Icon.valueOf(rawIcon));
-                        } catch (IllegalArgumentException ignored) {}
-                    }
-                    loadPresetColor(props, prefix + ".primary",
-                            STRUCTURE_PRESET_PRIMARY, preset);
-                    loadPresetColor(props, prefix + ".accent",
-                            STRUCTURE_PRESET_ACCENT, preset);
-                    loadPresetColor(props, prefix + ".line",
-                            STRUCTURE_PRESET_LINE, preset);
+            for (MapMarkerStore.StructurePreset preset
+                    : MapMarkerStore.StructurePreset.values()) {
+                String prefix = "structurePreset." + preset.name();
+                String rawIcon = props.getProperty(prefix + ".icon");
+                if (rawIcon != null && !rawIcon.isBlank()) {
+                    try {
+                        STRUCTURE_PRESET_ICONS.put(
+                                preset, MapMarkerStore.Icon.valueOf(rawIcon));
+                    } catch (IllegalArgumentException ignored) {}
                 }
+                loadPresetColor(props, prefix + ".primary",
+                        STRUCTURE_PRESET_PRIMARY, preset);
+                loadPresetColor(props, prefix + ".accent",
+                        STRUCTURE_PRESET_ACCENT, preset);
+                loadPresetColor(props, prefix + ".line",
+                        STRUCTURE_PRESET_LINE, preset);
+                STRUCTURE_VISIBLE.put(
+                        preset,
+                        Boolean.parseBoolean(props.getProperty(prefix + ".visible", "true")));
             }
         } catch (IOException ignored) {}
     }
@@ -321,6 +446,7 @@ final class MapUiSettings {
 
     private static void save() {
         Properties props = new Properties();
+        props.setProperty("schemaVersion", Integer.toString(SCHEMA_VERSION));
         props.setProperty("markerType", markerType.name());
         props.setProperty("markerPrimaryColor", Integer.toString(markerPrimaryColor));
         props.setProperty("markerColor", Integer.toString(markerColor));
@@ -328,11 +454,19 @@ final class MapUiSettings {
         props.setProperty("markerSize", Integer.toString(markerSize));
         props.setProperty("markerLayerEnabled", Boolean.toString(markerLayerEnabled));
         props.setProperty("structureLayerEnabled", Boolean.toString(structureLayerEnabled));
+        props.setProperty("showCoords", Boolean.toString(showCoords));
+        props.setProperty("playerRing", Boolean.toString(playerRing));
+        props.setProperty("labels", Boolean.toString(labels));
+        props.setProperty("grid", Boolean.toString(grid));
+        props.setProperty("dragMap", Boolean.toString(dragMap));
+        props.setProperty("hideLabelsLowZoom", Boolean.toString(hideLabelsLowZoom));
+        props.setProperty("avoidLabels", Boolean.toString(avoidLabels));
+        props.setProperty("markerScalePercent", Integer.toString(markerScalePercent));
+        props.setProperty("customMarkerDefaultIcon", customMarkerDefaultIcon.name());
+        props.setProperty("customMarkerDefaultColor", Integer.toString(customMarkerDefaultColor));
+        props.setProperty("customMarkerDefaultSize", Integer.toString(customMarkerDefaultSize));
         props.setProperty("requestBatchSize", Integer.toString(requestBatchSize));
         props.setProperty("liveScanIntervalTicks", Integer.toString(liveScanIntervalTicks));
-        props.setProperty(
-                "structurePresetVersion",
-                Integer.toString(STRUCTURE_PRESET_VERSION));
         for (MapMarkerStore.StructurePreset preset
                 : MapMarkerStore.StructurePreset.values()) {
             String prefix = "structurePreset." + preset.name();
@@ -343,6 +477,8 @@ final class MapUiSettings {
                     Integer.toString(structurePresetAccentColor(preset)));
             props.setProperty(prefix + ".line",
                     Integer.toString(structurePresetLineColor(preset)));
+            props.setProperty(prefix + ".visible",
+                    Boolean.toString(structureVisible(preset)));
         }
 
         Path path = path();

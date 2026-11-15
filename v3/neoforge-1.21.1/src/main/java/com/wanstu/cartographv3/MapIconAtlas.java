@@ -11,6 +11,9 @@ final class MapIconAtlas {
 
     enum UiIcon {
         MENU("menu"),
+        MAP("map"),
+        ABOUT("about"),
+        COPY("copy"),
         MARKERS("markers"),
         LAYERS("layers"),
         SETTINGS("settings"),

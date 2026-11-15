@@ -33,6 +33,10 @@ public final class CartographV3Client {
         return OPEN.matches(keyCode, scanCode);
     }
 
+    static String openKeyLabel() {
+        return OPEN.getTranslatedKeyMessage().getString();
+    }
+
     private static void tick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         MapClientCache.ensureWorld(mc.level);

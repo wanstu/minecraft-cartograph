@@ -16,7 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class MapMarkerStore {
-    private static final int STORE_SCHEMA = 1;
+    private static final int STORE_SCHEMA = 3;
     static final int DEFAULT_PRIMARY_COLOR = 0xe8eef5;
     static final int DEFAULT_ACCENT_COLOR = 0xf2bd45;
     static final int DEFAULT_LINE_COLOR = 0xb8c3cc;
@@ -24,28 +24,27 @@ final class MapMarkerStore {
     enum Origin { CUSTOM, AUTO }
 
     enum StructurePreset {
-        VILLAGE("村庄", Icon.VILLAGE, 0xfff1cf, 0xdba637, 0x765d2c),
-        MANSION("林地府邸", Icon.MANSION, 0xe7e0d6, 0x765844, 0x40352f),
-        DESERT_PYRAMID("沙漠神殿", Icon.TEMPLE, 0xffefbf, 0xd8a238, 0x816126),
-        JUNGLE_PYRAMID("丛林神庙", Icon.TEMPLE, 0xe5f0d5, 0x668e3d, 0x3b5128),
-        SWAMP_HUT("沼泽小屋", Icon.HOME, 0xe2e0d1, 0x6f7654, 0x414632),
-        IGLOO("雪屋", Icon.HOME, 0xf1f6fb, 0xa8c8df, 0x5f7483),
-        OCEAN_MONUMENT("海底神殿", Icon.TEMPLE, 0xd9f1ee, 0x4d9d9a, 0x315f62),
-        OUTPOST("掠夺者前哨站", Icon.OUTPOST, 0xe8e1d7, 0x8a6951, 0x463831),
-        MINESHAFT("废弃矿井", Icon.MINE, 0xdce1e6, 0xa97843, 0x44494e),
-        RUINED_PORTAL("废弃传送门", Icon.PORTAL, 0xeee6ff, 0x8151d2, 0x4a326d),
-        SHIPWRECK("沉船", Icon.SHIP, 0xe1f0f7, 0x3f87a4, 0x35525f),
-        OCEAN_RUIN("海底废墟", Icon.WATER, 0xd9f1f2, 0x368ea3, 0x2c5964),
-        BURIED_TREASURE("埋藏的宝藏", Icon.STAR, 0xfff3c9, 0xd9a634, 0x715524),
-        TRAIL_RUINS("古迹废墟", Icon.TEMPLE, 0xe9dfcf, 0x9b7557, 0x594536),
-        TRIAL_CHAMBERS("试炼密室", Icon.TEMPLE, 0xe6e6e1, 0xa96c43, 0x5c4437),
-        ANCIENT_CITY("远古城市", Icon.CITY, 0xdbe7e6, 0x477b78, 0x2c4d4b),
-        STRONGHOLD("要塞", Icon.FORTRESS, 0xe6e1d8, 0x7f7567, 0x49443d),
-        NETHER_FORTRESS("下界要塞", Icon.FORTRESS, 0xf0d6d1, 0x9d3f38, 0x572a28),
-        BASTION("堡垒遗迹", Icon.FORTRESS, 0xe6d6cb, 0x70564a, 0x3f322d),
-        NETHER_FOSSIL("下界化石", Icon.CAVE, 0xeee4d6, 0xb99f7a, 0x66584a),
-        END_CITY("末地城", Icon.CITY, 0xeee7f5, 0xa378b5, 0x5d4965),
-        OTHER("其他结构", Icon.STAR, 0xfff2c7, 0xe4b13c, 0x735a24);
+        VILLAGE("村庄", Icon.VILLAGE, 0xf4c84f, 0xf4c84f, 0xf4c84f),
+        MANSION("林地府邸", Icon.MANSION, 0xe7d7c0, 0xe7d7c0, 0xe7d7c0),
+        DESERT_PYRAMID("沙漠神殿", Icon.DESERT_PYRAMID, 0xddb85e, 0xddb85e, 0xddb85e),
+        JUNGLE_PYRAMID("丛林神庙", Icon.JUNGLE_TEMPLE, 0x8fcb73, 0x8fcb73, 0x8fcb73),
+        SWAMP_HUT("沼泽小屋", Icon.SWAMP_HUT, 0xa6b17f, 0xa6b17f, 0xa6b17f),
+        IGLOO("雪屋", Icon.IGLOO, 0xedf4f6, 0xedf4f6, 0xedf4f6),
+        OCEAN_MONUMENT("海底神殿", Icon.OCEAN_MONUMENT, 0x70c7ce, 0x70c7ce, 0x70c7ce),
+        OUTPOST("掠夺者前哨站", Icon.OUTPOST, 0xc89a76, 0xc89a76, 0xc89a76),
+        MINESHAFT("废弃矿井", Icon.MINE, 0xc08a55, 0xc08a55, 0xc08a55),
+        RUINED_PORTAL("废弃传送门", Icon.RUINED_PORTAL, 0xa77ce8, 0xa77ce8, 0xa77ce8),
+        SHIPWRECK("沉船", Icon.SHIPWRECK, 0x6eb5d1, 0x6eb5d1, 0x6eb5d1),
+        OCEAN_RUIN("海底废墟", Icon.OCEAN_RUIN, 0x64c0d3, 0x64c0d3, 0x64c0d3),
+        BURIED_TREASURE("埋藏的宝藏", Icon.BURIED_TREASURE, 0xf3d66a, 0xf3d66a, 0xf3d66a),
+        TRAIL_RUINS("古迹废墟", Icon.TRAIL_RUINS, 0xba9673, 0xba9673, 0xba9673),
+        TRIAL_CHAMBERS("试炼密室", Icon.TRIAL_CHAMBERS, 0xd6a06a, 0xd6a06a, 0xd6a06a),
+        ANCIENT_CITY("远古城市", Icon.ANCIENT_CITY, 0x6daba8, 0x6daba8, 0x6daba8),
+        STRONGHOLD("要塞", Icon.STRONGHOLD, 0xb7ada0, 0xb7ada0, 0xb7ada0),
+        NETHER_FORTRESS("下界要塞", Icon.NETHER_FORTRESS, 0xb8554e, 0xb8554e, 0xb8554e),
+        BASTION("堡垒遗迹", Icon.BASTION_REMNANT, 0x84695a, 0x84695a, 0x84695a),
+        NETHER_FOSSIL("下界化石", Icon.NETHER_FOSSIL, 0xd7c2a3, 0xd7c2a3, 0xd7c2a3),
+        END_CITY("末地城", Icon.END_CITY, 0xc7a3d5, 0xc7a3d5, 0xc7a3d5);
 
         final String label;
         final Icon defaultIcon;
@@ -68,6 +67,23 @@ final class MapMarkerStore {
         PIN("标点"),
         VILLAGE("村庄"),
         MANSION("林地府邸"),
+        DESERT_PYRAMID("沙漠神殿"),
+        JUNGLE_TEMPLE("丛林神庙"),
+        SWAMP_HUT("沼泽小屋"),
+        IGLOO("雪屋"),
+        OCEAN_MONUMENT("海底神殿"),
+        RUINED_PORTAL("废弃传送门"),
+        SHIPWRECK("沉船"),
+        OCEAN_RUIN("海底废墟"),
+        BURIED_TREASURE("埋藏的宝藏"),
+        TRAIL_RUINS("古迹废墟"),
+        TRIAL_CHAMBERS("试炼密室"),
+        ANCIENT_CITY("远古城市"),
+        STRONGHOLD("要塞"),
+        NETHER_FORTRESS("下界要塞"),
+        BASTION_REMNANT("堡垒遗迹"),
+        NETHER_FOSSIL("下界化石"),
+        END_CITY("末地城"),
         TEMPLE("神殿"),
         OUTPOST("前哨站"),
         MINE("矿井"),
@@ -117,6 +133,7 @@ final class MapMarkerStore {
         String id;
         String dimension;
         int x;
+        int y;
         int z;
         String name;
         Icon icon;
@@ -129,12 +146,14 @@ final class MapMarkerStore {
         String structureId;
         boolean modifiedAuto;
         boolean deleted;
+        long deletedAt;
 
         Marker copy() {
             Marker next = new Marker();
             next.id = id;
             next.dimension = dimension;
             next.x = x;
+            next.y = y;
             next.z = z;
             next.name = name;
             next.icon = icon;
@@ -147,6 +166,7 @@ final class MapMarkerStore {
             next.structureId = structureId;
             next.modifiedAuto = modifiedAuto;
             next.deleted = deleted;
+            next.deletedAt = deletedAt;
             return next;
         }
 
@@ -218,7 +238,7 @@ final class MapMarkerStore {
     }
 
     static synchronized Marker createCustom(
-            String dimension, int x, int z,
+            String dimension, int x, int y, int z,
             String name, Icon icon,
             int primaryColor, int accentColor, int lineColor,
             String description) {
@@ -227,6 +247,7 @@ final class MapMarkerStore {
         marker.id = id.toString();
         marker.dimension = dimension;
         marker.x = x;
+        marker.y = y;
         marker.z = z;
         marker.name = normalizeName(name, "标点");
         marker.icon = icon == null ? Icon.PIN : icon;
@@ -239,6 +260,7 @@ final class MapMarkerStore {
         marker.structureId = null;
         marker.modifiedAuto = false;
         marker.deleted = false;
+        marker.deletedAt = 0L;
         MARKERS.put(id, marker);
         saveAsync();
         return marker.copy();
@@ -291,6 +313,7 @@ final class MapMarkerStore {
             marker.id = id.toString();
             marker.dimension = dimension;
             marker.x = hit.x();
+            marker.y = 64;
             marker.z = hit.z();
             marker.name = defaultStructureName(hit.structureId());
             marker.icon = defaultStructureIcon(hit.structureId());
@@ -303,6 +326,7 @@ final class MapMarkerStore {
             marker.structureId = hit.structureId();
             marker.modifiedAuto = false;
             marker.deleted = false;
+            marker.deletedAt = 0L;
             MARKERS.put(id, marker);
             AUTO_INDEX.put(autoKey, id);
             changed = true;
@@ -336,12 +360,38 @@ final class MapMarkerStore {
         return recycle(true);
     }
 
+    static synchronized List<Marker> recycleAll() {
+        List<Marker> out = new ArrayList<>();
+        for (Marker marker : MARKERS.values()) {
+            if (marker.deleted) out.add(marker.copy());
+        }
+        out.sort(Comparator.comparingLong((Marker m) -> m.deletedAt).reversed());
+        return out;
+    }
+
+    static synchronized int recycleCount() {
+        int count = 0;
+        for (Marker marker : MARKERS.values()) if (marker.deleted) count++;
+        return count;
+    }
+
+    static synchronized void clearRecycle() {
+        Iterator<Map.Entry<UUID, Marker>> iterator = MARKERS.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Marker marker = iterator.next().getValue();
+            if (!marker.deleted) continue;
+            if (marker.autoKey != null) AUTO_INDEX.remove(marker.autoKey);
+            iterator.remove();
+        }
+        saveAsync();
+    }
+
     private static List<Marker> recycle(boolean auto) {
         List<Marker> out = new ArrayList<>();
         for (Marker marker : MARKERS.values()) {
             if (marker.deleted && marker.isAuto() == auto) out.add(marker.copy());
         }
-        out.sort(Comparator.comparing(m -> m.name, String.CASE_INSENSITIVE_ORDER));
+        out.sort(Comparator.comparingLong((Marker m) -> m.deletedAt).reversed());
         return out;
     }
 
@@ -351,11 +401,15 @@ final class MapMarkerStore {
     }
 
     static synchronized void update(
-            UUID id, String name, Icon icon,
+            UUID id, int x, int y, int z,
+            String name, Icon icon,
             int primaryColor, int accentColor, int lineColor,
             String description) {
         Marker marker = MARKERS.get(id);
         if (marker == null) return;
+        marker.x = x;
+        marker.y = y;
+        marker.z = z;
         marker.name = normalizeName(name, marker.name);
         marker.icon = icon == null ? marker.icon : icon;
         marker.primaryColor = primaryColor & 0x00ffffff;
@@ -364,6 +418,7 @@ final class MapMarkerStore {
         marker.description = normalizeDescription(description);
         if (marker.origin == Origin.AUTO) marker.modifiedAuto = true;
         marker.deleted = false;
+        marker.deletedAt = 0L;
         saveAsync();
     }
 
@@ -371,6 +426,8 @@ final class MapMarkerStore {
         Marker marker = MARKERS.get(id);
         if (marker == null) return;
         marker.deleted = true;
+        marker.deletedAt = System.currentTimeMillis();
+        enforceRecycleLimit();
         saveAsync();
     }
 
@@ -378,6 +435,7 @@ final class MapMarkerStore {
         Marker marker = MARKERS.get(id);
         if (marker == null) return;
         marker.deleted = false;
+        marker.deletedAt = 0L;
         saveAsync();
     }
 
@@ -392,13 +450,30 @@ final class MapMarkerStore {
         marker.description = defaultStructureDescription(marker.structureId);
         marker.modifiedAuto = false;
         marker.deleted = false;
+        marker.deletedAt = 0L;
         saveAsync();
+    }
+
+    private static void enforceRecycleLimit() {
+        List<Map.Entry<UUID, Marker>> deleted = MARKERS.entrySet().stream()
+                .filter(entry -> entry.getValue().deleted)
+                .sorted(Comparator.comparingLong(entry -> entry.getValue().deletedAt))
+                .toList();
+        int remove = deleted.size() - 100;
+        for (int i = 0; i < remove; i++) {
+            Map.Entry<UUID, Marker> entry = deleted.get(i);
+            Marker marker = entry.getValue();
+            if (marker.autoKey != null) AUTO_INDEX.remove(marker.autoKey);
+            MARKERS.remove(entry.getKey());
+        }
     }
 
     private static boolean valid(Marker marker) {
         if (marker == null || marker.id == null || marker.dimension == null || marker.origin == null) return false;
         try { UUID.fromString(marker.id); } catch (IllegalArgumentException invalid) { return false; }
         if (marker.icon == null) return false;
+        if (marker.deleted && marker.deletedAt <= 0L) return false;
+        if (!marker.deleted) marker.deletedAt = 0L;
         marker.primaryColor &= 0x00ffffff;
         marker.accentColor &= 0x00ffffff;
         marker.lineColor &= 0x00ffffff;
@@ -494,7 +569,7 @@ final class MapMarkerStore {
         if (path.contains("bastion")) return StructurePreset.BASTION;
         if (path.contains("nether_fossil")) return StructurePreset.NETHER_FOSSIL;
         if (path.contains("end_city")) return StructurePreset.END_CITY;
-        return StructurePreset.OTHER;
+        return null;
     }
 
     static Icon defaultStructureIcon(String id) {
