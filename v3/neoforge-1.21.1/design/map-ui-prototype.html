@@ -32,18 +32,11 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .map-stage.dragging{cursor:grabbing}
 .world-wrap{position:absolute;left:50%;top:50%;width:1800px;height:1100px;transform-origin:50% 50%;transform:translate(-50%,-50%) scale(1)}
 .world{width:100%;height:100%;display:block}
-.world .satellite,.world .modern,.world .ancient{display:none}
-.app[data-style="satellite"] .world .satellite{display:inline}
-.app[data-style="modern"] .world .modern{display:inline}
-.app[data-style="ancient"] .world .ancient{display:inline}
+.world .satellite{display:inline}
 .app[data-style="satellite"] .map-stage{background:#17383c}
-.app[data-style="modern"] .map-stage{background:#d9d4bd}
-.app[data-style="ancient"] .map-stage{background:#b99f6b}
 .map-grid{position:absolute;inset:0;pointer-events:none;opacity:.16;background-image:linear-gradient(90deg,#e4edf01c 1px,transparent 1px),linear-gradient(#e4edf01c 1px,transparent 1px);background-size:256px 256px}
 .app:not([data-grid="on"]) .map-grid{display:none}
 .map-shade{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 58%,#0610153f 100%)}
-.app[data-style="modern"] .map-shade{background:radial-gradient(circle at center,transparent 62%,#8d846427 100%)}
-.app[data-style="ancient"] .map-shade{background:radial-gradient(circle at center,transparent 55%,#5d452f55 100%)}
 
 .marker-layer{position:absolute;inset:0;pointer-events:none}
 .map-marker{position:absolute;z-index:12;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;pointer-events:auto;cursor:pointer;color:white}
@@ -53,8 +46,6 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .app[data-labels="off"] .marker-label{display:none}
 .app[data-structures="off"] .map-marker.structure{display:none}
 .app[data-custom="off"] .map-marker.custom{display:none}
-.app[data-style="modern"] .map-marker.structure,.app[data-style="ancient"] .map-marker.structure{color:#26353b}
-.app[data-style="ancient"] .map-marker.structure{color:#3a2b22}.app[data-style="ancient"] .map-marker .marker-label{background:#d4bd8fe8;color:#2c2119;border-color:#5b4938}
 
 .player{position:absolute;z-index:20;left:50%;top:51%;color:#ffe14e;transform:translate(-50%,-50%) rotate(28deg);filter:drop-shadow(0 2px 2px #000c);pointer-events:none}
 .player .icon{width:30px;height:30px}
@@ -62,18 +53,18 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .app[data-player-ring="off"] .player-ring{display:none}
 
 .floating-panel,.modal,.context-menu{background:linear-gradient(180deg,#182228f8,#151e23f7);border:1px solid #53616a;box-shadow:var(--shadow);backdrop-filter:blur(8px);border-radius:8px;color:var(--text)}
-.floating-panel{position:absolute;z-index:40;top:84px}
+.floating-panel{position:absolute;z-index:40;top:18px}
 .panel-head,.modal-head{height:50px;padding:0 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #43505a;font-weight:700;font-size:16px}
 .panel-head .icon,.modal-head .icon{width:22px;height:22px}.panel-head .spacer,.modal-head .spacer{flex:1}
 .close-btn{width:30px;height:30px;background:transparent;display:grid;place-items:center;cursor:pointer;color:#e2e7ea}.close-btn:hover{background:#ffffff0d;border-radius:4px}.close-btn .icon{width:18px;height:18px}
-.layers-panel{left:16px;width:300px;display:none}
+.layers-panel{left:16px;width:300px;display:none;max-height:calc(100vh - var(--header) - 36px);overflow:hidden}
 .markers-panel{left:16px;width:345px;display:none;max-height:calc(100vh - 130px)}
-.panel-body{padding:12px}
+.panel-body{padding:12px}.layers-panel .panel-body{max-height:calc(100vh - var(--header) - 86px);overflow:auto;scrollbar-gutter:stable}
 .panel-section-title{font-size:12px;color:#98a4ab;margin:3px 0 8px}
 .layer-row{min-height:39px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #ffffff0a}
 .layer-row.indent{padding-left:28px}.layer-row .name{flex:1}.count{font-size:12px;color:#98a4ab}
 .checkbox{width:19px;height:19px;border:1px solid #7c8991;border-radius:4px;display:grid;place-items:center;cursor:pointer;background:#10171b}
-.checkbox.on{background:var(--accent);border-color:#e7bd42;color:#1a1d1f}.checkbox .icon{width:13px;height:13px;stroke-width:2.6}
+.checkbox.on{background:var(--accent);border-color:#e7bd42;color:#1a1d1f}.checkbox .icon{width:13px;height:13px;stroke-width:2.6}.checkbox:not(.on) .icon{opacity:0}
 .layer-icon{width:21px;height:21px}
 .expand{width:26px;height:26px;background:transparent;display:grid;place-items:center;cursor:pointer}.expand .icon{width:15px;height:15px;transition:.15s}.expanded .expand .icon{transform:rotate(180deg)}
 .structure-children{display:block}.layer-group:not(.expanded) .structure-children{display:none}
@@ -96,8 +87,8 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .ctx-item{height:39px;padding:0 9px;display:flex;align-items:center;gap:10px;border-radius:5px;cursor:pointer;font-size:14px}.ctx-item:hover{background:#ffffff0d}.ctx-item.disabled{opacity:.4;pointer-events:none}.ctx-item.danger{color:#f08b85}.ctx-item .icon{width:19px;height:19px}.ctx-sep{height:1px;background:#43505a;margin:5px 7px}.ctx-meta{padding:7px 9px 4px;color:#aeb7bc;font-size:12px;display:flex;align-items:center;gap:8px}.ctx-meta .icon{width:16px;height:16px}
 
 .overlay{position:absolute;z-index:60;inset:var(--header) 0 0;background:#05080b4f;display:none}
-.modal{position:absolute;z-index:70;left:50%;top:50%;transform:translate(-50%,-50%);display:none}
-.settings-modal{width:min(1030px,94vw);height:min(710px,89vh)}
+.modal{position:absolute;z-index:70;left:50%;top:calc(var(--header) + (100vh - var(--header))/2);transform:translate(-50%,-50%);display:none;max-height:calc(100vh - var(--header) - 20px)}
+.settings-modal{width:min(1030px,94vw);height:min(710px,calc(100vh - var(--header) - 20px))}
 .modal-head{height:54px;font-size:18px;background:#172127f7}
 .settings-layout{display:grid;grid-template-columns:190px 1fr;height:calc(100% - 54px)}
 .settings-nav{padding:13px 10px;background:#11191ed6;border-right:1px solid #3f4c55}
@@ -124,7 +115,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .shortcut{display:flex;align-items:center;justify-content:space-between}.key{padding:5px 10px;border:1px solid #56636c;border-bottom-width:2px;border-radius:5px;background:#202a31;color:#edf1f3;font-family:Consolas,monospace;font-size:12px}
 .advanced-warning{padding:10px 12px;border:1px solid #776d43;background:#332f1f;border-radius:6px;color:#e8d9a2;font-size:12px;line-height:1.6}
 
-.editor-modal{width:min(620px,90vw)}
+.editor-modal{width:min(620px,90vw);max-height:calc(100vh - var(--header) - 20px);overflow:auto}
 .editor-body{padding:16px 18px 18px}.editor-grid{display:grid;grid-template-columns:85px 1fr;gap:11px 13px;align-items:center}.editor-grid input[type=text],.editor-grid textarea{width:100%;border:1px solid #4a5861;background:#202a31;color:#eef2f4;border-radius:5px;padding:8px 10px}.editor-grid input[type=text]{height:36px}.editor-grid textarea{height:88px;resize:none}.editor-actions{margin-top:16px;display:flex;gap:8px}.editor-actions .spacer{flex:1}
 
 .toast{position:absolute;z-index:100;left:50%;bottom:30px;transform:translate(-50%,15px);opacity:0;background:#162026f2;border:1px solid #596771;border-radius:6px;padding:9px 14px;box-shadow:0 10px 30px #0007;transition:.18s;pointer-events:none}.toast.show{opacity:1;transform:translate(-50%,0)}
@@ -134,6 +125,36 @@ svg.icon.solid{fill:currentColor;stroke:none}
   .location-info{display:none}.nav-btn{min-width:70px;padding-inline:9px}.settings-layout{grid-template-columns:150px 1fr}.settings-nav-item{padding-inline:8px}
   .form-row{grid-template-columns:125px 1fr 72px}.performance-line{grid-template-columns:125px 1fr 80px}.performance-help{margin-left:139px}.structure-head,.structure-row{grid-template-columns:125px 1fr 70px}
 }
+
+/* usability pass */
+.settings-main{overflow:auto;scrollbar-gutter:stable}
+.settings-footer{position:sticky;bottom:-18px;background:#151e23f7;z-index:5}
+.style-card.disabled{opacity:.48;cursor:not-allowed;position:relative;filter:saturate(.55)}
+.style-card.disabled:hover{border-color:#44525b;box-shadow:none}
+.coming-badge{position:absolute;right:7px;top:7px;padding:3px 7px;border-radius:10px;background:#11191ed9;border:1px solid #59666e;color:#c7cfd3;font-size:10px;z-index:2}
+.dropdown{position:fixed;z-index:120;min-width:190px;max-height:280px;overflow:auto;padding:5px;background:#172126f8;border:1px solid #56646e;border-radius:6px;box-shadow:0 16px 44px #000a;display:none}
+.dropdown.open{display:block}
+.dropdown-item{height:36px;padding:0 10px;border-radius:4px;display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13px}
+.dropdown-item:hover,.dropdown-item.active{background:#ffffff0e}
+.dropdown-item .icon{width:18px;height:18px}
+.editor-icon-select{cursor:pointer}
+.marker-description{color:#839099;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.about-modal{width:min(520px,88vw)}
+.about-body{padding:20px}
+.about-brand{display:flex;gap:13px;align-items:center;margin-bottom:16px}.about-brand .icon{width:38px;height:38px}
+.about-name{font-size:20px;font-weight:700}.about-version{font-size:12px;color:#8f9ba2;margin-top:3px}
+.about-grid{display:grid;grid-template-columns:120px 1fr;gap:8px 12px;padding:13px 0;border-top:1px solid #3f4b54;border-bottom:1px solid #3f4b54;font-size:13px}
+.about-grid .k{color:#8e9aa1}
+.about-note{font-size:12px;line-height:1.7;color:#a3adb3;margin-top:14px}
+.debug-hud{position:absolute;z-index:34;right:18px;top:78px;background:#11191ee8;border:1px solid #4c5a63;border-radius:6px;padding:9px 11px;font:11px/1.6 Consolas,monospace;color:#b9d3c2;display:none;pointer-events:none}
+.app[data-debug="on"] .debug-hud{display:block}
+.app[data-coords="off"] .coord-box,.app[data-coords="off"] .location-info{display:none}
+.readonly-field{opacity:.86;cursor:default}
+.notice-inline{display:flex;align-items:center;gap:8px;font-size:12px;color:#95a1a8;margin-top:9px}
+.notice-inline .icon{width:15px;height:15px}
+.marker-empty{padding:26px 12px;text-align:center;color:#849199;font-size:12px}
+kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f8 inset}
+
 </style>
 </head>
 <body>
@@ -207,12 +228,6 @@ svg.icon.solid{fill:currentColor;stroke:none}
           <pattern id="satRock" width="28" height="28" patternUnits="userSpaceOnUse">
             <path d="M3 22L10 7l6 11 5-9 5 13z" fill="#778084"/><path d="M10 7l3 5 3-4 3 6" fill="none" stroke="#d8dfe1" stroke-width="2"/>
           </pattern>
-          <pattern id="modernTrees" width="70" height="60" patternUnits="userSpaceOnUse">
-            <path d="M18 42v8M18 18l-12 22h24L18 18zM48 45v7M48 23l-10 19h20L48 23z" fill="none" stroke="#526b53" stroke-width="3"/>
-          </pattern>
-          <pattern id="ancientTrees" width="76" height="64" patternUnits="userSpaceOnUse">
-            <path d="M20 48v7M20 18c-8 8-12 15-12 22h24c0-7-4-14-12-22zM50 50v6M50 25c-7 7-10 13-10 19h20c0-6-3-12-10-19z" fill="none" stroke="#5a432c" stroke-width="2.6"/>
-          </pattern>
         </defs>
 
         <g class="satellite">
@@ -232,34 +247,9 @@ svg.icon.solid{fill:currentColor;stroke:none}
           <g fill="#994d36" opacity=".85"><rect x="540" y="322" width="62" height="44"/><rect x="630" y="350" width="54" height="39"/><rect x="730" y="315" width="44" height="32"/></g>
         </g>
 
-        <g class="modern">
-          <rect width="1800" height="1100" fill="#ddd9c6"/>
-          <path d="M-60 790c250-70 330-135 490-180 155-44 285 32 425 62 185 40 292-86 430-73 182 18 286 129 600 27v520H-60z" fill="#9bcbd0" stroke="#5f8990" stroke-width="4"/>
-          <path d="M90-30c68 172 120 255 260 292 173 46 253-66 410-23 135 37 172 158 316 148 134-10 192-102 340-79 124 19 214 86 340 83" fill="none" stroke="#5f8990" stroke-width="70"/>
-          <path d="M0 0h780v540H0zM1100 80h700v470h-700zM200 510h720v430H200z" fill="url(#modernTrees)" opacity=".82"/>
-          <g fill="none" stroke="#5b6561" stroke-width="5">
-            <path d="M160 210l80-145 72 110 64-95 105 165M220 250l92-165 70 125"/>
-            <path d="M1110 220l95-170 82 125 72-110 110 180M1190 250l97-170 78 122"/>
-            <path d="M840 540l58-94 55 88 45-70 70 110"/>
-          </g>
-          <g fill="#b0c88f" stroke="#6c805f" stroke-width="3"><path d="M410 690c110-100 275-118 420-53 115 50 140 183 37 258-108 78-305 83-433 0-78-51-90-145-24-205z"/><path d="M1290 610c120-73 248-62 348 23 71 59 78 162 10 226-99 93-295 93-389 8-83-76-65-199 31-257z"/></g>
-          <g font-family="serif" font-size="34" fill="#53605d"><text x="225" y="270">北岭山脉</text><text x="610" y="210">常青林</text><text x="1170" y="285">雪岭</text><text x="1360" y="885">南部密林</text><text x="540" y="850">丘陵草原</text></g>
-        </g>
 
-        <g class="ancient">
-          <rect width="1800" height="1100" fill="#c9ad78"/>
-          <path d="M-60 790c250-70 330-135 490-180 155-44 285 32 425 62 185 40 292-86 430-73 182 18 286 129 600 27v520H-60z" fill="#a6bac1" stroke="#5a4733" stroke-width="5"/>
-          <path d="M90-30c68 172 120 255 260 292 173 46 253-66 410-23 135 37 172 158 316 148 134-10 192-102 340-79 124 19 214 86 340 83" fill="none" stroke="#657e84" stroke-width="60"/>
-          <path d="M0 0h780v540H0zM1100 80h700v470h-700zM200 510h720v430H200z" fill="url(#ancientTrees)" opacity=".72"/>
-          <g fill="none" stroke="#5a432c" stroke-width="4">
-            <path d="M165 240l75-148 70 118 63-101 92 145M220 265l90-166 72 125"/>
-            <path d="M1110 245l94-172 81 126 68-111 103 178M1180 265l100-176 77 126"/>
-            <path d="M830 575l66-105 59 93 47-76 75 118"/>
-          </g>
-          <g fill="none" stroke="#6b5439" stroke-width="3"><path d="M400 680c120-87 282-98 423-35 119 54 143 173 43 244-108 77-293 80-425 11-93-49-106-148-41-220z"/><path d="M1270 615c126-68 263-55 360 26 77 64 80 160 9 221-102 88-286 90-381 13-88-72-75-196 12-260z"/></g>
-          <g font-family="KaiTi,STKaiti,serif" font-size="40" fill="#4a3725"><text x="205" y="300">北岭</text><text x="615" y="220">苍林</text><text x="1170" y="305">雪山</text><text x="1370" y="890">南林</text><text x="515" y="865">丘原</text></g>
-          <g stroke="#7a6040" stroke-width="2" opacity=".55"><path d="M0 1020h1800M0 1030h1800M0 1040h1800"/></g>
-        </g>
+
+
       </svg>
     </div>
 
@@ -283,11 +273,11 @@ svg.icon.solid{fill:currentColor;stroke:none}
         <div class="layer-group expanded" id="structureGroup">
           <div class="layer-row"><div class="checkbox on" data-toggle="structures"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-temple"/></svg><div class="name">自然结构</div><div class="count">86</div><button class="expand" id="structureExpand"><svg class="icon"><use href="#i-chevron"/></svg></button></div>
           <div class="structure-children">
-            <div class="layer-row indent"><div class="checkbox on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-village"/></svg><div class="name">村庄</div><div class="count">9</div></div>
-            <div class="layer-row indent"><div class="checkbox on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-mansion"/></svg><div class="name">林地府邸</div><div class="count">1</div></div>
-            <div class="layer-row indent"><div class="checkbox on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-temple"/></svg><div class="name">神殿 / 遗迹</div><div class="count">8</div></div>
-            <div class="layer-row indent"><div class="checkbox on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-mine"/></svg><div class="name">矿井 / 地下结构</div><div class="count">14</div></div>
-            <div class="layer-row indent"><div class="checkbox"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-city"/></svg><div class="name">其他结构</div><div class="count">54</div></div>
+            <div class="layer-row indent"><div class="checkbox on" data-structure-filter="village"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-village"/></svg><div class="name">村庄</div><div class="count">9</div></div>
+            <div class="layer-row indent"><div class="checkbox on" data-structure-filter="mansion"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-mansion"/></svg><div class="name">林地府邸</div><div class="count">1</div></div>
+            <div class="layer-row indent"><div class="checkbox on" data-structure-filter="temple"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-temple"/></svg><div class="name">神殿 / 遗迹</div><div class="count">8</div></div>
+            <div class="layer-row indent"><div class="checkbox on" data-structure-filter="mine"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-mine"/></svg><div class="name">矿井 / 地下结构</div><div class="count">14</div></div>
+            <div class="layer-row indent"><div class="checkbox" data-structure-filter="other"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-city"/></svg><div class="name">其他结构</div><div class="count">54</div></div>
           </div>
         </div>
         <div class="layer-row"><div class="checkbox on" data-toggle="labels"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-info"/></svg><div class="name">名称标签</div></div>
@@ -312,13 +302,12 @@ svg.icon.solid{fill:currentColor;stroke:none}
 
     <div class="context-menu" id="mapContext">
       <div class="ctx-item" id="ctxAdd"><svg class="icon"><use href="#i-pin"/></svg>添加标点…</div>
-      <div class="ctx-item"><svg class="icon"><use href="#i-teleport"/></svg>传送至此</div>
+      <div class="ctx-item" id="ctxTeleport"><svg class="icon"><use href="#i-teleport"/></svg>传送至此</div>
       <div class="ctx-item" id="ctxCopy"><svg class="icon"><use href="#i-copy"/></svg>复制坐标</div>
-      <div class="ctx-item"><svg class="icon"><use href="#i-frame"/></svg>框选区域…</div>
       <div class="ctx-sep"></div><div class="ctx-meta"><svg class="icon"><use href="#i-info"/></svg><span>X 1254, Z -376</span></div>
     </div>
     <div class="context-menu" id="markerContext">
-      <div class="ctx-item"><svg class="icon"><use href="#i-teleport"/></svg>传送</div>
+      <div class="ctx-item" id="markerTeleport"><svg class="icon"><use href="#i-teleport"/></svg>传送</div>
       <div class="ctx-item" id="ctxEdit"><svg class="icon"><use href="#i-edit"/></svg>编辑</div>
       <div class="ctx-item danger" id="ctxDelete"><svg class="icon"><use href="#i-trash"/></svg>删除</div>
       <div class="ctx-sep"></div><div class="ctx-meta"><svg class="icon"><use href="#i-info"/></svg><span id="markerContextMeta">标点</span></div>
@@ -328,7 +317,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
   <div class="overlay" id="overlay"></div>
 
   <div class="modal settings-modal" id="settingsModal">
-    <div class="modal-head"><svg class="icon"><use href="#i-settings"/></svg>设置<div class="spacer"></div><button class="close-btn" data-modal-close><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="modal-head"><svg class="icon"><use href="#i-settings"/></svg>设置<span id="settingsDirty" class="small" style="display:none;color:#e5c66e;margin-left:6px">● 有未应用更改</span><div class="spacer"></div><button class="close-btn" data-modal-close><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div class="settings-layout">
       <aside class="settings-nav">
         <div class="settings-nav-item active" data-page="general"><svg class="icon"><use href="#i-settings"/></svg>通用</div>
@@ -346,10 +335,10 @@ svg.icon.solid{fill:currentColor;stroke:none}
           <div class="subpage" data-subpage="interface">
             <div class="card">
               <div class="card-title">界面</div>
-              <div class="form-row"><div class="label">显示坐标与生物群系</div><div></div><div class="switch on" data-switch></div></div>
-              <div class="form-row"><div class="label">显示玩家位置环</div><div></div><div class="switch on" data-switch data-player-ring-switch></div></div>
-              <div class="form-row"><div class="label">显示名称标签</div><div></div><div class="switch on" data-switch data-label-switch></div></div>
-              <div class="form-row"><div class="label">界面主题</div><div class="select"><span>深色（默认）</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div>
+              <div class="form-row"><div class="label">显示坐标与生物群系</div><div></div><div class="switch on" data-switch data-setting="showCoords"></div></div>
+              <div class="form-row"><div class="label">显示玩家位置环</div><div></div><div class="switch on" data-switch data-setting="playerRing"></div></div>
+              <div class="form-row"><div class="label">显示名称标签</div><div></div><div class="switch on" data-switch data-setting="labels"></div></div>
+              <div class="form-row"><div class="label">界面主题</div><div class="field readonly-field">深色（当前唯一主题）</div><div></div></div>
             </div>
             <div class="card">
               <div class="card-title">玩家图标</div>
@@ -359,17 +348,17 @@ svg.icon.solid{fill:currentColor;stroke:none}
             </div>
           </div>
           <div class="subpage hidden" data-subpage="mapstyle">
-            <div class="card"><div class="card-title">地图风格</div><div class="card-note">三种风格共享同一份真实地表事实；切换风格不重新扫描世界。</div>
+            <div class="card"><div class="card-title">地图风格</div><div class="card-note">当前仅“卫星 · 写实”可用；两种手绘模式先保留设置入口，后续共享同一份真实地表事实。</div>
               <div class="style-cards">
                 <div class="style-card active" data-style-choice="satellite"><div class="style-preview sat"></div><div class="style-info"><div class="style-name">卫星 · 写实</div><div class="style-sub">按真实方块/资源包颜色绘制</div></div></div>
-                <div class="style-card" data-style-choice="modern"><div class="style-preview mod"></div><div class="style-info"><div class="style-name">手绘 · 现代</div><div class="style-sub">按地貌区域表达山脉、森林、水系</div></div></div>
-                <div class="style-card" data-style-choice="ancient"><div class="style-preview old"></div><div class="style-info"><div class="style-name">手绘 · 古式</div><div class="style-sub">羊皮纸、墨线、山水符号与古地图标注</div></div></div>
+                <div class="style-card disabled" data-style-choice="modern" data-disabled="true"><span class="coming-badge">预留</span><div class="style-preview mod"></div><div class="style-info"><div class="style-name">手绘 · 现代</div><div class="style-sub">设置项预留，暂未实现渲染</div></div></div>
+                <div class="style-card disabled" data-style-choice="ancient" data-disabled="true"><span class="coming-badge">预留</span><div class="style-preview old"></div><div class="style-info"><div class="style-name">手绘 · 古式</div><div class="style-sub">设置项预留，暂未实现渲染</div></div></div>
               </div>
             </div>
-            <div class="card"><div class="card-title">缩放范围</div><div class="form-row"><div class="label">最小 / 最大</div><div class="field">6.25% ～ 1024%</div><div></div></div><div class="form-row"><div class="label">低缩放标签密度</div><input class="slider" type="range" min="0" max="100" value="35"><div class="value">35%</div></div></div>
+            <div class="card"><div class="card-title">缩放范围</div><div class="form-row"><div class="label">最小 / 最大</div><div class="field readonly-field">6.25% ～ 1024%</div><div></div></div><div class="notice-inline"><svg class="icon"><use href="#i-info"/></svg>手绘风格目前仅预留入口，不参与地图渲染。</div></div>
           </div>
           <div class="subpage hidden" data-subpage="function">
-            <div class="card"><div class="card-title">地图行为</div><div class="form-row"><div class="label">右键地图</div><div class="select"><span>操作菜单</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div><div class="form-row"><div class="label">右键标点</div><div class="select"><span>传送 / 编辑 / 删除</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div><div class="form-row"><div class="label">拖拽地图</div><div></div><div class="switch on" data-switch></div></div></div>
+            <div class="card"><div class="card-title">地图行为</div><div class="form-row"><div class="label">右键地图</div><div class="field readonly-field">添加标点 / 传送 / 复制坐标</div><div></div></div><div class="form-row"><div class="label">右键标点</div><div class="field readonly-field">传送 / 编辑 / 删除</div><div></div></div><div class="form-row"><div class="label">拖拽地图</div><div></div><div class="switch on" data-switch data-setting="dragMap"></div></div></div>
           </div>
           <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-reset"/></svg> 恢复默认</button><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
@@ -377,13 +366,13 @@ svg.icon.solid{fill:currentColor;stroke:none}
         <div class="setting-page" data-setting-page="display">
           <div class="settings-title-row"><div class="settings-title">显示</div><div class="settings-desc">地图覆盖层与可视信息</div></div>
           <div class="card"><div class="card-title">地图覆盖</div>
-            <div class="form-row"><div class="label">自定义标点</div><div></div><div class="switch on" data-switch data-app-toggle="custom"></div></div>
-            <div class="form-row"><div class="label">自动结构</div><div></div><div class="switch on" data-switch data-app-toggle="structures"></div></div>
-            <div class="form-row"><div class="label">名称标签</div><div></div><div class="switch on" data-switch data-app-toggle="labels"></div></div>
-            <div class="form-row"><div class="label">区块网格</div><div></div><div class="switch" data-switch data-app-toggle="grid"></div></div>
+            <div class="form-row"><div class="label">自定义标点</div><div></div><div class="switch on" data-switch data-setting="custom"></div></div>
+            <div class="form-row"><div class="label">自动结构</div><div></div><div class="switch on" data-switch data-setting="structures"></div></div>
+            <div class="form-row"><div class="label">名称标签</div><div></div><div class="switch on" data-switch data-setting="labels"></div></div>
+            <div class="form-row"><div class="label">区块网格</div><div></div><div class="switch" data-switch data-setting="grid"></div></div>
           </div>
-          <div class="card"><div class="card-title">图标显示</div><div class="form-row"><div class="label">图标随地图缩放</div><input class="slider" type="range" min="0" max="100" value="35"><div class="value">轻微</div></div><div class="form-row"><div class="label">玩家图标固定屏幕大小</div><div></div><div class="switch on" data-switch></div></div></div>
-          <div class="settings-footer"><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
+          <div class="card"><div class="card-title">图标显示</div><div class="form-row"><div class="label">图标随地图缩放</div><input id="markerScaleRange" class="slider" type="range" min="0" max="100" value="35"><div class="value" id="markerScaleValue">35%</div></div><div class="form-row"><div class="label">玩家图标固定屏幕大小</div><div></div><div class="switch on" data-switch data-setting="playerFixed"></div></div></div>
+          <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-reset"/></svg> 恢复默认</button><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
 
         <div class="setting-page" data-setting-page="performance">
@@ -391,17 +380,17 @@ svg.icon.solid{fill:currentColor;stroke:none}
           <div class="card">
             <div class="performance-row"><div class="performance-line"><div>每批请求区块数</div><input id="requestRange" class="slider" type="range" min="16" max="256" step="16" value="64"><div class="value" id="requestValue">64</div></div><div class="performance-help">只控制客户端预取宽度；服务端按独立预算逐 tick 处理，不会把 256 个区块塞进同一个 tick。</div></div>
             <div class="performance-row"><div class="performance-line"><div>实时扫描间隔</div><input id="scanRange" class="slider" type="range" min="5" max="100" step="5" value="10"><div class="value" id="scanValue">10 tick / 0.50 s</div></div><div class="performance-help">决定地表变化检查的平均频率；扫描会平摊到多个 server tick，避免实体 AI / TNT 周期性变慢。</div></div>
-            <div class="performance-row"><div class="performance-line"><div>缓存预热范围</div><input class="slider" type="range" min="128" max="2048" step="128" value="1024"><div class="value">1024 区块</div></div><div class="performance-help">进入存档后主动恢复玩家附近已经绘制的地图，打开地图时尽量直接显示。</div></div>
+            <div class="performance-row"><div class="performance-line"><div>缓存预热范围</div><input id="prewarmRange" class="slider" type="range" min="128" max="2048" step="128" value="1024"><div class="value" id="prewarmValue">1024 区块</div></div><div class="performance-help">进入存档后主动恢复玩家附近已经绘制的地图，打开地图时尽量直接显示。</div></div>
           </div>
-          <div class="card"><div class="card-title">缓存</div><div class="form-row"><div class="label">已渲染 RGB 缓存</div><div class="small">与地表事实同时保存；资源包变化时只重新着色</div><div class="switch on" data-switch></div></div><div class="form-row"><div class="label">刷新全部已覆盖地图</div><button class="btn" id="refreshAll">立即刷新</button><div></div></div></div>
-          <div class="settings-footer"><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
+          <div class="card"><div class="card-title">缓存</div><div class="form-row"><div class="label">已渲染 RGB 缓存</div><div class="small">与地表事实同时保存；资源包变化时只重新着色</div><div class="switch on" data-switch data-setting="rgbCache"></div></div><div class="form-row"><div class="label">刷新全部已覆盖地图</div><button class="btn" id="refreshAll">立即刷新</button><div></div></div></div>
+          <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-reset"/></svg> 恢复默认</button><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
 
         <div class="setting-page" data-setting-page="marker">
           <div class="settings-title-row"><div class="settings-title">标点</div><div class="settings-desc">自定义标点默认行为</div></div>
-          <div class="card"><div class="card-title">默认标点</div><div class="form-row"><div class="label">默认图标</div><div class="select"><div class="left"><svg class="icon"><use href="#i-pin"/></svg>定位点</div><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div><div class="form-row"><div class="label">默认颜色</div><div class="color-field"><span class="swatch" style="background:#ffd34e"></span><span>#FFD34E</span></div><div></div></div><div class="form-row"><div class="label">图标大小</div><input class="slider" type="range" min="8" max="32" value="16"><div class="value">16 px</div></div></div>
-          <div class="card"><div class="card-title">名称标签</div><div class="form-row"><div class="label">25% 以下隐藏标签</div><div></div><div class="switch on" data-switch></div></div><div class="form-row"><div class="label">标签避让</div><div></div><div class="switch on" data-switch></div></div></div>
-          <div class="settings-footer"><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
+          <div class="card"><div class="card-title">默认标点</div><div class="form-row"><div class="label">默认图标</div><div class="select" id="markerDefaultIconSelect"><div class="left"><svg class="icon"><use href="#i-pin"/></svg><span>定位点</span></div><svg class="icon"><use href="#i-chevron"/></svg></div><div></div></div><div class="form-row"><div class="label">默认颜色</div><label class="color-field" id="markerDefaultColorField"><span class="swatch" id="markerDefaultSwatch" style="background:#ffd34e"></span><span id="markerDefaultColorText">#FFD34E</span><input class="native-color" id="markerDefaultColor" type="color" value="#ffd34e"></label><div></div></div><div class="form-row"><div class="label">图标大小</div><input id="markerDefaultSize" class="slider" type="range" min="8" max="32" value="22"><div class="value" id="markerDefaultSizeValue">22 px</div></div></div>
+          <div class="card"><div class="card-title">名称标签</div><div class="form-row"><div class="label">25% 以下隐藏标签</div><div></div><div class="switch on" data-switch data-setting="hideLabelsLowZoom"></div></div><div class="form-row"><div class="label">标签避让</div><div></div><div class="switch on" data-switch data-setting="avoidLabels"></div></div></div>
+          <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-reset"/></svg> 恢复默认</button><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
 
         <div class="setting-page" data-setting-page="structure">
@@ -412,14 +401,14 @@ svg.icon.solid{fill:currentColor;stroke:none}
 
         <div class="setting-page" data-setting-page="shortcut">
           <div class="settings-title-row"><div class="settings-title">快捷键</div><div class="settings-desc">只保留真正高频动作</div></div>
-          <div class="card"><div class="form-row"><div class="label">打开地图</div><div class="shortcut"><span>打开 / 关闭地图</span><span class="key">M</span></div><div></div></div><div class="form-row"><div class="label">回到玩家</div><div class="shortcut"><span>地图视野回到玩家</span><span class="key">R</span></div><div></div></div><div class="form-row"><div class="label">添加标点</div><div class="shortcut"><span>在视野中心添加标点</span><span class="key">Shift + M</span></div><div></div></div></div>
+          <div class="card"><div class="form-row"><div class="label">打开地图</div><div class="shortcut"><span>打开 / 关闭地图</span><kbd class="key" data-shortcut="map">M</kbd></div><div></div></div><div class="form-row"><div class="label">回到玩家</div><div class="shortcut"><span>地图视野回到玩家</span><kbd class="key" data-shortcut="locate">R</kbd></div><div></div></div><div class="form-row"><div class="label">添加标点</div><div class="shortcut"><span>在视野中心添加标点</span><kbd class="key" data-shortcut="add">Shift + M</kbd></div><div></div></div></div>
           <div class="settings-footer"><button class="btn">恢复默认</button><div class="spacer"></div><button class="btn primary" data-modal-close>应用</button></div>
         </div>
 
         <div class="setting-page" data-setting-page="advanced">
           <div class="settings-title-row"><div class="settings-title">高级</div><div class="settings-desc">调试与边界选项</div></div>
           <div class="advanced-warning">高级选项会直接影响扫描和缓存行为。正常游玩通常不需要修改。</div>
-          <div class="card" style="margin-top:12px"><div class="form-row"><div class="label">强制重新着色缓存</div><button class="btn">执行</button><div></div></div><div class="form-row"><div class="label">清除 GPU 地图纹理</div><button class="btn">执行</button><div></div></div><div class="form-row"><div class="label">显示调试统计</div><div></div><div class="switch" data-switch></div></div></div>
+          <div class="card" style="margin-top:12px"><div class="form-row"><div class="label">强制重新着色缓存</div><button class="btn" id="recolorCache">执行</button><div></div></div><div class="form-row"><div class="label">清除 GPU 地图纹理</div><button class="btn" id="clearGpuCache">执行</button><div></div></div><div class="form-row"><div class="label">显示调试统计</div><div></div><div class="switch" data-switch data-setting="debug"></div></div></div>
           <div class="settings-footer"><div class="spacer"></div><button class="btn primary" data-modal-close>完成</button></div>
         </div>
       </section>
@@ -431,184 +420,500 @@ svg.icon.solid{fill:currentColor;stroke:none}
     <div class="editor-body">
       <div class="editor-grid">
         <div>名称</div><input id="markerName" type="text" value="临时营地">
-        <div>图标</div><div class="select"><div class="left"><svg class="icon"><use href="#i-home"/></svg>营地</div><svg class="icon"><use href="#i-chevron"/></svg></div>
+        <div>图标</div><div class="select editor-icon-select" id="markerIconSelect"><div class="left"><svg class="icon"><use href="#i-home"/></svg><span>营地</span></div><svg class="icon"><use href="#i-chevron"/></svg></div>
         <div>颜色</div><label class="color-field" id="markerColorField"><span class="swatch" id="markerSwatch" style="background:#ffd34e"></span><span id="markerColorText">#FFD34E</span><input class="native-color" id="markerColor" type="color" value="#ffd34e"></label>
-        <div>简介</div><textarea>临时驻点，附近有平地与水源。</textarea>
-        <div>坐标</div><div class="small">X 1254　Z -376</div>
+        <div>简介</div><textarea id="markerDescription">临时驻点，附近有平地与水源。</textarea>
+        <div>坐标</div><div class="small" id="markerCoords">X 1254　Z -376</div>
       </div>
       <div class="editor-actions"><button class="btn danger" id="deleteMarkerButton">删除</button><div class="spacer"></div><button class="btn" data-editor-close>取消</button><button class="btn primary" id="saveMarkerButton"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-save"/></svg> 保存</button></div>
     </div>
   </div>
+
+
+  <div class="modal about-modal" id="aboutModal">
+    <div class="modal-head"><svg class="icon"><use href="#i-info"/></svg>关于<div class="spacer"></div><button class="close-btn" data-about-close><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="about-body">
+      <div class="about-brand"><svg class="icon"><use href="#i-map"/></svg><div><div class="about-name">地图册 · Map Atlas</div><div class="about-version">Cartograph V3 · 高保真交互原型</div></div></div>
+      <div class="about-grid"><div class="k">地图事实</div><div>仅使用真实已生成区块</div><div class="k">当前地图风格</div><div>卫星 · 写实</div><div class="k">手绘风格</div><div>设置项预留，暂未实现</div><div class="k">缓存策略</div><div>地表事实 + RGB 成图缓存</div></div>
+      <div class="about-note">此页面用于确定游戏内最终 UI 的交互、状态与信息架构。所有可见核心控件应当具备真实交互语义，而不是静态示意。</div>
+    </div>
+  </div>
+  <div class="dropdown" id="dropdown"></div>
+  <div class="debug-hud" id="debugHud">zoom=100%<br>pan=0,0<br>markers=0<br>style=satellite</div>
 
   <div class="toast" id="toast">已完成</div>
 </div>
 
 <script>
 (function(){
-  const q=function(s){return document.querySelector(s)}, qa=function(s){return Array.from(document.querySelectorAll(s))};
-  const app=q('#app'), overlay=q('#overlay'), settings=q('#settingsModal'), editor=q('#editorModal');
-  const layers=q('#layersPanel'), markers=q('#markersPanel'), mapCtx=q('#mapContext'), markerCtx=q('#markerContext');
-  const worldWrap=q('#worldWrap'), mapStage=q('#mapStage');
-  let zoom=1, panX=0, panY=0, dragging=false, dragStartX=0, dragStartY=0, basePanX=0, basePanY=0;
-  let selectedMarker=null;
+  'use strict';
+  const q=s=>document.querySelector(s), qa=s=>Array.from(document.querySelectorAll(s));
+  const app=q('#app'), overlay=q('#overlay'), settings=q('#settingsModal'), editor=q('#editorModal'), about=q('#aboutModal');
+  const layers=q('#layersPanel'), markersPanel=q('#markersPanel'), mapCtx=q('#mapContext'), markerCtx=q('#markerContext');
+  const worldWrap=q('#worldWrap'), mapStage=q('#mapStage'), dropdown=q('#dropdown');
+  const STORAGE_KEY='cartograph-v3-hifi-state-v3';
 
-  function toast(text){
-    const el=q('#toast'); el.textContent=text; el.classList.add('show');
-    setTimeout(function(){el.classList.remove('show')},1200);
+  const ICONS={
+    pin:['i-pin','定位点'],home:['i-home','营地'],mine:['i-mine','矿井'],ship:['i-ship','船 / 码头'],
+    mountain:['i-mountain','山地'],temple:['i-temple','神殿'],village:['i-village','村庄'],
+    mansion:['i-mansion','府邸'],outpost:['i-outpost','前哨站'],portal:['i-portal','传送门'],
+    city:['i-city','城市'],fortress:['i-fortress','要塞'],cave:['i-cave','洞穴'],water:['i-water','水域']
+  };
+  const FIXED_STRUCTURES=[
+    {id:'s-village',name:'村庄',type:'village',preset:'村庄',x:420,z:260,left:20,top:32},
+    {id:'s-mansion',name:'林地府邸',type:'mansion',preset:'林地府邸',x:780,z:-420,left:33,top:18},
+    {id:'s-temple',name:'海底神殿',type:'temple',preset:'海底神殿',x:2060,z:-680,left:68,top:29},
+    {id:'s-mine',name:'废弃矿井',type:'mine',preset:'废弃矿井',x:2380,z:920,left:76,top:60},
+    {id:'s-ship',name:'沉船',type:'other',preset:'沉船',x:1510,z:1390,left:58,top:72}
+  ];
+  const DEFAULT_STRUCTURE_PRESETS=[
+    ['村庄','village','#F4C84F'],['林地府邸','mansion','#E7D7C0'],['沙漠神殿','temple','#DDB85E'],['丛林神庙','temple','#8FCB73'],
+    ['沼泽小屋','home','#A6B17F'],['雪屋','home','#EDF4F6'],['海底神殿','temple','#70C7CE'],['掠夺者前哨站','outpost','#C89A76'],
+    ['废弃矿井','mine','#C08A55'],['废弃传送门','portal','#A77CE8'],['沉船','ship','#6EB5D1'],['海底废墟','water','#64C0D3'],
+    ['埋藏的宝藏','pin','#F3D66A'],['古迹废墟','temple','#BA9673'],['试炼密室','temple','#D6A06A'],['远古城市','city','#6DABA8'],
+    ['要塞','fortress','#B7ADA0'],['下界要塞','fortress','#B8554E'],['堡垒遗迹','fortress','#84695A'],['下界化石','cave','#D7C2A3'],
+    ['末地城','city','#C7A3D5'],['其他结构','pin','#D7B85D']
+  ].map(x=>({name:x[0],icon:x[1],color:x[2]}));
+
+  const DEFAULTS={
+    settings:{
+      showCoords:true,playerRing:true,labels:true,custom:true,structures:true,grid:false,dragMap:true,
+      playerFixed:true,playerIcon:'arrow',playerSize:24,playerColor:'#FFE14E',
+      requestBatch:64,scanInterval:10,prewarm:1024,rgbCache:true,
+      markerDefaultIcon:'pin',markerDefaultColor:'#FFD34E',markerDefaultSize:22,
+      hideLabelsLowZoom:true,avoidLabels:true,debug:false,
+      markerScale:35,style:'satellite',
+      structureFilters:{village:true,mansion:true,temple:true,mine:true,other:false},
+      shortcuts:{map:'M',locate:'R',add:'Shift+M'},
+      structurePresets:DEFAULT_STRUCTURE_PRESETS
+    },
+    hiddenStructures:[],
+    markers:[
+      {id:'m1',name:'临时营地',icon:'home',color:'#FFD34E',description:'临时驻点，附近有平地与水源。',x:1254,z:-376,left:41,top:56},
+      {id:'m2',name:'矿区 A',icon:'mine',color:'#F2B84B',description:'已确认的采矿区域。',x:1690,z:-188,left:54,top:45},
+      {id:'m3',name:'北岭入口',icon:'mountain',color:'#E9D86A',description:'进入北部山地的入口。',x:882,z:-1012,left:29,top:27},
+      {id:'m4',name:'河口码头',icon:'ship',color:'#66C1D5',description:'沿河航运节点。',x:1418,z:-642,left:49,top:35}
+    ],
+    view:{zoom:1,panX:0,panY:0}
+  };
+
+  function clone(v){return JSON.parse(JSON.stringify(v));}
+  function mergeDefaults(saved){
+    const d=clone(DEFAULTS); if(!saved||typeof saved!=='object')return d;
+    if(saved.settings)Object.assign(d.settings,saved.settings);
+    if(saved.settings&&saved.settings.structureFilters)Object.assign(d.settings.structureFilters,saved.settings.structureFilters);
+    if(saved.settings&&Array.isArray(saved.settings.structurePresets))d.settings.structurePresets=saved.settings.structurePresets;
+    if(Array.isArray(saved.markers))d.markers=saved.markers;
+    if(Array.isArray(saved.hiddenStructures))d.hiddenStructures=saved.hiddenStructures;
+    if(saved.view)Object.assign(d.view,saved.view);
+    return d;
   }
+  function load(){
+    try{return mergeDefaults(JSON.parse(localStorage.getItem(STORAGE_KEY)||'null'));}catch(e){return clone(DEFAULTS);}
+  }
+  let committed=load(), draft=null;
+  let selectedMarkerId=null, selectedStructureId=null, editorMode='add', editorPoint={x:1254,z:-376,left:50,top:50};
+  let contextPoint={x:1254,z:-376,left:50,top:50};
+  let dragging=false,dragStartX=0,dragStartY=0,basePanX=0,basePanY=0;
+  let captureShortcut=null, dropdownHandler=null, toastTimer=null;
+
+  function currentSettings(){return draft?draft.settings:committed.settings;}
+  function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(committed));}
+  function toast(text){
+    const el=q('#toast');clearTimeout(toastTimer);el.textContent=text;el.classList.add('show');
+    toastTimer=setTimeout(()=>el.classList.remove('show'),1500);
+  }
+  function iconUse(icon){return ICONS[icon]?ICONS[icon][0]:'i-pin';}
+  function iconLabel(icon){return ICONS[icon]?ICONS[icon][1]:'定位点';}
+  function presetFor(name,settings=currentSettings()){return settings.structurePresets.find(p=>p.name===name)||{icon:'pin',color:'#FFFFFF'};}
+  function screenPercent(left,top){
+    const r=mapStage.getBoundingClientRect();
+    return {
+      left:50+(left-50)*committed.view.zoom+(committed.view.panX/r.width*100),
+      top:50+(top-50)*committed.view.zoom+(committed.view.panY/r.height*100)
+    };
+  }
+  function updateWorldAnchors(settings=currentSettings()){
+    const pp=screenPercent(50,51), player=q('.player'), ring=q('.player-ring');
+    player.style.left=pp.left+'%';player.style.top=pp.top+'%';ring.style.left=pp.left+'%';ring.style.top=pp.top+'%';
+    const base=settings.playerSize;
+    const size=settings.playerFixed?base:Math.max(8,Math.min(72,base*Math.pow(Math.max(.15,Math.min(4,committed.view.zoom)),.35)));
+    const pi=q('.player .icon');pi.style.width=size+'px';pi.style.height=size+'px';
+    const grid=q('.map-grid'), cell=Math.max(8,256*committed.view.zoom);
+    grid.style.backgroundSize=cell+'px '+cell+'px';
+    grid.style.backgroundPosition=committed.view.panX+'px '+committed.view.panY+'px';
+  }
+
+  function renderView(){
+    const v=committed.view;
+    worldWrap.style.transform='translate(calc(-50% + '+v.panX+'px),calc(-50% + '+v.panY+'px)) scale('+v.zoom+')';
+    q('#zoomText').textContent=(Math.round(v.zoom*10000)/100)+'%';
+    q('#scaleText').textContent=v.zoom<.125?'16 km':v.zoom<.25?'8 km':v.zoom<.5?'4 km':v.zoom<1?'3 km':v.zoom<2?'2 km':'1 km';
+    updateWorldAnchors();
+    renderMarkers();
+    renderDebug();
+  }
+  function setZoom(next){
+    committed.view.zoom=Math.max(.0625,Math.min(10.24,next));save();renderView();
+  }
+  function renderAppSettings(settings=currentSettings()){
+    app.dataset.style='satellite';
+    app.dataset.grid=settings.grid?'on':'off';
+    app.dataset.labels=settings.labels?'on':'off';
+    app.dataset.structures=settings.structures?'on':'off';
+    app.dataset.custom=settings.custom?'on':'off';
+    app.dataset.playerRing=settings.playerRing?'on':'off';
+    app.dataset.coords=settings.showCoords?'on':'off';
+    app.dataset.debug=settings.debug?'on':'off';
+    const player=q('.player'), pi=q('.player .icon');
+    player.style.color=settings.playerColor;
+    pi.classList.toggle('solid',settings.playerIcon!=='cross');
+    pi.querySelector('use').setAttribute('href',settings.playerIcon==='arrow'?'#i-player':settings.playerIcon==='cross'?'#i-cross':'#i-dot');
+    syncLayerControls(settings);
+    updateWorldAnchors(settings);
+    renderMarkers(settings);
+    renderDebug();
+  }
+  function markerScreenSize(settings=currentSettings()){
+    const z=committed.view.zoom, strength=settings.markerScale/100;
+    const factor=Math.pow(Math.max(.15,Math.min(4,z)),.20*strength);
+    return Math.max(10,Math.min(32,settings.markerDefaultSize*factor));
+  }
+  function renderMarkers(settings=currentSettings()){
+    const layer=q('#markerLayer'); layer.innerHTML='';
+    const showLabels=settings.labels && !(settings.hideLabelsLowZoom&&committed.view.zoom<.25);
+    const size=markerScreenSize(settings);
+
+    if(settings.structures){
+      FIXED_STRUCTURES.forEach(st=>{
+        if(committed.hiddenStructures.includes(st.id))return;
+        if(settings.structureFilters[st.type]===false)return;
+        const p=presetFor(st.preset,settings);
+        const el=document.createElement('div');
+        const pos=screenPercent(st.left,st.top);
+        el.className='map-marker structure';el.style.left=pos.left+'%';el.style.top=pos.top+'%';el.dataset.kind='structure';el.dataset.structureId=st.id;el.dataset.name=st.name;
+        el.style.color=p.color;
+        el.innerHTML='<svg class="icon glyph" style="width:'+size+'px;height:'+size+'px"><use href="#'+iconUse(p.icon)+'"/></svg>'+(showLabels?'<div class="marker-label">'+escapeHtml(st.name)+'</div>':'');
+        layer.appendChild(el);
+      });
+    }
+    if(settings.custom){
+      committed.markers.forEach(m=>{
+        const el=document.createElement('div');
+        const pos=screenPercent(m.left,m.top);
+        el.className='map-marker custom';el.style.left=pos.left+'%';el.style.top=pos.top+'%';el.dataset.kind='custom';el.dataset.markerId=m.id;el.dataset.name=m.name;el.style.color=m.color;
+        el.innerHTML='<svg class="icon glyph" style="width:'+size+'px;height:'+size+'px"><use href="#'+iconUse(m.icon)+'"/></svg>'+(showLabels?'<div class="marker-label">'+escapeHtml(m.name)+'</div>':'');
+        layer.appendChild(el);
+      });
+    }
+    bindMarkerContext();
+    if(settings.avoidLabels&&showLabels)requestAnimationFrame(()=>avoidLabelCollisions());
+    renderMarkerList();
+    renderLayerCounts();
+  }
+  function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function avoidLabelCollisions(){
+    const used=[];
+    qa('#markerLayer .marker-label').forEach(label=>{
+      label.style.display='';
+      const r=label.getBoundingClientRect();
+      const hit=used.some(u=>r.left<u.right&&r.right>u.left&&r.top<u.bottom&&r.bottom>u.top);
+      if(hit)label.style.display='none';else used.push(r);
+    });
+  }
+  function renderMarkerList(){
+    const list=q('#markerList');
+    if(!committed.markers.length){list.innerHTML='<div class="marker-empty">还没有自定义标点</div>';return;}
+    list.innerHTML=committed.markers.map(m=>'<div class="marker-row" data-marker-id="'+m.id+'"><svg class="icon mi" style="color:'+m.color+'"><use href="#'+iconUse(m.icon)+'"/></svg><div class="info"><div class="title">'+escapeHtml(m.name)+'</div><div class="meta">'+m.x+', '+m.z+'</div><div class="marker-description">'+escapeHtml(m.description||'')+'</div></div><div class="row-actions"><button class="mini edit-row" title="编辑"><svg class="icon"><use href="#i-edit"/></svg></button><button class="mini danger delete-row" title="删除"><svg class="icon"><use href="#i-trash"/></svg></button></div></div>').join('');
+    qa('#markerList .edit-row').forEach(b=>b.onclick=()=>openEditor('edit',b.closest('.marker-row').dataset.markerId));
+    qa('#markerList .delete-row').forEach(b=>b.onclick=()=>deleteMarker(b.closest('.marker-row').dataset.markerId));
+  }
+  function renderLayerCounts(){
+    const customCount=q('#layersPanel .layer-row .count');if(customCount)customCount.textContent=committed.markers.length;
+  }
+  function syncLayerControls(settings=currentSettings()){
+    qa('.checkbox[data-toggle]').forEach(cb=>{
+      const k=cb.dataset.toggle;cb.classList.toggle('on',!!settings[k]);
+    });
+    qa('.checkbox[data-structure-filter]').forEach(cb=>cb.classList.toggle('on',settings.structureFilters[cb.dataset.structureFilter]!==false));
+  }
+  function renderDebug(){
+    const h=q('#debugHud');if(!h)return;
+    h.innerHTML='zoom='+(committed.view.zoom*100).toFixed(1)+'%<br>pan='+Math.round(committed.view.panX)+','+Math.round(committed.view.panY)+'<br>markers='+committed.markers.length+'<br>style=satellite';
+  }
+
+  function renderSettings(){
+    const s=currentSettings();
+    const dirty=q('#settingsDirty');
+    if(dirty)dirty.style.display=draft&&JSON.stringify(draft.settings)!==JSON.stringify(committed.settings)?'inline':'none';
+    qa('[data-switch][data-setting]').forEach(sw=>sw.classList.toggle('on',!!s[sw.dataset.setting]));
+    qa('[data-player-icon]').forEach(b=>b.classList.toggle('active',b.dataset.playerIcon===s.playerIcon));
+    q('#playerSize').value=s.playerSize;q('#playerSizeValue').textContent=s.playerSize+' px';
+    q('#playerColor').value=s.playerColor;q('#playerSwatch').style.background=s.playerColor;q('#playerColorText').textContent=s.playerColor.toUpperCase();
+    q('#requestRange').value=s.requestBatch;q('#requestValue').textContent=s.requestBatch;
+    q('#scanRange').value=s.scanInterval;q('#scanValue').textContent=s.scanInterval+' tick / '+(s.scanInterval/20).toFixed(2)+' s';
+    q('#prewarmRange').value=s.prewarm;q('#prewarmValue').textContent=s.prewarm+' 区块';
+    q('#markerDefaultSize').value=s.markerDefaultSize;q('#markerDefaultSizeValue').textContent=s.markerDefaultSize+' px';
+    q('#markerScaleRange').value=s.markerScale;q('#markerScaleValue').textContent=s.markerScale+'%';
+    q('#markerDefaultColor').value=s.markerDefaultColor;q('#markerDefaultSwatch').style.background=s.markerDefaultColor;q('#markerDefaultColorText').textContent=s.markerDefaultColor.toUpperCase();
+    updateSelectDisplay(q('#markerDefaultIconSelect'),s.markerDefaultIcon);
+    qa('[data-shortcut]').forEach(k=>k.textContent=s.shortcuts[k.dataset.shortcut]);
+    qa('.style-card').forEach(c=>c.classList.toggle('active',c.dataset.styleChoice==='satellite'));
+    renderStructureTable();
+  }
+  function renderStructureTable(){
+    const s=currentSettings(), list=q('#structureList');
+    list.innerHTML=s.structurePresets.map((p,i)=>'<div class="structure-row" data-index="'+i+'"><div>'+escapeHtml(p.name)+'</div><div class="structure-select" data-structure-icon="'+i+'"><div class="left"><svg class="icon"><use href="#'+iconUse(p.icon)+'"/></svg><span>'+escapeHtml(iconLabel(p.icon))+'</span></div><svg class="icon"><use href="#i-chevron"/></svg></div><div class="structure-color"><label class="swatch" style="background:'+p.color+'"><input class="native-color structure-color-input" data-index="'+i+'" type="color" value="'+p.color+'"></label></div></div>').join('');
+    qa('[data-structure-icon]').forEach(el=>el.onclick=e=>openIconDropdown(el,currentSettings().structurePresets[+el.dataset.structureIcon].icon,val=>{
+      currentSettings().structurePresets[+el.dataset.structureIcon].icon=val;renderStructureTable();renderAppSettings();
+    }));
+    qa('.structure-color-input').forEach(inp=>inp.oninput=e=>{
+      currentSettings().structurePresets[+inp.dataset.index].color=e.target.value.toUpperCase();
+      inp.parentElement.style.background=e.target.value;renderAppSettings();
+    });
+  }
+  function updateSelectDisplay(el,icon){
+    if(!el)return;const left=el.querySelector('.left');left.innerHTML='<svg class="icon"><use href="#'+iconUse(icon)+'"/></svg><span>'+escapeHtml(iconLabel(icon))+'</span>';
+  }
+
+  function openSettings(page='general'){
+    hidePanels();draft=clone(committed);overlay.style.display='block';settings.style.display='block';about.style.display='none';
+    qa('.nav-btn').forEach(b=>b.classList.remove('active'));q('[data-nav="settings"]').classList.add('active');
+    activateSettingsPage(page);renderSettings();renderAppSettings(draft.settings);
+  }
+  function applySettings(){
+    if(!draft)return;committed.settings=clone(draft.settings);draft=null;save();closeModal(false);renderAppSettings(committed.settings);toast('设置已应用');
+  }
+  function cancelSettings(){
+    draft=null;closeModal(false);renderAppSettings(committed.settings);toast('已取消更改');
+  }
+  function closeModal(cancel=true){
+    if(settings.style.display==='block'&&draft&&cancel){cancelSettings();return;}
+    overlay.style.display='none';settings.style.display='none';editor.style.display='none';about.style.display='none';closeDropdown();
+    qa('.nav-btn').forEach(b=>b.classList.remove('active'));q('[data-nav="map"]').classList.add('active');
+  }
+  function activateSettingsPage(page){
+    qa('.settings-nav-item').forEach(x=>x.classList.toggle('active',x.dataset.page===page));
+    qa('[data-setting-page]').forEach(x=>x.classList.toggle('active',x.dataset.settingPage===page));
+  }
+  function resetCurrentPage(){
+    if(!draft)return;const page=q('.settings-nav-item.active')?.dataset.page||'general', d=DEFAULTS.settings;
+    if(page==='general'){['showCoords','playerRing','labels','dragMap','playerIcon','playerSize','playerColor','style'].forEach(k=>draft.settings[k]=clone(d[k]));}
+    else if(page==='display'){['custom','structures','labels','grid','playerFixed','markerScale'].forEach(k=>draft.settings[k]=clone(d[k]));}
+    else if(page==='performance'){['requestBatch','scanInterval','prewarm','rgbCache'].forEach(k=>draft.settings[k]=clone(d[k]));}
+    else if(page==='marker'){['markerDefaultIcon','markerDefaultColor','markerDefaultSize','hideLabelsLowZoom','avoidLabels'].forEach(k=>draft.settings[k]=clone(d[k]));}
+    else if(page==='structure'){draft.settings.structurePresets=clone(d.structurePresets);}
+    else if(page==='shortcut'){draft.settings.shortcuts=clone(d.shortcuts);}
+    else if(page==='advanced'){draft.settings.debug=d.debug;}
+    renderSettings();renderAppSettings(draft.settings);toast('已恢复此页默认值');
+  }
+
   function hidePanels(){
-    layers.style.display='none'; markers.style.display='none';
-    mapCtx.style.display='none'; markerCtx.style.display='none';
-    qa('.nav-btn').forEach(function(b){b.classList.remove('active')});
-    q('[data-nav="map"]').classList.add('active');
+    layers.style.display='none';markersPanel.style.display='none';mapCtx.style.display='none';markerCtx.style.display='none';closeDropdown();
+    qa('.nav-btn').forEach(b=>b.classList.remove('active'));q('[data-nav="map"]').classList.add('active');
   }
   function openPanel(which){
     hidePanels();q('[data-nav="map"]').classList.remove('active');
-    if(which==='layers'){layers.style.display='block';q('[data-nav="layers"]').classList.add('active')}
-    if(which==='markers'){markers.style.display='block';q('[data-nav="markers"]').classList.add('active')}
+    if(which==='layers'){layers.style.display='block';q('[data-nav="layers"]').classList.add('active');}
+    if(which==='markers'){markersPanel.style.display='block';q('[data-nav="markers"]').classList.add('active');renderMarkerList();}
   }
-  function openSettings(page){
-    hidePanels();q('[data-nav="map"]').classList.remove('active'); overlay.style.display='block'; settings.style.display='block';
-    q('[data-nav="settings"]').classList.add('active');
-    if(page) activateSettingsPage(page);
-  }
-  function closeModal(){
-    overlay.style.display='none';settings.style.display='none';editor.style.display='none';
-    qa('.nav-btn').forEach(function(b){b.classList.remove('active')});q('[data-nav="map"]').classList.add('active');
-  }
-  function activateSettingsPage(page){
-    qa('.settings-nav-item').forEach(function(x){x.classList.toggle('active',x.dataset.page===page)});
-    qa('[data-setting-page]').forEach(function(x){x.classList.toggle('active',x.dataset.settingPage===page)});
-  }
-  function positionMenu(el,x,y){
-    el.style.display='block'; const r=el.getBoundingClientRect();
-    el.style.left=Math.max(8,Math.min(innerWidth-r.width-8,x))+'px';
-    el.style.top=Math.max(70,Math.min(innerHeight-r.height-8,y))+'px';
-  }
-  function updateTransform(){
-    worldWrap.style.transform='translate(calc(-50% + '+panX+'px),calc(-50% + '+panY+'px)) scale('+zoom+')';
-    const percent=Math.round(zoom*10000)/100;
-    q('#zoomText').textContent=percent+'%';
-    q('#scaleText').textContent=zoom<.25?'8 km':zoom<.5?'4 km':zoom<1?'3 km':zoom<2?'2 km':'1 km';
-  }
-  function setZoom(next,cx,cy){
-    next=Math.max(.0625,Math.min(10.24,next));
-    zoom=next;updateTransform();
-  }
-  function openEditor(title,name){
-    mapCtx.style.display='none';markerCtx.style.display='none';overlay.style.display='block';editor.style.display='block';
-    q('#editorTitle').textContent=title;q('#markerName').value=name||'新标点';
-    q('#deleteMarkerButton').style.visibility=title==='添加标点'?'hidden':'visible';
+  function openAbout(){
+    hidePanels();overlay.style.display='block';about.style.display='block';q('[data-nav="about"]').classList.add('active');
   }
 
-  qa('.nav-btn').forEach(function(btn){
-    btn.addEventListener('click',function(){
-      const n=btn.dataset.nav;
-      if(n==='map'){hidePanels();return}
-      if(n==='markers'||n==='layers'){openPanel(n);return}
-      if(n==='settings'){openSettings('general');return}
-      if(n==='about'){toast('Map Atlas V3 · 高保真交互原型')}
-    })
-  });
-  qa('[data-panel-close]').forEach(function(b){b.onclick=hidePanels});
-  qa('[data-modal-close]').forEach(function(b){b.onclick=closeModal});
-  qa('[data-editor-close]').forEach(function(b){b.onclick=closeModal});
-  overlay.onclick=function(e){if(e.target===overlay)closeModal()};
-
-  q('#structureExpand').onclick=function(){q('#structureGroup').classList.toggle('expanded')};
-  qa('.checkbox').forEach(function(cb){cb.onclick=function(){
-    cb.classList.toggle('on');const key=cb.dataset.toggle;if(key)app.dataset[key]=cb.classList.contains('on')?'on':'off';
-  }});
-  qa('[data-switch]').forEach(function(sw){sw.onclick=function(){
-    sw.classList.toggle('on');
-    if(sw.hasAttribute('data-player-ring-switch'))app.dataset.playerRing=sw.classList.contains('on')?'on':'off';
-    if(sw.hasAttribute('data-label-switch'))app.dataset.labels=sw.classList.contains('on')?'on':'off';
-    const key=sw.dataset.appToggle;if(key)app.dataset[key]=sw.classList.contains('on')?'on':'off';
-  }});
-
-  qa('.settings-nav-item').forEach(function(item){item.onclick=function(){activateSettingsPage(item.dataset.page)}});
-  qa('.subtab').forEach(function(tab){tab.onclick=function(){
-    qa('.subtab').forEach(function(x){x.classList.remove('active')});tab.classList.add('active');
-    qa('[data-subpage]').forEach(function(x){x.classList.toggle('hidden',x.dataset.subpage!==tab.dataset.sub)});
-  }});
-  qa('.style-card').forEach(function(card){card.onclick=function(){
-    qa('.style-card').forEach(function(x){x.classList.remove('active')});card.classList.add('active');
-    app.dataset.style=card.dataset.styleChoice;toast('地图风格：'+card.querySelector('.style-name').textContent);
-  }});
-
-  qa('[data-player-icon]').forEach(function(btn){btn.onclick=function(){
-    qa('[data-player-icon]').forEach(function(x){x.classList.remove('active')});btn.classList.add('active');
-    const icon=q('.player .icon');const kind=btn.dataset.playerIcon;
-    icon.classList.toggle('solid',kind!=='cross');
-    icon.querySelector('use').setAttribute('href',kind==='arrow'?'#i-player':kind==='cross'?'#i-cross':'#i-dot');
-  }});
-  q('#playerSize').oninput=function(e){
-    const v=e.target.value;q('#playerSizeValue').textContent=v+' px';const i=q('.player .icon');i.style.width=v+'px';i.style.height=v+'px';
-  };
-  q('#playerColor').oninput=function(e){q('#playerSwatch').style.background=e.target.value;q('#playerColorText').textContent=e.target.value.toUpperCase();q('.player').style.color=e.target.value};
-  q('#markerColor').oninput=function(e){q('#markerSwatch').style.background=e.target.value;q('#markerColorText').textContent=e.target.value.toUpperCase()};
-
-  q('#requestRange').oninput=function(e){q('#requestValue').textContent=e.target.value};
-  q('#scanRange').oninput=function(e){q('#scanValue').textContent=e.target.value+' tick / '+(e.target.value/20).toFixed(2)+' s'};
-  q('#refreshAll').onclick=function(){toast('原型：刷新全部已覆盖地图')};
-
-  q('#zoomIn').onclick=function(){setZoom(zoom*1.25)};q('#zoomOut').onclick=function(){setZoom(zoom/1.25)};
-  q('#locateBtn').onclick=function(){panX=0;panY=0;setZoom(1);toast('已回到玩家位置')};
-  q('#homeBtn').onclick=function(){panX=180;panY=-80;setZoom(.8);toast('已回到出生点')};
-  mapStage.addEventListener('wheel',function(e){e.preventDefault();setZoom(e.deltaY<0?zoom*1.12:zoom/1.12)},{passive:false});
-  mapStage.addEventListener('pointerdown',function(e){if(e.button!==0||e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box,.map-marker'))return;dragging=true;mapStage.classList.add('dragging');dragStartX=e.clientX;dragStartY=e.clientY;basePanX=panX;basePanY=panY;mapStage.setPointerCapture(e.pointerId)});
-  mapStage.addEventListener('pointermove',function(e){if(!dragging)return;panX=basePanX+(e.clientX-dragStartX);panY=basePanY+(e.clientY-dragStartY);updateTransform()});
-  mapStage.addEventListener('pointerup',function(){dragging=false;mapStage.classList.remove('dragging')});
-
-  mapStage.addEventListener('contextmenu',function(e){
-    if(e.target.closest('.map-marker'))return;
-    e.preventDefault();mapCtx.style.display='none';markerCtx.style.display='none';positionMenu(mapCtx,e.clientX,e.clientY);
-  });
-  qa('.map-marker').forEach(function(m){m.addEventListener('contextmenu',function(e){
-    e.preventDefault();e.stopPropagation();selectedMarker=m;mapCtx.style.display='none';q('#markerContextMeta').textContent=m.dataset.name;positionMenu(markerCtx,e.clientX,e.clientY);
-  })});
-  q('#ctxAdd').onclick=function(){openEditor('添加标点','新标点')};
-  q('#ctxEdit').onclick=function(){openEditor('编辑标点',selectedMarker?(selectedMarker.dataset.name||selectedMarker.querySelector&&selectedMarker.querySelector('.title')?.textContent):'标点')};
-  q('#ctxDelete').onclick=function(){if(selectedMarker){selectedMarker.remove();markerCtx.style.display='none';toast('标点已删除')}};
-  q('#ctxCopy').onclick=function(){toast('已复制坐标：1254, -376')};
-  q('#addMarkerButton').onclick=function(){openEditor('添加标点','新标点')};
-
-  q('#saveMarkerButton').onclick=function(){
-    const name=q('#markerName').value.trim()||'未命名标点';
-    if(selectedMarker){
-      if(selectedMarker.classList&&selectedMarker.classList.contains('map-marker')){
-        selectedMarker.dataset.name=name;const label=selectedMarker.querySelector('.marker-label');if(label)label.textContent=name;
-      }else if(selectedMarker.querySelector){
-        const title=selectedMarker.querySelector('.title');if(title)title.textContent=name;
+  function openEditor(mode,id=null,point=null){
+    editorMode=mode;selectedMarkerId=id;overlay.style.display='block';editor.style.display='block';mapCtx.style.display='none';markerCtx.style.display='none';
+    let m=null;
+    if(mode==='edit')m=committed.markers.find(x=>x.id===id);
+    if(mode==='structure'){
+      const st=FIXED_STRUCTURES.find(x=>x.id===id);
+      if(st){
+        const preset=presetFor(st.preset,committed.settings);
+        m={name:st.name,icon:preset.icon,color:preset.color,description:'自动识别结构：'+st.preset,x:st.x,z:st.z,left:st.left,top:st.top};
       }
     }
-    closeModal();toast('标点已保存');
+    if(!m){
+      const s=committed.settings,p=point||contextPoint;
+      m={name:'新标点',icon:s.markerDefaultIcon,color:s.markerDefaultColor,description:'',x:p.x,z:p.z,left:p.left,top:p.top};
+    }
+    editorPoint={x:m.x,z:m.z,left:m.left,top:m.top};
+    q('#editorTitle').textContent=mode==='edit'?'编辑标点':mode==='structure'?'编辑结构标点':'添加标点';q('#markerName').value=m.name;q('#markerDescription').value=m.description||'';
+    q('#markerColor').value=m.color;q('#markerSwatch').style.background=m.color;q('#markerColorText').textContent=m.color.toUpperCase();
+    q('#markerCoords').textContent='X '+m.x+'　Z '+m.z;q('#deleteMarkerButton').style.visibility=(mode==='edit'||mode==='structure')?'visible':'hidden';
+    q('#markerIconSelect').dataset.value=m.icon;updateSelectDisplay(q('#markerIconSelect'),m.icon);
+  }
+  function saveEditor(){
+    const name=q('#markerName').value.trim();if(!name){toast('请输入标点名称');q('#markerName').focus();return;}
+    const m={name,icon:q('#markerIconSelect').dataset.value||'pin',color:q('#markerColor').value.toUpperCase(),description:q('#markerDescription').value.trim(),...editorPoint};
+    if(editorMode==='edit'){
+      const i=committed.markers.findIndex(x=>x.id===selectedMarkerId);if(i>=0)committed.markers[i]={...committed.markers[i],...m};
+    }else if(editorMode==='structure'){
+      m.id='m'+Date.now().toString(36);m.sourceStructureId=selectedStructureId;committed.markers.push(m);
+      if(selectedStructureId&&!committed.hiddenStructures.includes(selectedStructureId))committed.hiddenStructures.push(selectedStructureId);
+    }else{
+      m.id='m'+Date.now().toString(36);committed.markers.push(m);
+    }
+    save();closeModal(false);renderAppSettings();toast(editorMode==='edit'?'标点已保存':editorMode==='structure'?'自动结构已转为自定义标点':'标点已添加');
+  }
+  function deleteMarker(id){
+    const i=committed.markers.findIndex(x=>x.id===id);if(i<0)return;
+    const removed=committed.markers.splice(i,1)[0];save();renderAppSettings();closeModal(false);toast('已删除：'+removed.name);
+  }
+
+  function positionMenu(el,x,y){
+    el.style.display='block';const r=el.getBoundingClientRect();
+    el.style.left=Math.max(8,Math.min(innerWidth-r.width-8,x))+'px';el.style.top=Math.max(70,Math.min(innerHeight-r.height-8,y))+'px';
+  }
+  function pointFromEvent(e){
+    const r=mapStage.getBoundingClientRect();
+    const screenLeft=(e.clientX-r.left)/r.width*100, screenTop=(e.clientY-r.top)/r.height*100;
+    const panPctX=committed.view.panX/r.width*100, panPctY=committed.view.panY/r.height*100;
+    const left=50+(screenLeft-50-panPctX)/committed.view.zoom;
+    const top=50+(screenTop-50-panPctY)/committed.view.zoom;
+    const cl=Math.max(1,Math.min(99,left)),ct=Math.max(1,Math.min(99,top));
+    return {left:cl,top:ct,x:Math.round(1254+(cl-50)*36),z:Math.round(-376+(ct-50)*36)};
+  }
+  function bindMarkerContext(){
+    qa('.map-marker').forEach(el=>el.oncontextmenu=e=>{
+      e.preventDefault();e.stopPropagation();mapCtx.style.display='none';
+      if(el.dataset.kind==='custom'){
+        selectedMarkerId=el.dataset.markerId;selectedStructureId=null;q('#markerContextMeta').textContent=el.dataset.name;
+      }else{
+        selectedMarkerId=null;selectedStructureId=el.dataset.structureId;q('#markerContextMeta').textContent=el.dataset.name+' · 自动结构';
+      }
+      q('#ctxEdit').classList.remove('disabled');q('#ctxDelete').classList.remove('disabled');positionMenu(markerCtx,e.clientX,e.clientY);
+    });
+  }
+
+  function openDropdown(anchor,items,value,onSelect){
+    dropdown.innerHTML=items.map(i=>'<div class="dropdown-item '+(i.value===value?'active':'')+'" data-value="'+i.value+'">'+(i.icon?'<svg class="icon"><use href="#'+iconUse(i.icon)+'"/></svg>':'')+escapeHtml(i.label)+'</div>').join('');
+    dropdown.classList.add('open');const r=anchor.getBoundingClientRect(),dw=Math.max(190,r.width);
+    dropdown.style.width=dw+'px';dropdown.style.left=Math.max(8,Math.min(innerWidth-dw-8,r.left))+'px';
+    dropdown.style.top=Math.min(innerHeight-290,r.bottom+4)+'px';dropdownHandler=onSelect;
+    qa('.dropdown-item').forEach(it=>it.onclick=()=>{const v=it.dataset.value;closeDropdown();onSelect(v);});
+  }
+  function closeDropdown(){dropdown.classList.remove('open');dropdownHandler=null;}
+  function openIconDropdown(anchor,value,onSelect){
+    const keys=['pin','home','mine','ship','mountain','temple','village','mansion','outpost','portal','city','fortress','cave','water'];
+    openDropdown(anchor,keys.map(k=>({value:k,label:iconLabel(k),icon:k})),value,onSelect);
+  }
+  function escapeHtml(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+  function keyString(e){
+    const parts=[];if(e.ctrlKey)parts.push('Ctrl');if(e.altKey)parts.push('Alt');if(e.shiftKey&&e.key!=='Shift')parts.push('Shift');
+    let k=e.key;if(k===' ')k='Space';if(k.length===1)k=k.toUpperCase();if(['Control','Alt','Shift','Meta'].includes(k))return null;
+    parts.push(k);return parts.join('+');
+  }
+
+  // navigation / modal
+  qa('.nav-btn').forEach(btn=>btn.onclick=()=>{
+    const n=btn.dataset.nav;if(n==='map')hidePanels();else if(n==='markers'||n==='layers')openPanel(n);else if(n==='settings')openSettings();else if(n==='about')openAbout();
+  });
+  qa('[data-panel-close]').forEach(b=>b.onclick=hidePanels);
+  qa('[data-about-close]').forEach(b=>b.onclick=()=>closeModal(false));
+  overlay.onclick=e=>{if(e.target===overlay)closeModal(true);};
+  qa('.settings-nav-item').forEach(i=>i.onclick=()=>activateSettingsPage(i.dataset.page));
+  qa('.subtab').forEach(tab=>tab.onclick=()=>{
+    qa('.subtab').forEach(x=>x.classList.remove('active'));tab.classList.add('active');
+    qa('[data-subpage]').forEach(x=>x.classList.toggle('hidden',x.dataset.subpage!==tab.dataset.sub));
+  });
+  qa('.settings-modal [data-modal-close]').forEach(b=>b.onclick=()=>b.classList.contains('primary')?applySettings():cancelSettings());
+  qa('.settings-modal .btn').filter(b=>b.textContent.includes('恢复默认')).forEach(b=>b.onclick=resetCurrentPage);
+
+  // settings controls
+  qa('[data-switch][data-setting]').forEach(sw=>sw.onclick=()=>{if(!draft)return;draft.settings[sw.dataset.setting]=!draft.settings[sw.dataset.setting];renderSettings();renderAppSettings(draft.settings);});
+  qa('[data-player-icon]').forEach(b=>b.onclick=()=>{if(!draft)return;draft.settings.playerIcon=b.dataset.playerIcon;renderSettings();renderAppSettings(draft.settings);});
+  q('#playerSize').oninput=e=>{if(!draft)return;draft.settings.playerSize=+e.target.value;renderSettings();renderAppSettings(draft.settings);};
+  q('#playerColor').oninput=e=>{if(!draft)return;draft.settings.playerColor=e.target.value.toUpperCase();renderSettings();renderAppSettings(draft.settings);};
+  q('#requestRange').oninput=e=>{if(!draft)return;draft.settings.requestBatch=+e.target.value;renderSettings();};
+  q('#scanRange').oninput=e=>{if(!draft)return;draft.settings.scanInterval=+e.target.value;renderSettings();};
+  q('#prewarmRange').oninput=e=>{if(!draft)return;draft.settings.prewarm=+e.target.value;renderSettings();};
+  q('#markerDefaultSize').oninput=e=>{if(!draft)return;draft.settings.markerDefaultSize=+e.target.value;renderSettings();renderAppSettings(draft.settings);};
+  q('#markerScaleRange').oninput=e=>{if(!draft)return;draft.settings.markerScale=+e.target.value;renderSettings();renderAppSettings(draft.settings);};
+  q('#markerDefaultColor').oninput=e=>{if(!draft)return;draft.settings.markerDefaultColor=e.target.value.toUpperCase();renderSettings();};
+  q('#markerDefaultIconSelect').onclick=()=>{if(draft)openIconDropdown(q('#markerDefaultIconSelect'),draft.settings.markerDefaultIcon,v=>{draft.settings.markerDefaultIcon=v;renderSettings();});};
+  q('#recolorCache').onclick=()=>toast('已安排重新着色：只重绘缓存，不扫描世界');
+  q('#clearGpuCache').onclick=()=>toast('GPU 地图纹理已清除（原型模拟）');
+  q('#refreshAll').onclick=()=>toast('已安排刷新全部已覆盖地图（原型模拟）');
+
+  qa('.style-card').forEach(card=>card.onclick=()=>{
+    if(card.dataset.disabled==='true'){toast(card.querySelector('.style-name').textContent+'：暂未实现，仅预留设置项');return;}
+    if(draft){draft.settings.style='satellite';renderSettings();}
+  });
+
+  // layer controls modify committed state immediately
+  q('#structureExpand').onclick=()=>q('#structureGroup').classList.toggle('expanded');
+  qa('.checkbox[data-toggle]').forEach(cb=>cb.onclick=()=>{const k=cb.dataset.toggle;committed.settings[k]=!committed.settings[k];save();renderAppSettings();});
+  qa('.checkbox[data-structure-filter]').forEach(cb=>cb.onclick=()=>{const k=cb.dataset.structureFilter;committed.settings.structureFilters[k]=!committed.settings.structureFilters[k];save();renderAppSettings();});
+
+  // marker editor
+  q('#markerIconSelect').onclick=()=>openIconDropdown(q('#markerIconSelect'),q('#markerIconSelect').dataset.value||'pin',v=>{q('#markerIconSelect').dataset.value=v;updateSelectDisplay(q('#markerIconSelect'),v);});
+  q('#markerColor').oninput=e=>{q('#markerSwatch').style.background=e.target.value;q('#markerColorText').textContent=e.target.value.toUpperCase();};
+  q('#saveMarkerButton').onclick=saveEditor;q('#deleteMarkerButton').onclick=()=>{
+    if(editorMode==='edit'&&selectedMarkerId)deleteMarker(selectedMarkerId);
+    else if(editorMode==='structure'&&selectedStructureId){
+      if(!committed.hiddenStructures.includes(selectedStructureId))committed.hiddenStructures.push(selectedStructureId);
+      save();closeModal(false);renderAppSettings();toast('自动结构标点已隐藏');
+    }
   };
-  q('#deleteMarkerButton').onclick=function(){if(selectedMarker&&selectedMarker.remove)selectedMarker.remove();closeModal();toast('标点已删除')};
+  qa('[data-editor-close]').forEach(b=>b.onclick=()=>closeModal(false));
+  q('#addMarkerButton').onclick=()=>openEditor('add',null,{x:1254,z:-376,left:50,top:50});
 
-  const markerRows=[['临时营地','1254, -376','i-home'],['矿区 A','1690, -188','i-mine'],['北岭入口','882, -1012','i-mountain'],['河口码头','1418, -642','i-ship']];
-  q('#markerList').innerHTML=markerRows.map(function(r){return '<div class="marker-row"><svg class="icon mi"><use href="#'+r[2]+'"/></svg><div class="info"><div class="title">'+r[0]+'</div><div class="meta">'+r[1]+'</div></div><div class="row-actions"><button class="mini edit-row"><svg class="icon"><use href="#i-edit"/></svg></button><button class="mini danger"><svg class="icon"><use href="#i-trash"/></svg></button></div></div>'}).join('');
-  qa('.edit-row').forEach(function(b){b.onclick=function(){const name=b.closest('.marker-row').querySelector('.title').textContent;selectedMarker=b.closest('.marker-row');openEditor('编辑标点',name)}});
-  qa('.marker-row .mini.danger').forEach(function(b){b.onclick=function(){b.closest('.marker-row').remove();toast('标点已删除')}});
+  // map controls
+  q('#zoomIn').onclick=()=>setZoom(committed.view.zoom*1.25);q('#zoomOut').onclick=()=>setZoom(committed.view.zoom/1.25);
+  q('#locateBtn').onclick=()=>{committed.view={zoom:1,panX:0,panY:0};save();renderView();toast('已回到玩家位置');};
+  q('#homeBtn').onclick=()=>{committed.view={zoom:.8,panX:180,panY:-80};save();renderView();toast('已回到出生点');};
+  mapStage.addEventListener('wheel',e=>{if(settings.style.display==='block'||editor.style.display==='block')return;e.preventDefault();setZoom(e.deltaY<0?committed.view.zoom*1.12:committed.view.zoom/1.12);},{passive:false});
+  mapStage.addEventListener('pointerdown',e=>{
+    if(e.button!==0||!committed.settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box,.map-marker'))return;
+    dragging=true;mapStage.classList.add('dragging');dragStartX=e.clientX;dragStartY=e.clientY;basePanX=committed.view.panX;basePanY=committed.view.panY;mapStage.setPointerCapture(e.pointerId);
+  });
+  mapStage.addEventListener('pointermove',e=>{if(!dragging)return;committed.view.panX=basePanX+(e.clientX-dragStartX);committed.view.panY=basePanY+(e.clientY-dragStartY);renderView();});
+  mapStage.addEventListener('pointerup',()=>{if(dragging){dragging=false;mapStage.classList.remove('dragging');save();}});
+  mapStage.addEventListener('contextmenu',e=>{
+    if(e.target.closest('.map-marker'))return;e.preventDefault();contextPoint=pointFromEvent(e);
+    q('#mapContext .ctx-meta span').textContent='X '+contextPoint.x+', Z '+contextPoint.z;markerCtx.style.display='none';positionMenu(mapCtx,e.clientX,e.clientY);
+  });
+  q('#ctxAdd').onclick=()=>openEditor('add',null,contextPoint);
+  q('#ctxTeleport').onclick=()=>{mapCtx.style.display='none';toast('已传送至 '+contextPoint.x+', '+contextPoint.z+'（原型模拟）');};
+  q('#ctxCopy').onclick=async()=>{const txt=contextPoint.x+', '+contextPoint.z;try{await navigator.clipboard.writeText(txt);}catch(e){}mapCtx.style.display='none';toast('已复制坐标：'+txt);};
+  q('#markerTeleport').onclick=()=>{
+    const m=committed.markers.find(x=>x.id===selectedMarkerId),st=FIXED_STRUCTURES.find(x=>x.id===selectedStructureId);
+    markerCtx.style.display='none';
+    if(m)toast('已传送到 '+m.name+' · '+m.x+', '+m.z+'（原型模拟）');
+    else if(st)toast('已传送到 '+st.name+' · '+st.x+', '+st.z+'（原型模拟）');
+  };
+  q('#ctxEdit').onclick=()=>{if(selectedMarkerId)openEditor('edit',selectedMarkerId);else if(selectedStructureId)openEditor('structure',selectedStructureId);};
+  q('#ctxDelete').onclick=()=>{
+    if(selectedMarkerId)deleteMarker(selectedMarkerId);
+    else if(selectedStructureId){
+      if(!committed.hiddenStructures.includes(selectedStructureId))committed.hiddenStructures.push(selectedStructureId);
+      const st=FIXED_STRUCTURES.find(x=>x.id===selectedStructureId);save();markerCtx.style.display='none';renderAppSettings();toast('已隐藏自动结构标点：'+(st?st.name:'结构'));
+    }
+  };
 
-  const structures=[
-    ['村庄','i-village','#F4C84F'],['林地府邸','i-mansion','#E7D7C0'],['沙漠神殿','i-temple','#DDB85E'],['丛林神庙','i-temple','#8FCB73'],
-    ['沼泽小屋','i-home','#A6B17F'],['雪屋','i-home','#EDF4F6'],['海底神殿','i-temple','#70C7CE'],['掠夺者前哨站','i-outpost','#C89A76'],
-    ['废弃矿井','i-mine','#C08A55'],['废弃传送门','i-portal','#A77CE8'],['沉船','i-ship','#6EB5D1'],['海底废墟','i-water','#64C0D3'],
-    ['埋藏的宝藏','i-pin','#F3D66A'],['古迹废墟','i-temple','#BA9673'],['试炼密室','i-temple','#D6A06A'],['远古城市','i-city','#6DABA8'],
-    ['要塞','i-fortress','#B7ADA0'],['下界要塞','i-fortress','#B8554E'],['堡垒遗迹','i-fortress','#84695A'],['下界化石','i-cave','#D7C2A3'],
-    ['末地城','i-city','#C7A3D5'],['其他结构','i-pin','#D7B85D']
-  ];
-  q('#structureList').innerHTML=structures.map(function(r){return '<div class="structure-row"><div>'+r[0]+'</div><div class="structure-select"><div class="left"><svg class="icon"><use href="#'+r[1]+'"/></svg>'+r[0]+'</div><svg class="icon"><use href="#i-chevron"/></svg></div><div class="structure-color"><span class="swatch" style="background:'+r[2]+'"></span></div></div>'}).join('');
-  qa('.structure-color .swatch').forEach(function(s){s.onclick=function(){toast('原型：打开单色取色器')}});
+  // shortcut editing and actual shortcuts
+  qa('[data-shortcut]').forEach(k=>k.onclick=()=>{if(!draft)return;captureShortcut=k.dataset.shortcut;k.classList.add('capturing');k.textContent='按下新快捷键…';});
+  document.addEventListener('keydown',e=>{
+    if(captureShortcut&&draft){
+      e.preventDefault();if(e.key==='Escape'){captureShortcut=null;renderSettings();return;}
+      const v=keyString(e);if(!v)return;draft.settings.shortcuts[captureShortcut]=v;captureShortcut=null;renderSettings();return;
+    }
+    if(e.key==='Escape'){if(dropdown.classList.contains('open'))closeDropdown();else if(editor.style.display==='block'||settings.style.display==='block'||about.style.display==='block')closeModal(true);else if(mapCtx.style.display==='block'||markerCtx.style.display==='block')hidePanels();else if(layers.style.display==='block'||markersPanel.style.display==='block')hidePanels();return;}
+    const s=committed.settings.shortcuts, key=keyString(e);if(!key)return;
+    if(key===s.locate){q('#locateBtn').click();}
+    if(key===s.add){e.preventDefault();openEditor('add',null,{x:1254,z:-376,left:50,top:50});}
+    if(key===s.map){e.preventDefault();toast('地图快捷键 '+s.map+'（游戏内用于打开 / 关闭地图）');}
+  });
 
-  q('.window-close').onclick=function(){toast('原型：关闭地图')};
+  document.addEventListener('pointerdown',e=>{if(dropdown.classList.contains('open')&&!e.target.closest('#dropdown,.select,.structure-select'))closeDropdown();});
+
+  q('.window-close').onclick=()=>toast('游戏内此按钮关闭地图（原型保留页面）');
+
+  // boot
+  renderAppSettings(committed.settings);renderView();renderSettings();
   const demo=new URLSearchParams(location.search).get('demo');
-  if(demo==='settings')openSettings('general');
-  if(demo==='layers')openPanel('layers');
-  if(demo==='markers')openPanel('markers');
-  if(demo==='modern'){app.dataset.style='modern';qa('.style-card').forEach(function(x){x.classList.toggle('active',x.dataset.styleChoice==='modern')})}
-  if(demo==='ancient'){app.dataset.style='ancient';qa('.style-card').forEach(function(x){x.classList.toggle('active',x.dataset.styleChoice==='ancient')})}
+  if(demo==='settings')openSettings('general');else if(demo==='layers')openPanel('layers');else if(demo==='markers')openPanel('markers');
 })();
 </script>
 </body>
