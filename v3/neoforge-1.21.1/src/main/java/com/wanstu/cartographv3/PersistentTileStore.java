@@ -4,7 +4,10 @@ import net.minecraft.client.Minecraft;
 
 import java.io.*;
 import java.nio.file.*;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -17,6 +20,7 @@ final class PersistentTileStore {
     private static final int VERSION_RGB_ONLY = 1;
     private static final int VERSION_SURFACE_FACTS = 2;
     private static final int VERSION_RENDERED_FACTS = 3;
+    private static final int VERSION_RENDERED_FACTS_WITH_STYLE = 4;
 
     private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "cartograph-v3-client-cache-writer");
@@ -62,10 +66,22 @@ final class PersistentTileStore {
                 for (int i = 0; i < rgb.length; i++) rgb[i] = input.readInt();
                 tile = new SurfaceTile(key, rgb);
             } else if (version == VERSION_SURFACE_FACTS
-                    || version == VERSION_RENDERED_FACTS) {
+                    || version == VERSION_RENDERED_FACTS
+                    || version == VERSION_RENDERED_FACTS_WITH_STYLE) {
+                long cachedRenderSignature = version == VERSION_RENDERED_FACTS_WITH_STYLE
+                        ? input.readLong()
+                        : Long.MIN_VALUE;
+                boolean useCachedRgb =
+                        version == VERSION_RENDERED_FACTS_WITH_STYLE
+                                && cachedRenderSignature == SatelliteSurfaceRenderer.renderSignature();
+
                 int[] rgb = new int[SurfaceTile.PIXELS];
-                if (version == VERSION_RENDERED_FACTS) {
-                    for (int i = 0; i < rgb.length; i++) rgb[i] = input.readInt();
+                if (version == VERSION_RENDERED_FACTS
+                        || version == VERSION_RENDERED_FACTS_WITH_STYLE) {
+                    for (int i = 0; i < rgb.length; i++) {
+                        int color = input.readInt();
+                        if (useCachedRgb) rgb[i] = color;
+                    }
                 }
                 int[] states = new int[SurfaceTile.PIXELS];
                 int[] biomes = new int[SurfaceTile.PIXELS];
@@ -107,6 +123,8 @@ final class PersistentTileStore {
         Path directory = directory(worldId, dimension);
         READER.execute(() -> {
             if (!Files.isDirectory(directory)) return;
+
+            List<ChunkKey> candidates = new ArrayList<>();
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*.ctv3")) {
                 for (Path candidate : stream) {
                     ChunkKey key = keyFromFile(dimension, candidate.getFileName().toString());
@@ -116,15 +134,28 @@ final class PersistentTileStore {
                             || !scheduled.add(key)) {
                         continue;
                     }
-
-                    Optional<SurfaceTile> tile = loadRaw(worldId, key);
-                    if (tile.isPresent()) {
-                        consumer.accept(worldId, tile.get());
-                    } else {
-                        scheduled.remove(key);
-                    }
+                    candidates.add(key);
                 }
-            } catch (IOException ignored) {}
+            } catch (IOException ignored) {
+                return;
+            }
+
+            long centerX = ((long) minChunkX + (long) maxChunkX) / 2L;
+            long centerZ = ((long) minChunkZ + (long) maxChunkZ) / 2L;
+            candidates.sort(Comparator.comparingLong(key -> {
+                long dx = Math.abs((long) key.x() - centerX);
+                long dz = Math.abs((long) key.z() - centerZ);
+                return Math.max(dx, dz);
+            }));
+
+            for (ChunkKey key : candidates) {
+                Optional<SurfaceTile> tile = loadRaw(worldId, key);
+                if (tile.isPresent()) {
+                    consumer.accept(worldId, tile.get());
+                } else {
+                    scheduled.remove(key);
+                }
+            }
         });
     }
 
@@ -156,6 +187,7 @@ final class PersistentTileStore {
         short[] surface = tile.surfaceHeights();
         short[] relief = tile.reliefHeights();
         byte[] water = tile.waterDepths();
+        long renderSignature = SatelliteSurfaceRenderer.renderSignature();
 
         WRITER.execute(() -> {
             Path target = file(worldId, tile.key());
@@ -166,9 +198,10 @@ final class PersistentTileStore {
                         new BufferedOutputStream(Files.newOutputStream(tmp,
                                 StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)))) {
                     output.writeInt(MAGIC);
-                    output.writeInt(VERSION_RENDERED_FACTS);
+                    output.writeInt(VERSION_RENDERED_FACTS_WITH_STYLE);
                     output.writeInt(tile.key().x());
                     output.writeInt(tile.key().z());
+                    output.writeLong(renderSignature);
 
                     int[] rgb = tile.rgb();
                     for (int color : rgb) output.writeInt(color);

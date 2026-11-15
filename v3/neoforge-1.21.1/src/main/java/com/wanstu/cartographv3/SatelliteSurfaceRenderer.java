@@ -43,12 +43,48 @@ final class SatelliteSurfaceRenderer {
     private static final Map<Integer, Appearance[]> STATE_CACHE = new HashMap<>();
     private static final Map<ResourceLocation, Integer> SPRITE_CACHE = new HashMap<>();
     private static final TintContext TINT_CONTEXT = new TintContext();
+    private static final long RENDER_PIPELINE_VERSION = 6L;
+    private static volatile long renderSignature;
 
     private SatelliteSurfaceRenderer() {}
 
     static void beginMapSession() {
         STATE_CACHE.clear();
         SPRITE_CACHE.clear();
+        renderSignature = computeRenderSignature();
+    }
+
+    static long renderSignature() {
+        long current = renderSignature;
+        if (current != 0L) return current;
+        current = computeRenderSignature();
+        renderSignature = current;
+        return current;
+    }
+
+    private static long computeRenderSignature() {
+        long hash = 0xcbf29ce484222325L;
+        hash = fnv64(hash, Long.toString(RENDER_PIPELINE_VERSION));
+        try {
+            for (String id : Minecraft.getInstance()
+                    .getResourcePackRepository().getSelectedIds()) {
+                hash = fnv64(hash, id);
+                hash ^= 0xffL;
+                hash *= 0x100000001b3L;
+            }
+        } catch (RuntimeException ignored) {
+            hash = fnv64(hash, "resource-packs-unavailable");
+        }
+        return hash == 0L ? 1L : hash;
+    }
+
+    private static long fnv64(long hash, String value) {
+        if (value == null) return hash;
+        for (int i = 0; i < value.length(); i++) {
+            hash ^= value.charAt(i);
+            hash *= 0x100000001b3L;
+        }
+        return hash;
     }
 
     static SurfaceTile render(SurfaceTile tile) {

@@ -719,10 +719,20 @@ public final class MapScreenV3 extends Screen {
             graphics.drawString(font, "边框色", contentX, row4 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "图标大小", contentX, row5 + 5, 0xffd8dde2, false);
 
-            markerTypeSelect.render(graphics, font, mouseX, mouseY);
-            markerPrimaryColorInput.render(graphics, font, mouseX, mouseY);
-            markerColorInput.render(graphics, font, mouseX, mouseY);
-            markerLineColorInput.render(graphics, font, mouseX, mouseY);
+            MapUiControls.Control playerPopup = null;
+            MapUiControls.Control[] playerControls = {
+                    markerTypeSelect,
+                    markerPrimaryColorInput,
+                    markerColorInput,
+                    markerLineColorInput
+            };
+            for (MapUiControls.Control control : playerControls) {
+                if (control.popupOpen()) {
+                    playerPopup = control;
+                } else {
+                    control.render(graphics, font, mouseX, mouseY);
+                }
+            }
             markerSizeSlider.render(graphics, font, mouseX, mouseY);
 
             String sizeText = MapUiSettings.markerSize() + " px";
@@ -730,6 +740,11 @@ public final class MapScreenV3 extends Screen {
                     font, sizeText,
                     Math.max(contentX, contentRight - font.width(sizeText)),
                     row5 + 5, 0xffd7dde2, false);
+
+            // The active popup is visually topmost, matching input routing.
+            if (playerPopup != null) {
+                playerPopup.render(graphics, font, mouseX, mouseY);
+            }
         } else if (settingsTab == SettingsTab.STRUCTURE) {
             graphics.drawString(font, "结构预设", contentX, contentY, 0xfff0f3f5, false);
             graphics.fill(contentX, contentY + 15, contentRight, contentY + 16, 0xff39424a);
@@ -753,6 +768,7 @@ public final class MapScreenV3 extends Screen {
             graphics.drawCenteredString(
                     font, "边", columns[4] + columns[6] / 2, listTop - 12, 0xffaeb7be);
 
+            MapUiControls.Control structurePopup = null;
             int row = 0;
             for (MapMarkerStore.StructurePreset preset : MapMarkerStore.StructurePreset.values()) {
                 int rowY = structureRowY(row);
@@ -773,14 +789,23 @@ public final class MapScreenV3 extends Screen {
                     accent.setValue(MapUiSettings.structurePresetAccentColor(preset));
                     line.setValue(MapUiSettings.structurePresetLineColor(preset));
 
-                    select.render(graphics, font, mouseX, mouseY);
-                    primary.render(graphics, font, mouseX, mouseY);
-                    accent.render(graphics, font, mouseX, mouseY);
-                    line.render(graphics, font, mouseX, mouseY);
+                    MapUiControls.Control[] rowControls = {
+                            select, primary, accent, line
+                    };
+                    for (MapUiControls.Control control : rowControls) {
+                        if (control.popupOpen()) {
+                            structurePopup = control;
+                        } else {
+                            control.render(graphics, font, mouseX, mouseY);
+                        }
+                    }
                 }
                 row++;
             }
             renderStructureScrollBar(graphics, contentRight, listTop, listBottom);
+            if (structurePopup != null) {
+                structurePopup.render(graphics, font, mouseX, mouseY);
+            }
         } else if (settingsTab == SettingsTab.MAP) {
             graphics.drawString(font, "地图性能", contentX, contentY, 0xfff0f3f5, false);
             graphics.fill(contentX, contentY + 15, contentRight, contentY + 16, 0xff39424a);

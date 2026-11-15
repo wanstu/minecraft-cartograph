@@ -16,11 +16,13 @@ public final class MapClientCache {
     private static final Map<ChunkKey, Long> VALIDATED_SESSION = new HashMap<>();
     private record RegionKey(String dimension, int x, int z) {}
     private static final Map<RegionKey, Integer> REGION_TILE_COUNTS = new HashMap<>();
-    private record DiskRestore(java.util.UUID worldId, SurfaceTile tile) {}
-    private static final Set<ChunkKey> DISK_RESTORE_SCHEDULED = ConcurrentHashMap.newKeySet();
+    private record DiskRestore(
+            java.util.UUID worldId, long generation, SurfaceTile tile) {}
+    private static Set<ChunkKey> DISK_RESTORE_SCHEDULED = ConcurrentHashMap.newKeySet();
     private static final ConcurrentLinkedQueue<DiskRestore> DISK_RESTORE_QUEUE =
             new ConcurrentLinkedQueue<>();
     private static final int MAX_DISK_RESTORES_PER_TICK = 512;
+    private static final int MAX_RENDER_UPGRADES_PER_TICK = 12;
 
     private static ClientLevel world;
     private static java.util.UUID worldId;
@@ -31,6 +33,8 @@ public final class MapClientCache {
     private static int validated;
     private static long mapSession;
     private static long tileRevision;
+    private static long renderSignature;
+    private static long diskRestoreGeneration;
 
     private MapClientCache() {}
 
@@ -44,8 +48,7 @@ public final class MapClientCache {
         MISSING_AT.clear();
         VALIDATED_SESSION.clear();
         REGION_TILE_COUNTS.clear();
-        DISK_RESTORE_SCHEDULED.clear();
-        DISK_RESTORE_QUEUE.clear();
+        resetDiskRestores();
         mapSession = 0L;
         tileRevision++;
         ticks = 0;
@@ -53,6 +56,7 @@ public final class MapClientCache {
         received = 0;
         validated = 0;
         SatelliteSurfaceRenderer.beginMapSession();
+        renderSignature = SatelliteSurfaceRenderer.renderSignature();
         MapMarkerStore.ensureWorld(null);
         if (level != null) requestWorldInfo();
     }
@@ -84,14 +88,17 @@ public final class MapClientCache {
         if (world == null || currentWorldId == null || dimension == null || dimension.isBlank()) {
             return;
         }
+        Set<ChunkKey> scheduled = DISK_RESTORE_SCHEDULED;
+        long generation = diskRestoreGeneration;
         PersistentTileStore.loadVisibleAsync(
                 currentWorldId,
                 dimension,
                 minChunkX, maxChunkX,
                 minChunkZ, maxChunkZ,
-                DISK_RESTORE_SCHEDULED,
+                scheduled,
                 (restoreWorldId, tile) ->
-                        DISK_RESTORE_QUEUE.add(new DiskRestore(restoreWorldId, tile)));
+                        DISK_RESTORE_QUEUE.add(
+                                new DiskRestore(restoreWorldId, generation, tile)));
     }
 
     private static void preloadCurrentDimensionFromDisk(String dimension) {
@@ -106,34 +113,37 @@ public final class MapClientCache {
             int centerChunkX = Math.floorDiv((int) Math.floor(player.getX()), 16);
             int centerChunkZ = Math.floorDiv((int) Math.floor(player.getZ()), 16);
             int radius = 1024;
+            Set<ChunkKey> scheduled = DISK_RESTORE_SCHEDULED;
+            long generation = diskRestoreGeneration;
             PersistentTileStore.loadVisibleAsync(
                     currentWorldId,
                     dimension,
                     centerChunkX - radius, centerChunkX + radius,
                     centerChunkZ - radius, centerChunkZ + radius,
-                    DISK_RESTORE_SCHEDULED,
+                    scheduled,
                     (restoreWorldId, tile) ->
-                            DISK_RESTORE_QUEUE.add(new DiskRestore(restoreWorldId, tile)));
+                            DISK_RESTORE_QUEUE.add(
+                                    new DiskRestore(restoreWorldId, generation, tile)));
         }
 
-        // Then continue with the complete dimension in the same single-reader
-        // queue. Already scheduled nearby tiles are skipped.
-        PersistentTileStore.loadVisibleAsync(
-                currentWorldId,
-                dimension,
-                Integer.MIN_VALUE, Integer.MAX_VALUE,
-                Integer.MIN_VALUE, Integer.MAX_VALUE,
-                DISK_RESTORE_SCHEDULED,
-                (restoreWorldId, tile) ->
-                        DISK_RESTORE_QUEUE.add(new DiskRestore(restoreWorldId, tile)));
+    }
+
+    private static void resetDiskRestores() {
+        diskRestoreGeneration++;
+        DISK_RESTORE_SCHEDULED = ConcurrentHashMap.newKeySet();
+        DISK_RESTORE_QUEUE.clear();
     }
 
     private static void drainDiskRestores() {
         int restored = 0;
+        int renderedUpgrades = 0;
         while (restored < MAX_DISK_RESTORES_PER_TICK) {
             DiskRestore next = DISK_RESTORE_QUEUE.poll();
             if (next == null) break;
-            if (!Objects.equals(worldId, next.worldId())) continue;
+            if (!Objects.equals(worldId, next.worldId())
+                    || next.generation() != diskRestoreGeneration) {
+                continue;
+            }
 
             SurfaceTile raw = next.tile();
             ChunkKey key = raw.key();
@@ -141,9 +151,19 @@ public final class MapClientCache {
 
             boolean needsRenderUpgrade =
                     raw.hasSurfaceFacts() && !raw.hasRenderedRgb();
+            if (needsRenderUpgrade
+                    && renderedUpgrades >= MAX_RENDER_UPGRADES_PER_TICK) {
+                // Rendering old fact-only cache is deliberately throttled.
+                // Requeue one item and stop this tick so cache migration cannot
+                // monopolize the client CPU / starve the integrated server.
+                DISK_RESTORE_QUEUE.add(next);
+                break;
+            }
+
             SurfaceTile tile = needsRenderUpgrade
                     ? SatelliteSurfaceRenderer.render(raw)
                     : raw;
+            if (needsRenderUpgrade) renderedUpgrades++;
             TILES.put(key, tile);
             if (needsRenderUpgrade && worldId != null) {
                 PersistentTileStore.save(worldId, tile);
@@ -162,7 +182,27 @@ public final class MapClientCache {
 
     public static void beginMapSession() {
         mapSession++;
+        long previousRenderSignature = renderSignature;
         SatelliteSurfaceRenderer.beginMapSession();
+        renderSignature = SatelliteSurfaceRenderer.renderSignature();
+
+        if (previousRenderSignature != 0L
+                && previousRenderSignature != renderSignature) {
+            TILES.clear();
+            PENDING.clear();
+            MISSING_AT.clear();
+            VALIDATED_SESSION.clear();
+            REGION_TILE_COUNTS.clear();
+            resetDiskRestores();
+            tileRevision++;
+            if (world != null && worldId != null) {
+                preloadCurrentDimensionFromDisk(
+                        world.dimension().location().toString());
+            }
+            LOG.info("V3_RENDER_STYLE_CHANGED old={} new={} cache=restyle",
+                    previousRenderSignature, renderSignature);
+        }
+
         validated = 0;
         firstRequestNanos = 0L;
         received = 0;
@@ -221,8 +261,7 @@ public final class MapClientCache {
                 MISSING_AT.clear();
                 VALIDATED_SESSION.clear();
                 REGION_TILE_COUNTS.clear();
-                DISK_RESTORE_SCHEDULED.clear();
-                DISK_RESTORE_QUEUE.clear();
+                resetDiskRestores();
                 tileRevision++;
             }
             worldId = next;

@@ -139,7 +139,7 @@ BASE_STYLE = f"""
 
 PRIMARY_STYLE = f"""
 svg * {{ opacity:0 !important; }}
-.stroke,.thin,.fill,.gold,.blue,.green,.water,.sand {{
+.stroke,.fill,.gold,.brown,.stone {{
   opacity:1 !important;
   fill:#ffffff !important;
   stroke:#ffffff !important;
@@ -147,16 +147,25 @@ svg * {{ opacity:0 !important; }}
   stroke-linecap:round;
   stroke-linejoin:round;
 }}
-.stroke,.thin {{
+.stroke {{
   fill:none !important;
 }}
 """
 
 ACCENT_STYLE = f"""
 svg * {{ opacity:0 !important; }}
-.soft,.brown,.purple,.stone {{
+.thin,.soft,.blue,.green,.purple,.water,.sand {{
   opacity:1 !important;
   fill:#ffffff !important;
+  stroke:#ffffff !important;
+  stroke-width:1.0 !important;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}}
+.thin {{
+  fill:none !important;
+}}
+.soft {{
   stroke:none !important;
 }}
 """
@@ -285,17 +294,16 @@ def build_semantic_layers(
         else:
             primary = mono
 
-    union = Image.new("L", primary.size, 0)
-    union = ImageChops.lighter(union, primary)
-    union = ImageChops.lighter(union, accent)
-    if union.getbbox() is None:
-        union = mono
+    # The outline must follow the complete icon, including neutral/base
+    # details that are not part of either editable color channel. The mono
+    # render is the authoritative full visible shape.
+    visible = mono if mono.getbbox() is not None else ImageChops.lighter(primary, accent)
 
     # Build a solid silhouette used only as the source for a screen-space
     # 1px outline. Do NOT pre-render a thin border ring into the texture:
     # when 64x64 icons are scaled down to ~12-24px that ring is undersampled
     # and becomes the dotted/checkerboard edge seen in-game.
-    hard = union.point(lambda a: 255 if a >= 24 else 0)
+    hard = visible.point(lambda a: 255 if a >= 24 else 0)
     closed = hard.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
     flood = closed.copy()
     ImageDraw.floodfill(flood, (0, 0), 128)

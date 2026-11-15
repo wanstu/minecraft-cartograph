@@ -193,10 +193,12 @@ final class MapMarkerStore {
             for (Marker marker : loaded) {
                 if (!valid(marker)) continue;
                 if (marker.origin == Origin.AUTO && !marker.modifiedAuto) {
+                    marker.name = defaultStructureName(marker.structureId);
                     marker.icon = defaultStructureIcon(marker.structureId);
                     marker.primaryColor = defaultStructurePrimaryColor(marker.structureId);
                     marker.color = defaultStructureColor(marker.structureId);
                     marker.lineColor = defaultStructureLineColor(marker.structureId);
+                    marker.description = defaultStructureDescription(marker.structureId);
                 }
                 UUID id = marker.uuid();
                 MARKERS.put(id, marker);
@@ -251,17 +253,27 @@ final class MapMarkerStore {
                 if (marker != null && !marker.modifiedAuto) {
                     String nextName = defaultStructureName(hit.structureId());
                     Icon nextIcon = defaultStructureIcon(hit.structureId());
+                    int nextPrimary = defaultStructurePrimaryColor(hit.structureId());
+                    int nextAccent = defaultStructureColor(hit.structureId());
+                    int nextBorder = defaultStructureLineColor(hit.structureId());
+                    String nextDescription = defaultStructureDescription(hit.structureId());
+
                     if (marker.x != hit.x() || marker.z != hit.z()
                             || !Objects.equals(marker.name, nextName)
-                            || marker.icon != nextIcon) {
+                            || marker.icon != nextIcon
+                            || marker.primary() != nextPrimary
+                            || marker.accent() != nextAccent
+                            || marker.line() != nextBorder
+                            || !Objects.equals(marker.description, nextDescription)
+                            || !Objects.equals(marker.structureId, hit.structureId())) {
                         marker.x = hit.x();
                         marker.z = hit.z();
                         marker.name = nextName;
                         marker.icon = nextIcon;
-                        marker.primaryColor = defaultStructurePrimaryColor(hit.structureId());
-                        marker.color = defaultStructureColor(hit.structureId());
-                        marker.lineColor = defaultStructureLineColor(hit.structureId());
-                        marker.description = defaultStructureDescription(hit.structureId());
+                        marker.primaryColor = nextPrimary;
+                        marker.color = nextAccent;
+                        marker.lineColor = nextBorder;
+                        marker.description = nextDescription;
                         marker.structureId = hit.structureId();
                         changed = true;
                     }
@@ -435,17 +447,21 @@ final class MapMarkerStore {
         if (path.contains("mineshaft")) return "废弃矿井";
         if (path.contains("pillager_outpost")) return "掠夺者前哨站";
         if (path.contains("desert_pyramid")) return "沙漠神殿";
-        if (path.contains("jungle_pyramid")) return "丛林神庙";
+        if (path.contains("jungle_pyramid") || path.contains("jungle_temple")) {
+            return "丛林神庙";
+        }
         if (path.contains("swamp_hut")) return "沼泽小屋";
         if (path.contains("igloo")) return "雪屋";
         if (path.contains("shipwreck")) return "沉船";
         if (path.contains("ocean_ruin")) return "海底废墟";
+        if (path.contains("buried_treasure")) return "埋藏的宝藏";
         if (path.contains("ruined_portal")) return "废弃传送门";
         if (path.contains("ancient_city")) return "远古城市";
         if (path.contains("trail_ruins")) return "古迹废墟";
         if (path.contains("trial_chambers")) return "试炼密室";
         if (path.contains("fortress")) return "下界要塞";
         if (path.contains("bastion")) return "堡垒遗迹";
+        if (path.contains("nether_fossil")) return "下界化石";
         if (path.contains("end_city")) return "末地城";
         return humanize(path);
     }
