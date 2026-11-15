@@ -5,20 +5,32 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.storage.LevelResource;
+import net.neoforged.neoforge.event.level.ChunkDataEvent;
 
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class StructureDiscovery {
+    private record Key(String worldRoot, String dimension, int x, int z) {}
+
+    private static final ConcurrentHashMap<Key, List<MapProtocol.StructureHit>> CACHE =
+            new ConcurrentHashMap<>();
+    private static final Set<Key> STALE = ConcurrentHashMap.newKeySet();
+    private static final ConcurrentHashMap<
+            Key, CompletableFuture<List<MapProtocol.StructureHit>>> PENDING =
+            new ConcurrentHashMap<>();
+
     private static final ExecutorService DISK = Executors.newFixedThreadPool(2, task -> {
         Thread thread = new Thread(task, "cartograph-v3-structure-scan");
         thread.setDaemon(true);
@@ -32,19 +44,59 @@ final class StructureDiscovery {
         if (!level.getServer().isSameThread())
             throw new IllegalStateException("Structure request must start on server thread");
 
-        LevelChunk loaded = level.getChunkSource().getChunkNow(chunkX, chunkZ);
-        if (loaded != null) {
-            return CompletableFuture.completedFuture(fromLoaded(level, loaded));
+        Key key = key(level, chunkX, chunkZ);
+        List<MapProtocol.StructureHit> cached = CACHE.get(key);
+        if (cached != null && !STALE.contains(key)) {
+            return CompletableFuture.completedFuture(cached);
         }
 
+        LevelChunk loaded = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+        if (loaded != null) {
+            List<MapProtocol.StructureHit> result = fromLoaded(level, loaded);
+            CACHE.put(key, result);
+            STALE.remove(key);
+            return CompletableFuture.completedFuture(result);
+        }
+
+        CompletableFuture<List<MapProtocol.StructureHit>> existing = PENDING.get(key);
+        if (existing != null) return existing;
+
         Path region = regionDirectory(level);
-        return CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<List<MapProtocol.StructureHit>> future = new CompletableFuture<>();
+        CompletableFuture<List<MapProtocol.StructureHit>> raced =
+                PENDING.putIfAbsent(key, future);
+        if (raced != null) return raced;
+
+        DISK.execute(() -> {
             try {
-                return fromSaved(region, chunkX, chunkZ);
-            } catch (IOException ignored) {
-                return List.of();
+                List<MapProtocol.StructureHit> result =
+                        fromSaved(region, chunkX, chunkZ);
+                CACHE.put(key, result);
+                STALE.remove(key);
+                future.complete(result);
+            } catch (IOException failure) {
+                future.complete(List.of());
+            } catch (Throwable failure) {
+                future.completeExceptionally(failure);
+            } finally {
+                PENDING.remove(key, future);
             }
-        }, DISK);
+        });
+        return future;
+    }
+
+    static void invalidate(ChunkDataEvent.Save event) {
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        var pos = event.getChunk().getPos();
+        STALE.add(key(level, pos.x, pos.z));
+    }
+
+    static void clear(MinecraftServer server) {
+        String root = server.getWorldPath(LevelResource.ROOT)
+                .toAbsolutePath().normalize().toString();
+        CACHE.keySet().removeIf(key -> key.worldRoot().equals(root));
+        STALE.removeIf(key -> key.worldRoot().equals(root));
+        PENDING.keySet().removeIf(key -> key.worldRoot().equals(root));
     }
 
     private static List<MapProtocol.StructureHit> fromLoaded(
@@ -129,6 +181,13 @@ final class StructureDiscovery {
             out.putIfAbsent(key, hit);
         }
         return List.copyOf(out.values());
+    }
+
+    private static Key key(ServerLevel level, int chunkX, int chunkZ) {
+        String root = level.getServer().getWorldPath(LevelResource.ROOT)
+                .toAbsolutePath().normalize().toString();
+        return new Key(
+                root, level.dimension().location().toString(), chunkX, chunkZ);
     }
 
     private static Path regionDirectory(ServerLevel level) {

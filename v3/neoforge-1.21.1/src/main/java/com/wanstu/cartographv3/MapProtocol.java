@@ -279,9 +279,11 @@ public final class MapProtocol {
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
                     if (request.open()) {
+                        TileRequestScheduler.open(player);
                         LiveSurfaceUpdates.open(player, request.liveScanIntervalTicks());
                     } else {
                         LiveSurfaceUpdates.close(player);
+                        TileRequestScheduler.close(player);
                     }
                 }));
         registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
@@ -314,59 +316,7 @@ public final class MapProtocol {
         registrar.playToServer(RequestTile.TYPE, RequestTile.CODEC, (request, context) ->
                 context.enqueueWork(() -> {
                     if (!(context.player() instanceof ServerPlayer player)) return;
-                    String current = player.serverLevel().dimension().location().toString();
-                    if (!current.equals(request.dimension())) return;
-
-                    ChunkKey watchedKey = new ChunkKey(
-                            request.dimension(), request.chunkX(), request.chunkZ());
-                    LiveSurfaceUpdates.watch(player, watchedKey);
-
-                    var surfaceFuture = SurfaceService.request(
-                            player.serverLevel(), request.chunkX(), request.chunkZ());
-                    var structureFuture = StructureDiscovery.request(
-                            player.serverLevel(), request.chunkX(), request.chunkZ());
-                    surfaceFuture.thenCombine(
-                                    structureFuture,
-                                    (surface, structures) -> new java.util.AbstractMap.SimpleImmutableEntry<>(
-                                            surface, structures))
-                            .whenComplete((combined, error) -> player.server.execute(() -> {
-                                var surface = combined == null
-                                        ? java.util.Optional.<SurfaceTile>empty()
-                                        : combined.getKey();
-                                var structures = combined == null
-                                        ? java.util.List.<StructureHit>of()
-                                        : combined.getValue();
-                                if (!player.isAlive() || player.serverLevel() == null) return;
-                                if (!player.serverLevel().dimension().location().toString()
-                                        .equals(request.dimension())) return;
-                                if (error != null) {
-                                    PacketDistributor.sendToPlayer(player,
-                                            Tile.status(
-                                                    request.dimension(), request.chunkX(),
-                                                    request.chunkZ(),
-                                                    request.hasKnownFingerprint(),
-                                                    false, true, java.util.List.of()));
-                                    return;
-                                }
-                                if (surface == null || surface.isEmpty()) {
-                                    PacketDistributor.sendToPlayer(player,
-                                            Tile.status(
-                                                    request.dimension(), request.chunkX(),
-                                                    request.chunkZ(),
-                                                    false, false, false, structures));
-                                    return;
-                                }
-                                SurfaceTile tile = surface.get();
-                                boolean unchanged = request.hasKnownFingerprint()
-                                        && request.knownFingerprint() == tile.fingerprint64();
-                                PacketDistributor.sendToPlayer(player,
-                                        unchanged
-                                                ? Tile.status(
-                                                        tile.key().dimension(),
-                                                        tile.key().x(), tile.key().z(),
-                                                        true, false, false, structures)
-                                                : Tile.changed(tile, structures));
-                            }));
+                    TileRequestScheduler.enqueue(player, request);
                 }));
 
         registrar.playToClient(WorldInfo.TYPE, WorldInfo.CODEC, (info, context) ->

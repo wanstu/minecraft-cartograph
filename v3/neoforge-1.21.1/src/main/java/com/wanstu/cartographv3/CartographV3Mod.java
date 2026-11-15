@@ -13,16 +13,20 @@ public final class CartographV3Mod {
     public CartographV3Mod(IEventBus modBus) {
         modBus.addListener(MapProtocol::register);
         NeoForge.EVENT_BUS.addListener(CartographV3Mod::chunkSaved);
+        NeoForge.EVENT_BUS.addListener(TileRequestScheduler::tick);
         NeoForge.EVENT_BUS.addListener(LiveSurfaceUpdates::tick);
         NeoForge.EVENT_BUS.addListener(CartographV3Mod::serverStopped);
     }
 
     private static void chunkSaved(ChunkDataEvent.Save event) {
         SurfaceService.invalidate(event);
+        StructureDiscovery.invalidate(event);
     }
 
     private static void serverStopped(ServerStoppedEvent event) {
         SurfaceService.clear(event.getServer());
+        StructureDiscovery.clear(event.getServer());
+        TileRequestScheduler.clear();
         LiveSurfaceUpdates.clear();
         WorldIdentity.clear(event.getServer());
     }

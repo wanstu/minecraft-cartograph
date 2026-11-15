@@ -20,14 +20,16 @@ final class LiveSurfaceUpdates {
     private static final Logger LOG = LoggerFactory.getLogger("cartograph.v3.live");
 
     private static final int MAX_WATCHED_PER_PLAYER = 512;
-    private static final int REFRESH_BUDGET_PER_PLAYER = 8;
-    private static final int MAX_SCAN_ATTEMPTS_PER_PLAYER = 64;
+    private static final int REFRESH_TARGET_PER_INTERVAL = 8;
+    private static final int MAX_REFRESH_PER_PLAYER_PER_TICK = 2;
+    private static final int MAX_SCAN_ATTEMPTS_PER_PLAYER_PER_TICK = 24;
+    private static final double MAX_REFRESH_CREDIT = 2.0;
 
     private static final class WatchState {
         final LinkedHashMap<ChunkKey, Long> watched = new LinkedHashMap<>();
         int cursor;
         int intervalTicks = 10;
-        long nextRefreshTick;
+        double refreshCredit = 1.0;
     }
 
     private static final Map<UUID, WatchState> WATCHERS = new HashMap<>();
@@ -39,7 +41,8 @@ final class LiveSurfaceUpdates {
     static void open(ServerPlayer player, int intervalTicks) {
         WatchState state = WATCHERS.computeIfAbsent(player.getUUID(), ignored -> new WatchState());
         state.intervalTicks = Math.max(5, Math.min(100, intervalTicks));
-        state.nextRefreshTick = tickCounter;
+        state.refreshCredit = Math.max(1.0, Math.min(
+                MAX_REFRESH_CREDIT, state.refreshCredit));
     }
 
     static void close(ServerPlayer player) {
@@ -75,8 +78,19 @@ final class LiveSurfaceUpdates {
 
             WatchState state = watcher.getValue();
             if (state.watched.isEmpty()) continue;
-            if (tickCounter < state.nextRefreshTick) continue;
-            state.nextRefreshTick = tickCounter + state.intervalTicks;
+
+            // Preserve the old average target (8 refreshes per configured
+            // interval) but spread the work over server ticks. This removes
+            // the 8-chunk burst that could visibly stall TNT/entity AI.
+            state.refreshCredit = Math.min(
+                    MAX_REFRESH_CREDIT,
+                    state.refreshCredit
+                            + REFRESH_TARGET_PER_INTERVAL
+                                    / (double) state.intervalTicks);
+            int refreshBudget = Math.min(
+                    MAX_REFRESH_PER_PLAYER_PER_TICK,
+                    (int) Math.floor(state.refreshCredit));
+            if (refreshBudget <= 0) continue;
 
             ServerLevel level = player.serverLevel();
             String dimension = level.dimension().location().toString();
@@ -84,8 +98,10 @@ final class LiveSurfaceUpdates {
 
             int refreshed = 0;
             int attempts = 0;
-            while (refreshed < REFRESH_BUDGET_PER_PLAYER
-                    && attempts < Math.min(MAX_SCAN_ATTEMPTS_PER_PLAYER, keys.size())) {
+            while (refreshed < refreshBudget
+                    && attempts < Math.min(
+                            MAX_SCAN_ATTEMPTS_PER_PLAYER_PER_TICK,
+                            keys.size())) {
                 if (state.cursor >= keys.size()) state.cursor = 0;
                 ChunkKey key = keys.get(state.cursor++);
                 attempts++;
@@ -95,6 +111,7 @@ final class LiveSurfaceUpdates {
                 if (chunk == null) continue;
 
                 refreshed++;
+                state.refreshCredit = Math.max(0.0, state.refreshCredit - 1.0);
                 SurfaceService.refreshLoaded(level, key.x(), key.z()).ifPresent(changed -> {
                     MapProtocol.pushChanged(player, changed);
                     changedPushes++;

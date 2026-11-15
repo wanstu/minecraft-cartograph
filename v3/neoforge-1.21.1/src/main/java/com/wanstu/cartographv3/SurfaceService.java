@@ -35,6 +35,18 @@ final class SurfaceService {
 
     private SurfaceService() {}
 
+    static boolean requiresLoadedCapture(
+            ServerLevel level, int chunkX, int chunkZ) {
+        if (!level.getServer().isSameThread())
+            throw new IllegalStateException("Surface request cost check must run on server thread");
+
+        Key key = key(level, chunkX, chunkZ);
+        SurfaceTile cached = CACHE.get(key);
+        if (cached != null && !DISK_STALE.contains(key)) return false;
+
+        return level.getChunkSource().getChunkNow(chunkX, chunkZ) != null;
+    }
+
     static CompletableFuture<Optional<SurfaceTile>> request(
             ServerLevel level, int chunkX, int chunkZ) {
         if (!level.getServer().isSameThread())

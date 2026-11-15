@@ -227,11 +227,11 @@ public final class MapScreenV3 extends Screen {
                 });
         requestBatchHelp = new MapUiControls.P(
                 420, 42,
-                "每批请求区块数越大，地图空白区域补全越快，但会增加网络、磁盘读取和服务器瞬时压力。默认 64；通常建议 32～64，机器性能较弱时可继续降低。");
+                "控制客户端一次预取多少区块。数值越大，远处空白补全越积极；服务端会再按独立安全预算分批处理，不会把 256 个请求塞进同一个 tick。默认 64；通常建议 32～64。");
         requestBatchHelp.setColor(0xff8f989f);
         liveScanHelp = new MapUiControls.P(
                 420, 42,
-                "实时扫描间隔决定已加载区块多久检查一次地表变化。数值越小更新越及时，但会增加服务器 tick 压力。默认 10 tick（0.5 秒）；若实体/TNT 变慢，应优先调高。");
+                "控制实时地表变化检查的平均频率。数值越小更新越及时；扫描会自动平摊到多个 server tick、每 tick 限量执行，避免集中扫描拖慢实体/TNT。默认 10 tick（0.5 秒）。");
         liveScanHelp.setColor(0xff8f989f);
 
         zoomLabel = new MapUiControls.Span(formatZoom(zoom));
