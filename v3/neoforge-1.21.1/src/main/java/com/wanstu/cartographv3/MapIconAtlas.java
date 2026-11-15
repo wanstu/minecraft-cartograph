@@ -84,7 +84,19 @@ final class MapIconAtlas {
             GuiGraphics graphics, String base,
             int centerX, int centerY, int size,
             int primary, int accent, int border) {
-        draw(graphics, texture(base + "_border"), centerX, centerY, size, border, 1.0f);
+        ResourceLocation silhouette = texture(base + "_silhouette");
+
+        // Outline in screen space, not texture space. Eight 1px offsets make
+        // the edge continuous at every displayed icon size and remain stable
+        // while the player arrow is rotated by the caller.
+        for (int oy = -1; oy <= 1; oy++) {
+            for (int ox = -1; ox <= 1; ox++) {
+                if (ox == 0 && oy == 0) continue;
+                draw(graphics, silhouette,
+                        centerX + ox, centerY + oy, size, border, 1.0f);
+            }
+        }
+
         draw(graphics, texture(base + "_base"), centerX, centerY, size, 0xffffff, 1.0f);
         draw(graphics, texture(base + "_primary"), centerX, centerY, size, primary, 1.0f);
         draw(graphics, texture(base + "_accent"), centerX, centerY, size, accent, 1.0f);

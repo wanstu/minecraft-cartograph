@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image, ImageChops, ImageFilter, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
 PREVIEW = ROOT / "design" / "icon-preview.html"
@@ -273,7 +273,7 @@ def build_semantic_layers(
         mono_path: Path,
         primary_out: Path,
         accent_out: Path,
-        border_out: Path) -> None:
+        silhouette_out: Path) -> None:
     primary = Image.open(primary_path).convert("RGBA").getchannel("A")
     accent = Image.open(accent_path).convert("RGBA").getchannel("A")
     mono = Image.open(mono_path).convert("RGBA").getchannel("A")
@@ -291,14 +291,23 @@ def build_semantic_layers(
     if union.getbbox() is None:
         union = mono
 
+    # Build a solid silhouette used only as the source for a screen-space
+    # 1px outline. Do NOT pre-render a thin border ring into the texture:
+    # when 64x64 icons are scaled down to ~12-24px that ring is undersampled
+    # and becomes the dotted/checkerboard edge seen in-game.
     hard = union.point(lambda a: 255 if a >= 24 else 0)
-    expanded = hard.filter(ImageFilter.MaxFilter(5))
-    border = ImageChops.subtract(expanded, hard)
+    closed = hard.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+    flood = closed.copy()
+    ImageDraw.floodfill(flood, (0, 0), 128)
+    silhouette = flood.point(lambda a: 0 if a == 128 else 255)
+    # Closing/fill may shave a boundary pixel at the canvas edge. The
+    # outline source must always contain every original visible pixel.
+    silhouette = ImageChops.lighter(silhouette, hard)
 
     primary_out.parent.mkdir(parents=True, exist_ok=True)
     white_mask(primary).save(primary_out)
     white_mask(accent).save(accent_out)
-    white_mask(border).save(border_out)
+    white_mask(silhouette).save(silhouette_out)
 
 
 def main() -> None:
@@ -330,7 +339,7 @@ def main() -> None:
             base_layer = TEXTURE_ROOT / f"{resource}_base.png"
             primary_layer = TEXTURE_ROOT / f"{resource}_primary.png"
             accent_layer = TEXTURE_ROOT / f"{resource}_accent.png"
-            border_layer = TEXTURE_ROOT / f"{resource}_border.png"
+            silhouette_layer = TEXTURE_ROOT / f"{resource}_silhouette.png"
             normal.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(duo / f"{resource}.png", normal)
             shutil.copy2(mono / f"{resource}.png", monochrome)
@@ -339,11 +348,11 @@ def main() -> None:
                     primary / f"{resource}.png",
                     accent / f"{resource}.png",
                     mono / f"{resource}.png",
-                    primary_layer, accent_layer, border_layer)
+                    primary_layer, accent_layer, silhouette_layer)
 
     print(
         f"synced {len(ASSETS)} HTML SVG icons -> "
-        "64x64 duo/mono + semantic primary/accent/outer-border layers")
+        "64x64 duo/mono + semantic primary/accent/silhouette layers")
 
 
 if __name__ == "__main__":
