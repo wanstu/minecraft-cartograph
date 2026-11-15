@@ -19,6 +19,10 @@ final class MapMarkerUi {
             int descriptionY, int descriptionH,
             int locationY, int buttonY, int buttonH) {}
 
+
+    private record ScreenMarker(
+            MapMarkerStore.Marker marker, int x, int y) {}
+
     private final MapUiControls.Input nameInput;
     private final MapUiControls.MarkerIconSelect iconSelect;
     private final MapUiControls.ColorInput primaryColorInput;
@@ -138,25 +142,39 @@ final class MapMarkerUi {
             String dimension, double centerX, double centerZ, double zoom,
             int width, int height, int mouseX, int mouseY,
             boolean markerLayerEnabled, boolean structureLayerEnabled) {
-        List<MapMarkerStore.Marker> markers = MapMarkerStore.visible(dimension);
-        markers.removeIf(marker -> !layerVisible(
-                marker, markerLayerEnabled, structureLayerEnabled));
-
-        markers.sort(Comparator.comparingInt(marker -> customLayer(marker) ? 1 : 0));
-
         int iconSize = markerIconSize(zoom);
         int hoverRadius = Math.max(6, iconSize / 2 + 2);
-        List<int[]> iconRects = new ArrayList<>();
-        List<int[]> labelRects = new ArrayList<>();
+        int margin = iconSize + 12;
 
-        for (MapMarkerStore.Marker marker : markers) {
-            int sx = (int) Math.round(width * 0.5 + (marker.x - centerX) * zoom);
-            int sy = (int) Math.round(height * 0.5 + (marker.z - centerZ) * zoom);
-            int margin = iconSize + 12;
-            if (sx < -margin || sy < -margin || sx > width + margin || sy > height + margin) {
+        // Cull before sorting. Large worlds can retain many markers that are
+        // nowhere near the current viewport; they should not participate in
+        // per-frame sorting or label layout.
+        List<ScreenMarker> markers = new ArrayList<>();
+        for (MapMarkerStore.Marker marker : MapMarkerStore.visible(dimension)) {
+            if (!layerVisible(marker, markerLayerEnabled, structureLayerEnabled)) {
                 continue;
             }
+            int sx = (int) Math.round(
+                    width * 0.5 + (marker.x - centerX) * zoom);
+            int sy = (int) Math.round(
+                    height * 0.5 + (marker.z - centerZ) * zoom);
+            if (sx < -margin || sy < -margin
+                    || sx > width + margin || sy > height + margin) {
+                continue;
+            }
+            markers.add(new ScreenMarker(marker, sx, sy));
+        }
 
+        markers.sort(Comparator.comparingInt(
+                item -> customLayer(item.marker()) ? 1 : 0));
+
+        List<int[]> iconRects = new ArrayList<>(markers.size());
+        List<int[]> labelRects = new ArrayList<>();
+
+        for (ScreenMarker item : markers) {
+            MapMarkerStore.Marker marker = item.marker();
+            int sx = item.x();
+            int sy = item.y();
             boolean hovered = Math.abs(mouseX - sx) <= hoverRadius
                     && Math.abs(mouseY - sy) <= hoverRadius;
             drawMarkerIcon(
@@ -173,19 +191,17 @@ final class MapMarkerUi {
 
         if (zoom < 0.25) return;
 
-        int index = 0;
-        for (MapMarkerStore.Marker marker : markers) {
-            int sx = (int) Math.round(width * 0.5 + (marker.x - centerX) * zoom);
-            int sy = (int) Math.round(height * 0.5 + (marker.z - centerZ) * zoom);
-            int margin = iconSize + 12;
-            if (sx < -margin || sy < -margin || sx > width + margin || sy > height + margin) {
-                continue;
-            }
+        for (int index = 0; index < markers.size(); index++) {
+            ScreenMarker item = markers.get(index);
+            MapMarkerStore.Marker marker = item.marker();
+            int sx = item.x();
+            int sy = item.y();
 
             boolean hovered = Math.abs(mouseX - sx) <= hoverRadius
                     && Math.abs(mouseY - sy) <= hoverRadius;
             int textW = font.width(marker.name);
-            int lx = Math.max(2, Math.min(width - textW - 2, sx - textW / 2));
+            int lx = Math.max(
+                    2, Math.min(width - textW - 2, sx - textW / 2));
             int ly = sy + iconSize / 2 + 4;
             int[] rect = new int[] {
                     lx - 2, ly - 2,
@@ -205,16 +221,14 @@ final class MapMarkerUi {
                         }
                     }
                 }
-                if (blocked) {
-                    index++;
-                    continue;
-                }
+                if (blocked) continue;
             }
 
             labelRects.add(rect);
-            graphics.fill(rect[0], rect[1], rect[2], rect[3], 0xc0181c20);
-            graphics.drawString(font, marker.name, lx, ly, 0xfff0f3f5, true);
-            index++;
+            graphics.fill(
+                    rect[0], rect[1], rect[2], rect[3], 0xc0181c20);
+            graphics.drawString(
+                    font, marker.name, lx, ly, 0xfff0f3f5, true);
         }
     }
 
@@ -275,10 +289,21 @@ final class MapMarkerUi {
 
         nameInput.render(graphics, font, mouseX, mouseY);
         descriptionInput.render(graphics, font, mouseX, mouseY);
-        iconSelect.render(graphics, font, mouseX, mouseY);
-        primaryColorInput.render(graphics, font, mouseX, mouseY);
-        accentColorInput.render(graphics, font, mouseX, mouseY);
-        lineColorInput.render(graphics, font, mouseX, mouseY);
+
+        MapUiControls.Control activePopup = null;
+        MapUiControls.Control[] popupControls = {
+                iconSelect,
+                primaryColorInput,
+                accentColorInput,
+                lineColorInput
+        };
+        for (MapUiControls.Control control : popupControls) {
+            if (control.popupOpen()) {
+                activePopup = control;
+            } else {
+                control.render(graphics, font, mouseX, mouseY);
+            }
+        }
 
         int saveW = 52;
         int cancelW = 52;
@@ -299,6 +324,10 @@ final class MapMarkerUi {
                             mouseX, mouseY, false);
                 }
             }
+        }
+
+        if (activePopup != null) {
+            activePopup.render(graphics, font, mouseX, mouseY);
         }
     }
 
