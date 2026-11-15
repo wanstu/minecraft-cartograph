@@ -574,49 +574,22 @@ final class MapMarkerStore {
 
     static Icon defaultStructureIcon(String id) {
         StructurePreset preset = structurePreset(id);
-        return MapUiSettings.structurePresetIcon(preset);
-    }
-
-    static synchronized void applyStructurePreset(StructurePreset preset) {
-        if (preset == null) return;
-        Icon nextIcon = MapUiSettings.structurePresetIcon(preset);
-        int nextPrimary = MapUiSettings.structurePresetPrimaryColor(preset);
-        int nextAccent = MapUiSettings.structurePresetAccentColor(preset);
-        int nextLine = MapUiSettings.structurePresetLineColor(preset);
-        boolean changed = false;
-        for (Marker marker : MARKERS.values()) {
-            if (marker.origin != Origin.AUTO || marker.modifiedAuto) continue;
-            if (structurePreset(marker.structureId) != preset) continue;
-            if (marker.icon != nextIcon
-                    || marker.primary() != nextPrimary
-                    || marker.accent() != nextAccent
-                    || marker.line() != nextLine) {
-                marker.icon = nextIcon;
-                marker.primaryColor = nextPrimary;
-                marker.accentColor = nextAccent;
-                marker.lineColor = nextLine;
-                changed = true;
-            }
-        }
-        if (changed) saveAsync();
-    }
-
-    static synchronized void applyAllStructurePresets() {
-        for (StructurePreset preset : StructurePreset.values()) {
-            applyStructurePreset(preset);
-        }
+        return preset == null ? Icon.STAR : preset.defaultIcon;
     }
 
     static int defaultStructurePrimaryColor(String id) {
-        return MapUiSettings.structurePresetPrimaryColor(structurePreset(id));
+        StructurePreset preset = structurePreset(id);
+        return preset == null ? DEFAULT_PRIMARY_COLOR : preset.defaultPrimary;
     }
 
     static int defaultStructureColor(String id) {
-        return MapUiSettings.structurePresetAccentColor(structurePreset(id));
+        StructurePreset preset = structurePreset(id);
+        return preset == null ? DEFAULT_ACCENT_COLOR : preset.defaultAccent;
     }
 
     static int defaultStructureLineColor(String id) {
-        return MapUiSettings.structurePresetLineColor(structurePreset(id));
+        StructurePreset preset = structurePreset(id);
+        return preset == null ? DEFAULT_LINE_COLOR : preset.defaultLine;
     }
 
     static String defaultStructureDescription(String id) {

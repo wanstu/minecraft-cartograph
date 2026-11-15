@@ -10,15 +10,21 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.lwjgl.glfw.GLFW;
 
+/**
+ * Client entry. There is deliberately no in-game map Screen in V3.1 WebUI.
+ * M starts/opens the loopback WebUI in the user's normal browser.
+ */
 @Mod(value = CartographV3Mod.MOD_ID, dist = Dist.CLIENT)
 public final class CartographV3Client {
     private static final org.slf4j.Logger LOG =
-            org.slf4j.LoggerFactory.getLogger("cartograph.v3.client.qa");
+            org.slf4j.LoggerFactory.getLogger("cartograph.v3.client");
+    private static final CartographWebUiServer WEB_UI = new CartographWebUiServer();
     private static boolean qaOpened;
-    private static net.minecraft.client.multiplayer.ClientLevel qaWorld;
-    private static int qaTicks;
+
     private static final KeyMapping OPEN = new KeyMapping(
-            "key.cartograph_v3.open", GLFW.GLFW_KEY_M, "key.categories.cartograph_v3");
+            "key.cartograph_v3.open",
+            GLFW.GLFW_KEY_M,
+            "key.categories.cartograph_v3");
 
     public CartographV3Client(IEventBus modBus) {
         modBus.addListener(CartographV3Client::registerKeys);
@@ -29,52 +35,27 @@ public final class CartographV3Client {
         event.register(OPEN);
     }
 
-    static boolean matchesOpenKey(int keyCode, int scanCode) {
-        return OPEN.matches(keyCode, scanCode);
-    }
-
-    static String openKeyLabel() {
-        return OPEN.getTranslatedKeyMessage().getString();
-    }
-
     private static void tick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
+
         MapClientCache.ensureWorld(mc.level);
         MapClientCache.tick();
+        WEB_UI.tick();
+
         if (mc.level == null) {
             qaOpened = false;
-            qaWorld = null;
-            qaTicks = 0;
             return;
         }
-        if (qaWorld != mc.level) {
-            qaWorld = mc.level;
-            qaOpened = false;
-            qaTicks = 0;
-        }
-        qaTicks++;
+
         if (Boolean.getBoolean("cartograph.v3.qaAutoOpen") && !qaOpened) {
             qaOpened = true;
-            mc.setScreen(new MapScreenV31());
-            LOG.info("V3_QA_AUTO_OPEN tick={}", qaTicks);
+            String url = WEB_UI.openInBrowser();
+            LOG.info("V3_WEBUI_QA_AUTO_OPEN url={}", url);
         }
-        if (Boolean.getBoolean("cartograph.v3.qaReopen")) {
-            int closeTick = Integer.getInteger("cartograph.v3.qaCloseTick", 100);
-            int reopenTick = Integer.getInteger("cartograph.v3.qaReopenTick", 220);
-            if (qaTicks == closeTick && mc.screen instanceof MapScreenV31) {
-                mc.setScreen(null);
-                LOG.info("V3_QA_AUTO_CLOSE tick={}", qaTicks);
-            } else if (qaTicks == reopenTick && !(mc.screen instanceof MapScreenV31)) {
-                mc.setScreen(new MapScreenV31());
-                LOG.info("V3_QA_AUTO_REOPEN tick={}", qaTicks);
-            }
-        }
+
         while (OPEN.consumeClick()) {
-            if (mc.screen instanceof MapScreenV31) {
-                mc.setScreen(null);
-            } else if (mc.level != null) {
-                mc.setScreen(new MapScreenV31());
-            }
+            String url = WEB_UI.openInBrowser();
+            LOG.info("V3_WEBUI_OPEN url={}", url);
         }
     }
 }

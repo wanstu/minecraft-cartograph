@@ -1,35 +1,30 @@
-# Cartograph V3.1 frontend architecture
+# Cartograph V3.1 WebUI architecture
 
-V3.1 uses a strict backend/frontend split. The opened large-map page is a
-complete Pane frontend theme; the backend only exposes world facts and semantic
-actions.
+V3.1 has no in-game map screen. The Minecraft mod is the backend and data owner;
+the large-map interface is a browser WebUI packaged inside the same JAR.
 
-## Stable boundary
+## Backend boundary
 
-Frontend code consumes `CartographBackendApi`.
+Frontend clients consume `CartographBackendApi`. The NeoForge implementation is
+`MinecraftCartographBackend`.
 
-The API exposes:
+The backend owns:
 
-- surface facts by chunk
-- visible region revisions
-- player position/direction
-- markers and structures
-- biome/surface lookup
-- viewport/request hints
+- chunk/surface collection
+- world identity
+- facts-only persistent cache
+- visible-region request scheduling
+- live surface updates
+- player state
+- structure discovery
+- marker persistence
 - semantic actions such as teleport and marker CRUD
 
-Frontend code must not access `MapClientCache`, `PersistentTileStore`,
-`PacketDistributor`, or `MapProtocol` directly. The Gradle task
-`verifyV31FrontendBoundary` enforces this rule.
-
-`MinecraftCartographBackend` is the NeoForge implementation. A Fabric build
-can provide another implementation without changing theme code.
+The frontend never reads Minecraft memory, chunks or save files directly.
 
 ## Facts-only persistence
 
-V3.1 does not persist rendered RGB tiles.
-
-The authoritative cache contains only:
+`PersistentTileStore` stores only world facts:
 
 - block state id
 - biome id
@@ -37,56 +32,56 @@ The authoritative cache contains only:
 - relief height
 - water depth
 
-The cache lives in a V3.1-only format/directory and deliberately does not read
-older V3 cache formats.
+Rendered pixels are not authoritative data and are not persisted in the world
+fact cache. A frontend can derive satellite, modern hand-drawn, ancient
+hand-drawn or other presentations from the same facts without rescanning the
+world.
 
-Rendered pixels are disposable frontend data.
+## WebUI transport
 
-## Theme frontend
+`CartographWebUiServer` is a loopback-only HTTP bridge:
 
-A complete theme implements `CartographThemeFrontend`.
+- binds only to `127.0.0.1`
+- uses a random per-session token
+- serves `webui/index.html` and `webui/app.js` from the JAR
+- marshals Minecraft access back onto the Minecraft client thread
+- exposes state, viewport, tile, point, marker and teleport APIs
+- stops the backend live-view session after the browser has been idle for 10s
 
-A theme owns all large-map presentation:
+The current satellite frontend requests 16x16 RGB24 tile derivatives. Those
+pixels are disposable WebUI cache; the persistent backend remains facts-only.
 
-- map renderer
-- map canvas
-- UI layout
-- interaction model
-- icon set
-- controls
-- windows/dialogs
-- marker presentation
+## Frontend
 
-The first implementation is `NativeCartographThemeFrontend`.
+The first formal frontend is the existing high-fidelity HTML prototype promoted
+to runtime WebUI.
 
-Its map is `NativeMapCanvas`, a Pane component. The map component receives raw
-facts through `CartographBackendApi` and uses
-`SatelliteMapStyleRenderer` to derive satellite pixels.
+Browser responsibilities:
 
-`MapRegionTextureCache` is frontend-only. It caches derived GPU textures and
-can be discarded/rebuilt when the active theme renderer changes.
+- HTML/CSS layout
+- SVG icons
+- Canvas map composition
+- player / structure / marker presentation
+- panels, dialogs and settings
+- pan / zoom / right-click interaction
+- frontend-only visual preferences
 
-Future themes can provide completely different layouts and interaction models,
-for example:
+This is why the WebUI can match the prototype directly: the prototype and the
+runtime use the same browser rendering model instead of reimplementing CSS/SVG
+through Minecraft GUI primitives.
 
-- Native / satellite
-- Hand-drawn modern
-- Hand-drawn ancient
+Future frontends can consume the same backend API. A standalone desktop shell,
+different browser theme, or another client does not require a new world scanner
+or cache format.
 
-They still consume the same backend API and the same persisted world facts.
+## M shortcut
 
-## Screen host
+The Minecraft M key does not open a Screen. It starts/reuses the local WebUI
+server and asks the operating system to open the WebUI URL in the normal system
+browser.
 
-`MapScreenV31` is intentionally thin. It only bridges Minecraft Screen
-lifecycle/input/render calls to Pane and the active theme.
+## Build guard
 
-It does not render the map, player, markers, panels or controls itself.
-
-The V3.1 client entry opens `MapScreenV31`; the old `MapScreenV3` remains
-only as implementation history/reference and is not an active frontend.
-
-## Pane dependency
-
-Pane 0.4.0 for Minecraft 1.21.1 is MIT licensed and is bundled inside the
-Cartograph NeoForge JAR using NeoForge Jar-in-Jar. Players do not install Pane
-separately. See `THIRD_PARTY_LICENSES.md`.
+`verifyV31WebUiBoundary` fails the build if the source/JAR contains the removed
+Minecraft map screens, Pane runtime, old map GUI classes, or if the persistent
+cache starts storing rendered pixels again.

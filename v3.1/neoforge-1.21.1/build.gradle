@@ -3,20 +3,6 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.148'
 }
 
-repositories {
-    exclusiveContent {
-        forRepository { maven { url = 'https://api.modrinth.com/maven' } }
-        filter { includeGroup 'maven.modrinth' }
-    }
-}
-
-dependencies {
-    // Pane 0.4.0 for Minecraft 1.21.1 NeoForge. The Modrinth version id is
-    // used deliberately because the human version number is shared by the
-    // Fabric build. jarJar embeds Pane so players install only Cartograph.
-    jarJar(implementation('maven.modrinth:pane:Owsqll1h'))
-}
-
 version = mod_version
 group = mod_group_id
 base { archivesName = 'Cartograph-V3.1' }
@@ -78,29 +64,33 @@ tasks.register('verifyV3Isolation') {
     }
 }
 
-tasks.register('verifyV31FrontendBoundary') {
+tasks.register('verifyV31WebUiBoundary') {
+    dependsOn tasks.named('jar')
     doLast {
-        def frontendFiles = [
-            'src/main/java/com/wanstu/cartographv3/MapScreenV31.java',
-            'src/main/java/com/wanstu/cartographv3/NativeMapCanvas.java',
-            'src/main/java/com/wanstu/cartographv3/NativeCartographThemeFrontend.java',
-            'src/main/java/com/wanstu/cartographv3/MapRegionTextureCache.java',
-            'src/main/java/com/wanstu/cartographv3/CartographThemeFrontend.java'
+        def javaSources = fileTree('src/main/java').matching {
+            include '**/*.java'
+        }.files
+        def forbiddenSourceTokens = [
+            'net.ethrocky.pane',
+            'class MapScreenV3',
+            'class MapScreenV31',
+            'MapPaneRenderer',
+            'NativeMapCanvas',
+            'NativeCartographThemeFrontend'
         ]
-        def forbidden = [
-            'MapClientCache',
-            'PacketDistributor',
-            'PersistentTileStore',
-            'MapProtocol'
-        ]
-        frontendFiles.each { relative ->
-            def text = file(relative).text
-            forbidden.each { token ->
-                if (text.contains(token)) {
-                    throw new GradleException(
-                        "V3.1 frontend boundary violation: ${relative} references ${token}")
-                }
+        forbiddenSourceTokens.each { token ->
+            def offenders = javaSources.findAll { it.text.contains(token) }
+            if (!offenders.isEmpty()) {
+                throw new GradleException(
+                    'V3.1 must not contain in-game UI/Panes (' + token + '): ' + offenders)
             }
+        }
+
+        def client = file(
+            'src/main/java/com/wanstu/cartographv3/CartographV3Client.java').text
+        if (client.contains('setScreen(')) {
+            throw new GradleException(
+                'V3.1 M shortcut must open WebUI, not a Minecraft Screen')
         }
 
         def store = file(
@@ -109,32 +99,42 @@ tasks.register('verifyV31FrontendBoundary') {
                 || store.contains('.rgb()')
                 || store.contains('renderSignature')) {
             throw new GradleException(
-                'V3.1 persistent cache must store facts only, never rendered theme pixels')
+                'V3.1 persistent cache must store facts only, never rendered pixels')
         }
-    }
-}
 
-tasks.register('verifyV31PaneBundle') {
-    dependsOn tasks.named('jar')
-    doLast {
         def jarFile = tasks.named('jar', Jar).get().archiveFile.get().asFile
-        def bundledPane = zipTree(jarFile).matching {
-            include 'META-INF/jarjar/pane-Owsqll1h.jar'
-        }.files
-        if (bundledPane.size() != 1) {
-            throw new GradleException("V3.1 JAR must contain exactly one bundled Pane JAR")
+        def index = zipTree(jarFile).matching { include 'webui/index.html' }.files
+        def script = zipTree(jarFile).matching { include 'webui/app.js' }.files
+        if (index.size() != 1 || script.size() != 1) {
+            throw new GradleException(
+                'V3.1 JAR must contain webui/index.html and webui/app.js')
         }
-        def paneLicense = zipTree(jarFile).matching {
-            include 'META-INF/licenses/cartograph_v3/Pane-MIT.txt'
+
+        def paneEntries = zipTree(jarFile).matching {
+            include '**/*pane*'
+            include 'net/ethrocky/pane/**'
+            include 'META-INF/jarjar/**'
         }.files
-        if (paneLicense.size() != 1) {
-            throw new GradleException("V3.1 JAR is missing the bundled Pane MIT notice")
+        if (!paneEntries.isEmpty()) {
+            throw new GradleException(
+                'V3.1 WebUI JAR still contains Pane/Jar-in-Jar UI artifacts: ' + paneEntries)
+        }
+
+        def screenClasses = zipTree(jarFile).matching {
+            include 'com/wanstu/cartographv3/MapScreen*.class'
+            include 'com/wanstu/cartographv3/MapPane*.class'
+            include 'com/wanstu/cartographv3/MapHifi*.class'
+            include 'com/wanstu/cartographv3/NativeMapCanvas*.class'
+            include 'com/wanstu/cartographv3/NativeCartographThemeFrontend*.class'
+        }.files
+        if (!screenClasses.isEmpty()) {
+            throw new GradleException(
+                'V3.1 JAR contains removed in-game UI classes: ' + screenClasses)
         }
     }
 }
 
 tasks.named('check').configure {
     dependsOn tasks.named('verifyV3Isolation')
-    dependsOn tasks.named('verifyV31PaneBundle')
-    dependsOn tasks.named('verifyV31FrontendBoundary')
+    dependsOn tasks.named('verifyV31WebUiBoundary')
 }

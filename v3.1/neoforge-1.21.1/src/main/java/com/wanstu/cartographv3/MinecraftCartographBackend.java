@@ -38,7 +38,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         MapClientCache.ensureWorld(minecraft.level);
         MapClientCache.beginMapSession();
         PacketDistributor.sendToServer(new MapProtocol.MapViewState(
-                true, MapUiSettings.liveScanIntervalTicks()));
+                true, CartographSettings.liveScanIntervalTicks()));
     }
 
     @Override
@@ -189,7 +189,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
 
     @Override
     public void setLiveScanInterval(int ticks) {
-        MapUiSettings.setLiveScanIntervalTicks(ticks);
+        CartographSettings.setLiveScanIntervalTicks(ticks);
         if (opened) {
             PacketDistributor.sendToServer(new MapProtocol.MapViewState(true, ticks));
         }
@@ -200,12 +200,12 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         if (!opened) return;
         opened = false;
         PacketDistributor.sendToServer(new MapProtocol.MapViewState(
-                false, MapUiSettings.liveScanIntervalTicks()));
+                false, CartographSettings.liveScanIntervalTicks()));
         viewport = null;
     }
 
     private int maxPendingRequests() {
-        return Math.max(MIN_PENDING_REQUESTS, MapUiSettings.requestBatchSize() * 2);
+        return Math.max(MIN_PENDING_REQUESTS, CartographSettings.requestBatchSize() * 2);
     }
 
     private void requestVisible(boolean force) {
@@ -263,7 +263,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
                         Math.abs(minChunkZ - centerChunkZ),
                         Math.abs(maxChunkZ - centerChunkZ)));
 
-        int requestBatch = MapUiSettings.requestBatchSize();
+        int requestBatch = CartographSettings.requestBatchSize();
         int requestBudget = Math.min(
                 requestBatch,
                 Math.max(0, maxPendingRequests() - MapClientCache.pendingCount()));
