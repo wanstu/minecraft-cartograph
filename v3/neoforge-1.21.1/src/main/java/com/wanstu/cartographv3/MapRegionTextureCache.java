@@ -7,13 +7,18 @@ import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FastColor;
 
-import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 final class MapRegionTextureCache implements AutoCloseable {
     private static final int REGION_CHUNKS = 16;
     private static final int REGION_BLOCKS = REGION_CHUNKS * SurfaceTile.SIZE;
     private static final int BACKGROUND = 0xff111417;
+    private static final int MIN_RETAINED_REGIONS = 192;
+    private static final int OFFSCREEN_SPARE_REGIONS = 48;
 
     private record RegionKey(String dimension, int x, int z) {}
 
@@ -44,7 +49,8 @@ final class MapRegionTextureCache implements AutoCloseable {
                     image.setPixelRGBA(x, z, background);
                 }
             }
-            texture.upload();
+            // Do not upload the empty background here. The region is always
+            // synced immediately before first draw, so one upload is enough.
             location = Minecraft.getInstance().getTextureManager()
                     .register("cartograph_v3_region", texture);
         }
@@ -97,7 +103,8 @@ final class MapRegionTextureCache implements AutoCloseable {
         }
     }
 
-    private final Map<RegionKey, RegionTexture> regions = new HashMap<>();
+    private final LinkedHashMap<RegionKey, RegionTexture> regions =
+            new LinkedHashMap<>(64, 0.75f, true);
 
     void render(GuiGraphics graphics, String dimension,
                 double centerX, double centerZ, double zoom,
@@ -113,17 +120,28 @@ final class MapRegionTextureCache implements AutoCloseable {
         int maxRegionZ = Math.floorDiv(
                 (int) Math.floor(centerZ + halfBlocksZ), REGION_BLOCKS);
         boolean blur = zoom < 1.0;
+        Set<RegionKey> usedThisFrame = new HashSet<>();
 
         for (int regionZ = minRegionZ; regionZ <= maxRegionZ; regionZ++) {
             for (int regionX = minRegionX; regionX <= maxRegionX; regionX++) {
                 RegionKey key = new RegionKey(dimension, regionX, regionZ);
+                boolean hasTiles =
+                        MapClientCache.hasTilesInRegion(dimension, regionX, regionZ);
                 RegionTexture region = regions.get(key);
+                if (!hasTiles) {
+                    if (region != null) {
+                        regions.remove(key);
+                        region.close();
+                    }
+                    continue;
+                }
                 if (region == null) {
-                    if (!MapClientCache.hasTilesInRegion(dimension, regionX, regionZ)) continue;
                     region = new RegionTexture(dimension, regionX, regionZ);
                     regions.put(key, region);
                 }
-                region.sync(MapClientCache.tileRevision());
+                usedThisFrame.add(key);
+                region.sync(MapClientCache.regionRevision(
+                        dimension, regionX, regionZ));
                 region.setBlur(blur);
 
                 double worldX0 = regionX * (double) REGION_BLOCKS;
@@ -141,6 +159,24 @@ final class MapRegionTextureCache implements AutoCloseable {
                         REGION_BLOCKS, REGION_BLOCKS,
                         REGION_BLOCKS, REGION_BLOCKS);
             }
+        }
+
+        pruneOffscreen(usedThisFrame);
+    }
+
+    private void pruneOffscreen(Set<RegionKey> usedThisFrame) {
+        int target = Math.max(
+                MIN_RETAINED_REGIONS,
+                usedThisFrame.size() + OFFSCREEN_SPARE_REGIONS);
+        if (regions.size() <= target) return;
+
+        Iterator<Map.Entry<RegionKey, RegionTexture>> iterator =
+                regions.entrySet().iterator();
+        while (regions.size() > target && iterator.hasNext()) {
+            Map.Entry<RegionKey, RegionTexture> entry = iterator.next();
+            if (usedThisFrame.contains(entry.getKey())) continue;
+            entry.getValue().close();
+            iterator.remove();
         }
     }
 
