@@ -33,7 +33,6 @@ public final class MapClientCache {
     private static int validated;
     private static long mapSession;
     private static long regionRevisionCounter;
-    private static long renderSignature;
     private static long diskRestoreGeneration;
 
     private MapClientCache() {}
@@ -56,8 +55,6 @@ public final class MapClientCache {
         firstRequestNanos = 0L;
         received = 0;
         validated = 0;
-        SatelliteSurfaceRenderer.beginMapSession();
-        renderSignature = SatelliteSurfaceRenderer.renderSignature();
         MapMarkerStore.ensureWorld(null);
         if (level != null) requestWorldInfo();
     }
@@ -149,10 +146,6 @@ public final class MapClientCache {
             ChunkKey key = raw.key();
             if (MISSING_AT.containsKey(key) || TILES.containsKey(key)) continue;
 
-            // V3 only accepts the current rendered tile format.
-            // Fact-only / previous-format cache entries are intentionally ignored.
-            if (!raw.hasRenderedRgb()) continue;
-
             SurfaceTile tile = raw;
             TILES.put(key, tile);
             addRegionTile(key);
@@ -169,28 +162,6 @@ public final class MapClientCache {
 
     public static void beginMapSession() {
         mapSession++;
-        long previousRenderSignature = renderSignature;
-        SatelliteSurfaceRenderer.beginMapSession();
-        renderSignature = SatelliteSurfaceRenderer.renderSignature();
-
-        if (previousRenderSignature != 0L
-                && previousRenderSignature != renderSignature) {
-            TILES.clear();
-            PENDING.clear();
-            MISSING_AT.clear();
-            VALIDATED_SESSION.clear();
-            REGION_TILE_COUNTS.clear();
-            REGION_REVISIONS.clear();
-            resetDiskRestores();
-            regionRevisionCounter++;
-            if (world != null && worldId != null) {
-                preloadCurrentDimensionFromDisk(
-                        world.dimension().location().toString());
-            }
-            LOG.info("V3_RENDER_STYLE_CHANGED old={} new={} cache=restyle",
-                    previousRenderSignature, renderSignature);
-        }
-
         validated = 0;
         firstRequestNanos = 0L;
         received = 0;
@@ -297,11 +268,10 @@ public final class MapClientCache {
                         validated, TILES.size(), PENDING.size(), key.x(), key.z());
             return;
         }
-        SurfaceTile tile = SatelliteSurfaceRenderer.render(
-                SurfaceTile.fromFacts(
-                        key,
-                        packet.stateIds(), packet.biomeIds(),
-                        packet.surfaceHeights(), packet.reliefHeights(), packet.waterDepths()));
+        SurfaceTile tile = SurfaceTile.fromFacts(
+                key,
+                packet.stateIds(), packet.biomeIds(),
+                packet.surfaceHeights(), packet.reliefHeights(), packet.waterDepths());
         VALIDATED_SESSION.put(key, mapSession);
         if (TILES.put(key, tile) == null) addRegionTile(key);
         markRegionChanged(key);

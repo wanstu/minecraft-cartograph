@@ -55,25 +55,25 @@ public final class CartographV3Client {
         qaTicks++;
         if (Boolean.getBoolean("cartograph.v3.qaAutoOpen") && !qaOpened) {
             qaOpened = true;
-            mc.setScreen(new MapScreenV3());
+            mc.setScreen(new MapScreenV31());
             LOG.info("V3_QA_AUTO_OPEN tick={}", qaTicks);
         }
         if (Boolean.getBoolean("cartograph.v3.qaReopen")) {
             int closeTick = Integer.getInteger("cartograph.v3.qaCloseTick", 100);
             int reopenTick = Integer.getInteger("cartograph.v3.qaReopenTick", 220);
-            if (qaTicks == closeTick && mc.screen instanceof MapScreenV3) {
+            if (qaTicks == closeTick && mc.screen instanceof MapScreenV31) {
                 mc.setScreen(null);
                 LOG.info("V3_QA_AUTO_CLOSE tick={}", qaTicks);
-            } else if (qaTicks == reopenTick && !(mc.screen instanceof MapScreenV3)) {
-                mc.setScreen(new MapScreenV3());
+            } else if (qaTicks == reopenTick && !(mc.screen instanceof MapScreenV31)) {
+                mc.setScreen(new MapScreenV31());
                 LOG.info("V3_QA_AUTO_REOPEN tick={}", qaTicks);
             }
         }
         while (OPEN.consumeClick()) {
-            if (mc.screen instanceof MapScreenV3) {
+            if (mc.screen instanceof MapScreenV31) {
                 mc.setScreen(null);
             } else if (mc.level != null) {
-                mc.setScreen(new MapScreenV3());
+                mc.setScreen(new MapScreenV31());
             }
         }
     }

@@ -61,7 +61,9 @@ public final class MapScreenV3 extends Screen {
     private double zoom = 2.0;
     private boolean dragging;
     private boolean initialized;
-    private final MapRegionTextureCache regionTextures = new MapRegionTextureCache();
+    private final CartographBackendApi legacyBackend = new MinecraftCartographBackend();
+    private final MapRegionTextureCache regionTextures = new MapRegionTextureCache(
+            legacyBackend, SatelliteMapStyleRenderer.INSTANCE);
 
     private int lastRequestMinChunkX = Integer.MIN_VALUE;
     private int lastRequestMaxChunkX = Integer.MIN_VALUE;
@@ -424,7 +426,8 @@ public final class MapScreenV3 extends Screen {
         graphics.fill(0, 0, width, height, 0xff0f171b);
         if (minecraft.level != null) {
             regionTextures.render(
-                    graphics, dimension(), centerX, centerZ, zoom, width, height);
+                    graphics, dimension(), centerX, centerZ, zoom,
+                    0, 0, width, height);
             if (MapUiSettings.grid()) {
                 withLayer(graphics, Z_MAP_MARKERS - 4.0f,
                         () -> renderChunkGrid(graphics));

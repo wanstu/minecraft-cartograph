@@ -77,6 +77,43 @@ tasks.register('verifyV3Isolation') {
         }
     }
 }
+
+tasks.register('verifyV31FrontendBoundary') {
+    doLast {
+        def frontendFiles = [
+            'src/main/java/com/wanstu/cartographv3/MapScreenV31.java',
+            'src/main/java/com/wanstu/cartographv3/NativeMapCanvas.java',
+            'src/main/java/com/wanstu/cartographv3/NativeCartographThemeFrontend.java',
+            'src/main/java/com/wanstu/cartographv3/MapRegionTextureCache.java',
+            'src/main/java/com/wanstu/cartographv3/CartographThemeFrontend.java'
+        ]
+        def forbidden = [
+            'MapClientCache',
+            'PacketDistributor',
+            'PersistentTileStore',
+            'MapProtocol'
+        ]
+        frontendFiles.each { relative ->
+            def text = file(relative).text
+            forbidden.each { token ->
+                if (text.contains(token)) {
+                    throw new GradleException(
+                        "V3.1 frontend boundary violation: ${relative} references ${token}")
+                }
+            }
+        }
+
+        def store = file(
+            'src/main/java/com/wanstu/cartographv3/PersistentTileStore.java').text
+        if (store.contains('SatelliteSurfaceRenderer')
+                || store.contains('.rgb()')
+                || store.contains('renderSignature')) {
+            throw new GradleException(
+                'V3.1 persistent cache must store facts only, never rendered theme pixels')
+        }
+    }
+}
+
 tasks.register('verifyV31PaneBundle') {
     dependsOn tasks.named('jar')
     doLast {
@@ -99,4 +136,5 @@ tasks.register('verifyV31PaneBundle') {
 tasks.named('check').configure {
     dependsOn tasks.named('verifyV3Isolation')
     dependsOn tasks.named('verifyV31PaneBundle')
+    dependsOn tasks.named('verifyV31FrontendBoundary')
 }

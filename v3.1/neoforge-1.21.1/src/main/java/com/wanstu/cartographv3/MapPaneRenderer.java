@@ -73,6 +73,10 @@ final class MapPaneRenderer implements PaneRenderer {
         return guiY / renderScale;
     }
 
+    GuiGraphics graphics() {
+        return graphics;
+    }
+
     void drawUiIcon(
             MapIconAtlas.UiIcon icon,
             int centerX, int centerY, int size, int rgb) {
