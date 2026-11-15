@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cartograph V3 · 高保真地图 UI</title>
+<style>
+:root{
+  --bg:#101418;--panel:#1b2228ee;--panel2:#232c33f2;--panel3:#2c363e;
+  --line:#46515a;--line2:#59656f;--text:#eef2f4;--muted:#aeb7bd;
+  --soft:#7f8a92;--accent:#f4c84f;--accent2:#d8ad35;--danger:#db625d;
+  --shadow:0 18px 50px #0008;--radius:5px;--icon:#f3f5f6;
+}
+*{box-sizing:border-box} html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0c1013;color:var(--text);font-family:"Microsoft YaHei","Noto Sans SC",sans-serif}
+button,input,select,textarea{font:inherit}
+button{color:inherit}
+svg.icon{width:1.2em;height:1.2em;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;display:block}
+svg.icon.solid{fill:currentColor;stroke:none}
+.app{position:relative;width:100vw;height:100vh;overflow:hidden;background:#12171b}
+.map{position:absolute;inset:0;overflow:hidden;background:#2c6437}
+.map svg.world{position:absolute;inset:-4%;width:108%;height:108%;filter:saturate(.9) contrast(1.03);shape-rendering:crispEdges}
+.pixel-noise{position:absolute;inset:0;pointer-events:none;opacity:.14;background-image:linear-gradient(90deg,#0002 1px,transparent 1px),linear-gradient(#0002 1px,transparent 1px);background-size:8px 8px;mix-blend-mode:multiply}
+.vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 55%,#06101533 100%)}
+.top-actions{position:absolute;top:20px;right:22px;display:flex;gap:8px;z-index:20;align-items:stretch}
+.top-actions.collapsed .action:not(.menu-btn){display:none}
+.action{height:44px;min-width:112px;padding:0 15px;border:1px solid #4b555d;background:#20272cdc;display:flex;align-items:center;justify-content:center;gap:9px;color:#edf1f3;font-size:17px;cursor:pointer;box-shadow:0 4px 14px #0003}
+.action:hover,.action.active{background:#2a3339}
+.action.active{border-bottom:3px solid var(--accent);color:#fff}
+.action .icon{width:21px;height:21px}
+.menu-btn{min-width:52px;width:52px;padding:0;color:var(--accent)}
+.map-marker{position:absolute;z-index:6;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:4px;color:#fff;cursor:pointer}
+.map-marker .mi{width:30px;height:30px;padding:2px;filter:drop-shadow(0 1px 0 #111) drop-shadow(0 0 2px #000)}
+.map-marker.structure{color:#f3d56f}.map-marker.custom{color:#7fdd9a}
+.map-marker .label{font-size:13px;background:#1b2024d9;padding:3px 6px;border:1px solid #0007;white-space:nowrap;color:#eef1f2}
+.player{position:absolute;left:51%;top:54%;z-index:8;color:#61d083;transform:translate(-50%,-50%) rotate(18deg);filter:drop-shadow(0 1px 1px #000)}
+.player .icon{width:27px;height:27px}
+.side-tools{position:absolute;right:22px;bottom:22px;z-index:15;display:flex;align-items:flex-end;gap:8px}
+.tool-col{display:flex;flex-direction:column;gap:7px}
+.icon-btn{width:42px;height:42px;border:1px solid #4b555d;background:#20272ce8;display:grid;place-items:center;cursor:pointer;box-shadow:0 4px 14px #0003}
+.icon-btn:hover{background:#2c363d}.icon-btn .icon{width:22px;height:22px}
+.zoom-box{height:42px;min-width:195px;border:1px solid #4b555d;background:#20272ce8;display:flex;align-items:center;gap:10px;padding:0 12px}
+.zoom-box input{width:96px;accent-color:var(--accent)} .zoom-value{min-width:46px;text-align:right;font-size:18px}
+.coord-chip{position:absolute;left:18px;bottom:18px;z-index:8;background:#171d22df;border:1px solid #4b555d;padding:8px 11px;font-size:13px;color:#d7dde0;line-height:1.6;box-shadow:0 4px 18px #0004}
+.scale{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:8;color:#f1f3f4;background:#171d22c9;padding:6px 10px 7px;border:1px solid #44505a;font-size:12px}
+.scale-line{width:128px;border-bottom:2px solid #f1f3f4;position:relative;margin-top:5px}.scale-line:before,.scale-line:after{content:"";position:absolute;bottom:-2px;height:8px;border-left:2px solid #f1f3f4}.scale-line:after{right:0}
+
+.panel,.modal{background:var(--panel);border:1px solid #4b565f;box-shadow:var(--shadow);backdrop-filter:blur(8px);color:var(--text)}
+.panel{position:absolute;z-index:35;border-radius:var(--radius)}
+.panel-head,.modal-head{height:48px;display:flex;align-items:center;gap:9px;padding:0 15px;border-bottom:1px solid #3c464e;font-weight:600}
+.panel-head .icon,.modal-head .icon{width:20px;height:20px}.panel-head .spacer,.modal-head .spacer{flex:1}
+.close{width:30px;height:30px;display:grid;place-items:center;border:0;background:transparent;cursor:pointer;color:#dce1e4}.close:hover{background:#ffffff12}.close .icon{width:18px;height:18px}
+.layers-panel{top:76px;right:22px;width:290px;display:none}
+.marker-manager{top:76px;right:22px;width:360px;max-height:560px;display:none}
+.panel-body{padding:12px}
+.layer-row,.list-row{display:flex;align-items:center;min-height:38px;gap:9px;border-bottom:1px solid #ffffff0c}
+.layer-row:last-child,.list-row:last-child{border-bottom:0}
+.check{width:18px;height:18px;border:1px solid #73808a;display:grid;place-items:center;cursor:pointer;background:#171c20}
+.check.on{background:var(--accent);border-color:var(--accent2);color:#202020}
+.check .icon{width:13px;height:13px;stroke-width:2.4}
+.layer-row .name{flex:1}.count{color:var(--muted);font-size:12px}
+.marker-list{max-height:440px;overflow:auto}
+.list-row .marker-icon{width:28px;height:28px;color:#f0cd63}.list-row .content{min-width:0;flex:1}
+.list-row .title{font-size:14px}.list-row .meta{font-size:11px;color:#87939b;margin-top:2px}
+.row-actions{display:flex;gap:3px}.mini{width:28px;height:28px;border:0;background:transparent;color:#bfc6cb;display:grid;place-items:center;cursor:pointer}.mini:hover{background:#ffffff0e}.mini.danger:hover{color:#ff8c86}
+.context{width:190px;padding:5px;display:none}
+.ctx-row{height:38px;display:flex;align-items:center;gap:10px;padding:0 10px;cursor:pointer;border-radius:3px;font-size:14px}.ctx-row:hover{background:#ffffff0e}.ctx-row.danger{color:#e98984}.ctx-row .icon{width:19px;height:19px}.sep{height:1px;background:#45515a;margin:4px 6px}
+
+.overlay{position:absolute;inset:0;background:#06090c66;z-index:40;display:none}
+.modal{position:absolute;z-index:45;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:6px}
+.settings{width:min(980px,92vw);height:min(690px,88vh);display:none}
+.modal-head{height:56px;font-size:18px;background:#20282eea}.modal-head .icon{width:22px;height:22px}
+.settings-body{display:grid;grid-template-columns:170px 1fr;height:calc(100% - 56px)}
+.tabs{background:#151b20ad;border-right:1px solid #3b454c;padding:14px 10px}
+.tab{height:44px;display:flex;align-items:center;gap:11px;padding:0 13px;margin-bottom:4px;cursor:pointer;border-left:3px solid transparent;color:#c9d0d4}.tab:hover{background:#ffffff08}.tab.active{color:var(--accent);background:#ffffff09;border-left-color:var(--accent)}
+.tab .icon{width:19px;height:19px}
+.settings-content{padding:22px 28px;overflow:hidden}
+.setting-page{display:none;height:100%}.setting-page.active{display:flex;flex-direction:column}
+.section-title{font-size:18px;margin-bottom:8px}.section-sub{font-size:12px;color:#8f9aa1;margin-bottom:16px}
+.rule{height:1px;background:#404a52;margin-bottom:16px}
+.form-grid{display:grid;grid-template-columns:150px minmax(180px,1fr) 92px;gap:12px 14px;align-items:center}
+.form-grid .label{color:#d7dde1}.value{text-align:right;color:#b8c0c5;font-variant-numeric:tabular-nums}
+.select,.text-input,.color-control{height:38px;border:1px solid #4b5660;background:#242d34;display:flex;align-items:center;padding:0 11px;color:#e8ecee}
+.select{justify-content:space-between;cursor:pointer}.select .left{display:flex;align-items:center;gap:9px}
+.color-control{gap:10px}.swatch{width:22px;height:22px;border:1px solid #d4dae0;background:#f4c84f}.color-control input[type=color]{opacity:0;position:absolute;pointer-events:none}
+.slider{width:100%;accent-color:var(--accent)}
+.help{grid-column:2 / 4;font-size:12px;line-height:1.6;color:#89949b;margin-top:-7px;margin-bottom:8px}
+.settings-footer{margin-top:auto;padding-top:16px;border-top:1px solid #3e4850;display:flex;justify-content:space-between;align-items:center}
+.btn{height:38px;padding:0 18px;border:1px solid #4c5861;background:#2a333a;color:#edf0f2;cursor:pointer}.btn:hover{background:#364149}.btn.primary{background:#d2a83c;color:#171717;border-color:#edc75b}.btn.primary:hover{background:#e2b742}.btn.danger{color:#f2a09b}
+.structure-head,.structure-row{display:grid;grid-template-columns:150px minmax(180px,1fr) 92px;align-items:center;gap:12px}
+.structure-head{height:32px;color:#909ba2;font-size:12px;border-bottom:1px solid #3c464d}
+.structure-list{overflow:auto;min-height:0;flex:1}.structure-row{min-height:48px;border-bottom:1px solid #ffffff0b}.structure-row:nth-child(2n){background:#ffffff03}
+.structure-icon-select{height:34px;border:1px solid #45515a;background:#242d34;display:flex;align-items:center;justify-content:space-between;padding:0 10px;cursor:pointer}
+.structure-icon-select .left{display:flex;align-items:center;gap:9px}.structure-icon-select .icon{width:22px;height:22px;color:#f4c84f}
+.structure-color{display:flex;align-items:center;justify-content:flex-end;gap:8px}.structure-color .swatch{width:26px;height:26px;cursor:pointer}
+.performance-card{padding:14px 0;border-bottom:1px solid #3d474e}.performance-line{display:grid;grid-template-columns:150px 1fr 100px;gap:14px;align-items:center}.performance-line .value{text-align:right;font-size:16px}
+.performance-card p{margin:8px 0 0 164px;color:#8e999f;font-size:12px;line-height:1.65}
+.editor{width:min(650px,90vw);display:none}.editor-body{padding:18px 20px 20px}.editor-grid{display:grid;grid-template-columns:90px 1fr;gap:12px 14px;align-items:center}
+.editor-grid textarea{height:90px;resize:none;padding:10px;border:1px solid #4b5660;background:#222a30;color:#edf1f3}.editor-grid input[type=text]{height:38px;border:1px solid #4b5660;background:#222a30;color:#edf1f3;padding:0 10px}
+.editor-actions{display:flex;justify-content:space-between;margin-top:18px}.editor-actions .right{display:flex;gap:8px}
+.toast{position:absolute;z-index:80;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);opacity:0;background:#1a2025e8;border:1px solid #53606a;padding:9px 14px;transition:.18s;pointer-events:none}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.small-note{font-size:12px;color:#839098}
+@media(max-width:780px){
+ .action{min-width:auto}.action span{display:none}.settings-body{grid-template-columns:120px 1fr}.form-grid{grid-template-columns:110px 1fr 72px}.structure-head,.structure-row{grid-template-columns:110px 1fr 70px}.performance-line{grid-template-columns:110px 1fr 72px}.performance-card p{margin-left:124px}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+<defs>
+<symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+<symbol id="i-markers" viewBox="0 0 24 24"><path d="M12 21s6-5.4 6-11a6 6 0 10-12 0c0 5.6 6 11 6 11z"/><circle cx="12" cy="10" r="2"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M4 8l8-4 8 4-8 4-8-4zM4 12l8 4 8-4M4 16l8 4 8-4"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6L7 7M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l4 4 10-10"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20l4.5-1 9.5-9.5-3.5-3.5L5 15.5 4 20zM13.5 7l3.5 3.5"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/></symbol>
+<symbol id="i-teleport" viewBox="0 0 24 24"><path d="M4 12h12M12 7l5 5-5 5"/><circle cx="6" cy="12" r="3"/></symbol>
+<symbol id="i-add" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></symbol>
+<symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+<symbol id="i-reset" viewBox="0 0 24 24"><path d="M5 9a8 8 0 111 7M5 9V4M5 9h5"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 24 24"><path d="M7 9l5 5 5-5"/></symbol>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9H6v-9M9 20v-6h6v6"/></symbol>
+<symbol id="i-village" viewBox="0 0 24 24"><path d="M3 11l6-5 6 5v9H5v-7M12 9l4-3 5 4v10h-6"/><path d="M8 20v-5h4v5"/></symbol>
+<symbol id="i-mansion" viewBox="0 0 24 24"><path d="M3 10h18M5 10v10h14V10M4 10l2-4h12l2 4M8 6V4h8v2M8 14h2v2H8M14 14h2v2h-2"/></symbol>
+<symbol id="i-temple" viewBox="0 0 24 24"><path d="M4 20h16M6 18h12M7 9h10M8 9v9M12 9v9M16 9v9M5 9l7-5 7 5"/></symbol>
+<symbol id="i-outpost" viewBox="0 0 24 24"><path d="M7 20h10M8 20V7h8v13M6 7h12l-2-3H8L6 7M10 10h4M10 14h4"/></symbol>
+<symbol id="i-mine" viewBox="0 0 24 24"><path d="M5 20V10a7 7 0 0114 0v10M8 20V11a4 4 0 018 0v9M4 20h16"/></symbol>
+<symbol id="i-portal" viewBox="0 0 24 24"><path d="M6 20V4h12v16M9 17V7h6v10"/></symbol>
+<symbol id="i-ship" viewBox="0 0 24 24"><path d="M4 15h16l-3 5H7l-3-5zM12 4v11M12 5l6 5h-6M12 7L7 11h5"/></symbol>
+<symbol id="i-city" viewBox="0 0 24 24"><path d="M4 20V9h5v11M9 20V5h6v15M15 20v-8h5v8M6 12h1M11 8h2M17 15h1"/></symbol>
+<symbol id="i-fortress" viewBox="0 0 24 24"><path d="M5 20V9h3V6h3v3h2V6h3v3h3v11M3 20h18M9 20v-5h6v5"/></symbol>
+<symbol id="i-cave" viewBox="0 0 24 24"><path d="M3 19c3-9 6-13 9-13s6 4 9 13H3zM9 19c0-4 1-7 3-7s3 3 3 7"/></symbol>
+<symbol id="i-mountain" viewBox="0 0 24 24"><path d="M3 20l7-12 4 7 2-3 5 8H3z"/></symbol>
+<symbol id="i-river" viewBox="0 0 24 24"><path d="M7 3c6 3-2 6 4 9s-3 5 3 9"/></symbol>
+<symbol id="i-lake" viewBox="0 0 24 24"><path d="M4 13c2-5 14-5 16 0-1 6-15 6-16 0z"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.2 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.2 5.9-.9L12 3z"/></symbol>
+<symbol id="i-tree" viewBox="0 0 24 24"><path d="M12 4l-5 7h3l-4 5h5v4h2v-4h5l-4-5h3l-5-7z"/></symbol>
+<symbol id="i-player" viewBox="0 0 24 24"><path d="M12 2L21 21l-9-4-9 4L12 2z"/></symbol>
+</defs>
+</svg>
+
+<div class="app" id="app">
+  <div class="map" id="map">
+    <svg class="world" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+      <rect width="1600" height="900" fill="#4c7f45"/>
+      <path d="M-60 650 C180 580,270 520,380 420 C520 300,660 330,820 370 C1040 430,1100 250,1290 260 C1450 270,1540 360,1670 300 L1700 980 L-80 980Z" fill="#bda86b"/>
+      <path d="M-80 750 C170 650,250 610,390 515 C530 420,660 460,810 490 C1030 530,1120 350,1300 360 C1470 370,1550 440,1680 390 L1680 980 L-80 980Z" fill="#2b8ba0"/>
+      <path d="M-80 810 C170 720,270 680,420 590 C590 490,720 530,870 560 C1050 600,1170 430,1330 440 C1480 450,1570 500,1680 470" fill="none" stroke="#1f6e8b" stroke-width="90"/>
+      <path d="M70 0 C160 170 190 260 350 310 C500 355 610 280 735 315 C850 345 900 455 1030 450 C1160 445 1220 330 1380 340 C1480 350 1530 390 1620 420" fill="none" stroke="#2b91a9" stroke-width="85"/>
+      <path d="M52 0 C155 175 184 250 347 300 C505 348 610 270 738 305 C860 338 904 442 1033 438 C1168 434 1228 318 1385 328 C1490 338 1540 380 1625 410" fill="none" stroke="#d7c78c" stroke-width="105" opacity=".88"/>
+      <path d="M52 0 C155 175 184 250 347 300 C505 348 610 270 738 305 C860 338 904 442 1033 438 C1168 434 1228 318 1385 328 C1490 338 1540 380 1625 410" fill="none" stroke="#2a8fa7" stroke-width="70"/>
+      <path d="M210 90l80-90 70 65 55-95 95 120-30 70-145 40z" fill="#7a8587"/>
+      <path d="M220 78l65-70 28 25 40-58 46 65-18 28-40-17-34 32-38-22z" fill="#e7ece8"/>
+      <path d="M1060 90l85-105 65 80 45-63 70 100-36 80-125-10z" fill="#6f7b7f"/>
+      <path d="M1078 78l66-82 32 40 30-40 38 56-20 32-35-18-31 31-31-24z" fill="#e8ecea"/>
+      <g fill="#2e6338" opacity=".9">
+        <circle cx="130" cy="240" r="62"/><circle cx="260" cy="360" r="78"/><circle cx="450" cy="220" r="68"/><circle cx="620" cy="140" r="55"/>
+        <circle cx="850" cy="180" r="82"/><circle cx="1000" cy="230" r="65"/><circle cx="1250" cy="170" r="75"/><circle cx="1450" cy="210" r="92"/>
+        <circle cx="530" cy="640" r="74"/><circle cx="760" cy="690" r="90"/><circle cx="1220" cy="690" r="85"/>
+      </g>
+      <g fill="#5f8c4a" opacity=".8">
+        <rect x="80" y="320" width="70" height="40"/><rect x="330" y="190" width="80" height="48"/><rect x="700" y="120" width="100" height="60"/>
+        <rect x="1120" y="510" width="90" height="55"/><rect x="1380" y="580" width="120" height="65"/><rect x="390" y="710" width="95" height="55"/>
+      </g>
+    </svg>
+    <div class="pixel-noise"></div><div class="vignette"></div>
+
+    <div class="map-marker structure" style="left:18%;top:34%" data-name="村庄"><svg class="icon mi"><use href="#i-village"/></svg><div class="label">村庄</div></div>
+    <div class="map-marker structure" style="left:31%;top:23%" data-name="林地府邸"><svg class="icon mi"><use href="#i-mansion"/></svg><div class="label">林地府邸</div></div>
+    <div class="map-marker structure" style="left:68%;top:35%" data-name="海底神殿"><svg class="icon mi"><use href="#i-temple"/></svg><div class="label">海底神殿</div></div>
+    <div class="map-marker structure" style="left:78%;top:57%" data-name="废弃矿井"><svg class="icon mi"><use href="#i-mine"/></svg><div class="label">废弃矿井</div></div>
+    <div class="map-marker custom" style="left:42%;top:59%" data-name="临时营地"><svg class="icon mi"><use href="#i-home"/></svg><div class="label">临时营地</div></div>
+    <div class="map-marker structure" style="left:58%;top:69%" data-name="沉船"><svg class="icon mi"><use href="#i-ship"/></svg><div class="label">沉船</div></div>
+    <div class="player"><svg class="icon solid"><use href="#i-player"/></svg></div>
+
+    <div class="top-actions collapsed" id="topActions">
+      <button class="action" data-open="markers"><svg class="icon"><use href="#i-markers"/></svg><span>标点</span></button>
+      <button class="action" data-open="layers"><svg class="icon"><use href="#i-layers"/></svg><span>图层</span></button>
+      <button class="action" data-open="settings"><svg class="icon"><use href="#i-settings"/></svg><span>设置</span></button>
+      <button class="action menu-btn" id="menuBtn" title="菜单"><svg class="icon"><use href="#i-menu"/></svg></button>
+    </div>
+
+    <div class="coord-chip">X 1254　Z -376<br><span class="small-note">生物群系：草原 · Y 72</span></div>
+    <div class="scale"><div>2 km</div><div class="scale-line"></div></div>
+    <div class="side-tools">
+      <div class="tool-col"><button class="icon-btn" id="locateBtn" title="回到玩家位置"><svg class="icon"><use href="#i-locate"/></svg></button></div>
+      <div class="zoom-box"><input id="zoom" type="range" min="6" max="200" value="100"><span class="zoom-value" id="zoomValue">100%</span></div>
+    </div>
+
+    <div class="panel layers-panel" id="layersPanel">
+      <div class="panel-head"><svg class="icon"><use href="#i-layers"/></svg>图层<div class="spacer"></div><button class="close" data-close="layers"><svg class="icon"><use href="#i-close"/></svg></button></div>
+      <div class="panel-body">
+        <div class="layer-row"><div class="check on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon"><use href="#i-markers"/></svg><div class="name">自定义标点</div><div class="count">12</div></div>
+        <div class="layer-row"><div class="check on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon"><use href="#i-village"/></svg><div class="name">自动结构</div><div class="count">86</div></div>
+        <div class="layer-row"><div class="check on"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon"><use href="#i-home"/></svg><div class="name">名称标签</div></div>
+      </div>
+    </div>
+
+    <div class="panel marker-manager" id="markersPanel">
+      <div class="panel-head"><svg class="icon"><use href="#i-markers"/></svg>自定义标点<div class="spacer"></div><button class="close" data-close="markers"><svg class="icon"><use href="#i-close"/></svg></button></div>
+      <div class="panel-body"><div class="marker-list" id="markerList"></div></div>
+    </div>
+
+    <div class="panel context" id="contextMenu">
+      <div class="ctx-row" id="ctxAdd"><svg class="icon"><use href="#i-add"/></svg>添加标点</div>
+      <div class="ctx-row"><svg class="icon"><use href="#i-teleport"/></svg>传送到此处</div>
+    </div>
+    <div class="panel context" id="markerContext">
+      <div class="ctx-row"><svg class="icon"><use href="#i-teleport"/></svg>传送</div>
+      <div class="ctx-row" id="ctxEdit"><svg class="icon"><use href="#i-edit"/></svg>编辑</div>
+      <div class="sep"></div>
+      <div class="ctx-row danger"><svg class="icon"><use href="#i-trash"/></svg>删除</div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay"></div>
+
+  <div class="modal settings" id="settingsModal">
+    <div class="modal-head"><svg class="icon"><use href="#i-settings"/></svg>设置<div class="spacer"></div><button class="close" data-modal-close="settings"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="settings-body">
+      <div class="tabs">
+        <div class="tab active" data-tab="player"><svg class="icon solid"><use href="#i-player"/></svg>玩家</div>
+        <div class="tab" data-tab="structure"><svg class="icon"><use href="#i-village"/></svg>结构</div>
+        <div class="tab" data-tab="map"><svg class="icon"><use href="#i-layers"/></svg>地图</div>
+        <div class="tab" data-tab="operation"><svg class="icon"><use href="#i-settings"/></svg>操作</div>
+      </div>
+      <div class="settings-content">
+        <div class="setting-page active" data-page="player">
+          <div class="section-title">玩家图标</div><div class="rule"></div>
+          <div class="form-grid">
+            <div class="label">图标类型</div><div class="select"><div class="left"><svg class="icon solid" style="color:#63d481;width:21px"><use href="#i-player"/></svg>实心箭头</div><svg class="icon"><use href="#i-chevron"/></svg></div><div></div>
+            <div class="label">图标颜色</div><label class="color-control"><span class="swatch" id="playerSwatch" style="background:#63d481"></span><span id="playerColorText">#63D481</span><input type="color" id="playerColor" value="#63d481"></label><div></div>
+            <div class="label">图标大小</div><input class="slider" type="range" id="playerSize" min="8" max="48" value="22"><div class="value" id="playerSizeValue">22 px</div>
+          </div>
+          <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:16px"><use href="#i-reset"/></svg> 恢复默认</button><div><button class="btn" data-modal-close="settings">取消</button> <button class="btn primary" data-modal-close="settings">应用</button></div></div>
+        </div>
+
+        <div class="setting-page" data-page="structure">
+          <div style="display:flex;align-items:center"><div><div class="section-title">结构预设</div><div class="section-sub">每一种自动结构使用单色简约图标；手工编辑后的结构标点不受全局预设影响。</div></div><div style="flex:1"></div><button class="btn">恢复默认</button></div>
+          <div class="structure-head"><div>结构</div><div>默认图标</div><div style="text-align:right">颜色</div></div>
+          <div class="structure-list" id="structureList"></div>
+        </div>
+
+        <div class="setting-page" data-page="map">
+          <div class="section-title">地图性能</div><div class="section-sub">客户端预取和服务器实际处理分离，避免地图工作挤占游戏 tick。</div><div class="rule"></div>
+          <div class="performance-card">
+            <div class="performance-line"><div>每批请求区块数</div><input class="slider" id="requestRange" type="range" min="16" max="256" step="16" value="64"><div class="value" id="requestValue">64</div></div>
+            <p>控制客户端一次预取多少区块。服务端仍按独立安全预算逐 tick 处理；提高到 256 不会在单个 tick 同步扫描 256 个区块。</p>
+          </div>
+          <div class="performance-card">
+            <div class="performance-line"><div>实时扫描间隔</div><input class="slider" id="scanRange" type="range" min="5" max="100" step="5" value="10"><div class="value" id="scanValue">10 tick / 0.50 s</div></div>
+            <p>控制实时地表变化检查的平均频率。扫描自动平摊到多个 server tick，每 tick 限量执行，避免集中扫描拖慢实体或 TNT。</p>
+          </div>
+          <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:16px"><use href="#i-reset"/></svg> 恢复默认</button><div><button class="btn" data-modal-close="settings">取消</button> <button class="btn primary" data-modal-close="settings">应用</button></div></div>
+        </div>
+
+        <div class="setting-page" data-page="operation">
+          <div class="section-title">操作</div><div class="rule"></div>
+          <div class="form-grid">
+            <div class="label">右键地图</div><div class="select"><span>打开“添加标点 / 传送”菜单</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div>
+            <div class="label">右键标点</div><div class="select"><span>打开“传送 / 编辑 / 删除”菜单</span><svg class="icon"><use href="#i-chevron"/></svg></div><div></div>
+          </div>
+          <div class="settings-footer"><div></div><div><button class="btn" data-modal-close="settings">取消</button> <button class="btn primary" data-modal-close="settings">应用</button></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal editor" id="editorModal">
+    <div class="modal-head"><svg class="icon"><use href="#i-edit"/></svg><span id="editorTitle">添加标点</span><div class="spacer"></div><button class="close" data-modal-close="editor"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="editor-body">
+      <div class="editor-grid">
+        <div>名称</div><input type="text" id="markerName" value="临时营地">
+        <div>图标</div><div class="select"><div class="left"><svg class="icon"><use href="#i-home"/></svg>营地</div><svg class="icon"><use href="#i-chevron"/></svg></div>
+        <div>颜色</div><label class="color-control"><span class="swatch" style="background:#f4c84f"></span><span>#F4C84F</span></label>
+        <div>简介</div><textarea>临时驻点，附近有平地与水源。</textarea>
+        <div>位置</div><div class="small-note">X 1254　Z -376</div>
+      </div>
+      <div class="editor-actions"><button class="btn danger" id="editorDelete">删除</button><div class="right"><button class="btn" data-modal-close="editor">取消</button><button class="btn primary" data-modal-close="editor">保存</button></div></div>
+    </div>
+  </div>
+  <div class="toast" id="toast">已回到玩家位置</div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const topActions=$('#topActions'), overlay=$('#overlay'), settings=$('#settingsModal'), editor=$('#editorModal');
+const closePanels=()=>{$('#layersPanel').style.display='none';$('#markersPanel').style.display='none';$('#contextMenu').style.display='none';$('#markerContext').style.display='none';$$('.action').forEach(x=>x.classList.remove('active'))};
+$('#menuBtn').onclick=()=>topActions.classList.toggle('collapsed');
+$$('.action[data-open]').forEach(btn=>btn.onclick=()=>{
+  const which=btn.dataset.open; closePanels();
+  if(which==='settings'){overlay.style.display='block';settings.style.display='block';return}
+  const p=which==='layers'?$('#layersPanel'):$('#markersPanel');p.style.display='block';btn.classList.add('active');
+});
+$$('[data-close]').forEach(b=>b.onclick=()=>closePanels());
+$$('[data-modal-close]').forEach(b=>b.onclick=()=>{overlay.style.display='none';settings.style.display='none';editor.style.display='none'});
+overlay.onclick=()=>{overlay.style.display='none';settings.style.display='none';editor.style.display='none'};
+
+$$('.tab').forEach(t=>t.onclick=()=>{
+  $$('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');
+  $$('.setting-page').forEach(x=>x.classList.remove('active'));$('[data-page="'+t.dataset.tab+'"]').classList.add('active');
+});
+
+const positionMenu=(el,x,y)=>{el.style.display='block';const r=el.getBoundingClientRect();el.style.left=Math.min(innerWidth-r.width-8,x)+'px';el.style.top=Math.min(innerHeight-r.height-8,y)+'px'};
+$('#map').addEventListener('contextmenu',e=>{e.preventDefault();closePanels();positionMenu($('#contextMenu'),e.clientX,e.clientY)});
+$$('.map-marker').forEach(m=>m.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();closePanels();$('#markerName').value=m.dataset.name;$('#editorTitle').textContent='编辑标点';positionMenu($('#markerContext'),e.clientX,e.clientY)}));
+$('#ctxAdd').onclick=()=>{closePanels();$('#editorTitle').textContent='添加标点';$('#markerName').value='新标点';overlay.style.display='block';editor.style.display='block'};
+$('#ctxEdit').onclick=()=>{closePanels();overlay.style.display='block';editor.style.display='block'};
+
+$$('.check').forEach(c=>c.onclick=()=>c.classList.toggle('on'));
+const toast=(txt)=>{const t=$('#toast');t.textContent=txt;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1200)};
+$('#locateBtn').onclick=()=>toast('已回到玩家位置');
+$('#zoom').oninput=e=>$('#zoomValue').textContent=e.target.value+'%';
+$('#requestRange').oninput=e=>$('#requestValue').textContent=e.target.value;
+$('#scanRange').oninput=e=>$('#scanValue').textContent=e.target.value+' tick / '+(e.target.value/20).toFixed(2)+' s';
+$('#playerSize').oninput=e=>{const v=e.target.value;$('#playerSizeValue').textContent=v+' px';document.querySelector('.player .icon').style.width=v+'px';document.querySelector('.player .icon').style.height=v+'px'};
+$('#playerColor').oninput=e=>{const c=e.target.value;$('#playerSwatch').style.background=c;$('#playerColorText').textContent=c.toUpperCase();document.querySelector('.player').style.color=c};
+$('#playerSwatch').onclick=()=>$('#playerColor').click();
+
+const markerRows=[
+  ['临时营地','1254, -376','i-home'],['码头','1418, -642','i-ship'],['北山入口','882, -1012','i-mountain'],['矿区 A','1690, -188','i-mine']
+];
+$('#markerList').innerHTML=markerRows.map(([n,p,i])=>`
+<div class="list-row"><svg class="icon marker-icon"><use href="#${i}"/></svg><div class="content"><div class="title">${n}</div><div class="meta">${p}</div></div><div class="row-actions"><button class="mini"><svg class="icon"><use href="#i-edit"/></svg></button><button class="mini danger"><svg class="icon"><use href="#i-trash"/></svg></button></div></div>`).join('');
+
+const structures=[
+['村庄','i-village','#F4C84F'],['林地府邸','i-mansion','#E7D7C0'],['沙漠神殿','i-temple','#E3B754'],['丛林神庙','i-temple','#8FCB73'],['沼泽小屋','i-home','#A6B17F'],['雪屋','i-home','#E9F1F5'],['海底神殿','i-temple','#70C7CE'],['掠夺者前哨站','i-outpost','#C89A76'],['废弃矿井','i-mine','#C08A55'],['废弃传送门','i-portal','#A77CE8'],['沉船','i-ship','#6EB5D1'],['海底废墟','i-lake','#64C0D3'],['埋藏的宝藏','i-star','#F3D66A'],['古迹废墟','i-temple','#BA9673'],['试炼密室','i-temple','#D6A06A'],['远古城市','i-city','#6DABA8'],['要塞','i-fortress','#B7ADA0'],['下界要塞','i-fortress','#B8554E'],['堡垒遗迹','i-fortress','#84695A'],['下界化石','i-cave','#D7C2A3'],['末地城','i-city','#C7A3D5'],['其他结构','i-star','#D7B85D']
+];
+$('#structureList').innerHTML=structures.map(([n,i,c])=>`
+<div class="structure-row"><div>${n}</div><div class="structure-icon-select"><div class="left"><svg class="icon"><use href="#${i}"/></svg>${n}</div><svg class="icon"><use href="#i-chevron"/></svg></div><div class="structure-color"><span class="swatch" style="background:${c}"></span></div></div>`).join('');
+$$('.structure-color .swatch').forEach(s=>s.onclick=()=>toast('原型：点击后打开单色取色器'));
+</script>
+</body>
+</html>
