@@ -27,13 +27,25 @@ final class MapMarkerStore {
     enum StructurePreset {
         VILLAGE("村庄", Icon.VILLAGE, 0xfff1cf, 0xdba637, 0x765d2c),
         MANSION("林地府邸", Icon.MANSION, 0xe7e0d6, 0x765844, 0x40352f),
-        TEMPLE("神殿 / 遗迹", Icon.TEMPLE, 0xffefbf, 0xd8a238, 0x816126),
-        OUTPOST("前哨站", Icon.OUTPOST, 0xe8e1d7, 0x8a6951, 0x463831),
-        MINE("废弃矿井", Icon.MINE, 0xdce1e6, 0xa97843, 0x44494e),
-        PORTAL("传送门", Icon.PORTAL, 0xeee6ff, 0x8151d2, 0x4a326d),
-        SHIP("沉船", Icon.SHIP, 0xe1f0f7, 0x3f87a4, 0x35525f),
-        CITY("城市", Icon.CITY, 0xe8ebee, 0x7e8994, 0x434950),
-        FORTRESS("要塞 / 堡垒", Icon.FORTRESS, 0xead9d3, 0xa65347, 0x5c342d),
+        DESERT_PYRAMID("沙漠神殿", Icon.TEMPLE, 0xffefbf, 0xd8a238, 0x816126),
+        JUNGLE_PYRAMID("丛林神庙", Icon.TEMPLE, 0xe5f0d5, 0x668e3d, 0x3b5128),
+        SWAMP_HUT("沼泽小屋", Icon.HOME, 0xe2e0d1, 0x6f7654, 0x414632),
+        IGLOO("雪屋", Icon.HOME, 0xf1f6fb, 0xa8c8df, 0x5f7483),
+        OCEAN_MONUMENT("海底神殿", Icon.TEMPLE, 0xd9f1ee, 0x4d9d9a, 0x315f62),
+        OUTPOST("掠夺者前哨站", Icon.OUTPOST, 0xe8e1d7, 0x8a6951, 0x463831),
+        MINESHAFT("废弃矿井", Icon.MINE, 0xdce1e6, 0xa97843, 0x44494e),
+        RUINED_PORTAL("废弃传送门", Icon.PORTAL, 0xeee6ff, 0x8151d2, 0x4a326d),
+        SHIPWRECK("沉船", Icon.SHIP, 0xe1f0f7, 0x3f87a4, 0x35525f),
+        OCEAN_RUIN("海底废墟", Icon.WATER, 0xd9f1f2, 0x368ea3, 0x2c5964),
+        BURIED_TREASURE("埋藏的宝藏", Icon.STAR, 0xfff3c9, 0xd9a634, 0x715524),
+        TRAIL_RUINS("古迹废墟", Icon.TEMPLE, 0xe9dfcf, 0x9b7557, 0x594536),
+        TRIAL_CHAMBERS("试炼密室", Icon.TEMPLE, 0xe6e6e1, 0xa96c43, 0x5c4437),
+        ANCIENT_CITY("远古城市", Icon.CITY, 0xdbe7e6, 0x477b78, 0x2c4d4b),
+        STRONGHOLD("要塞", Icon.FORTRESS, 0xe6e1d8, 0x7f7567, 0x49443d),
+        NETHER_FORTRESS("下界要塞", Icon.FORTRESS, 0xf0d6d1, 0x9d3f38, 0x572a28),
+        BASTION("堡垒遗迹", Icon.FORTRESS, 0xe6d6cb, 0x70564a, 0x3f322d),
+        NETHER_FOSSIL("下界化石", Icon.CAVE, 0xeee4d6, 0xb99f7a, 0x66584a),
+        END_CITY("末地城", Icon.CITY, 0xeee7f5, 0xa378b5, 0x5d4965),
         OTHER("其他结构", Icon.STAR, 0xfff2c7, 0xe4b13c, 0x735a24);
 
         final String label;
@@ -442,19 +454,27 @@ final class MapMarkerStore {
         String path = id == null ? "" : id.toLowerCase(Locale.ROOT);
         if (path.contains("village")) return StructurePreset.VILLAGE;
         if (path.contains("mansion")) return StructurePreset.MANSION;
-        if (path.contains("pyramid") || path.contains("temple") || path.contains("monument")
-                || path.contains("hut") || path.contains("igloo")
-                || path.contains("ruin") || path.contains("trial_chambers")) {
-            return StructurePreset.TEMPLE;
+        if (path.contains("desert_pyramid")) return StructurePreset.DESERT_PYRAMID;
+        if (path.contains("jungle_pyramid") || path.contains("jungle_temple")) {
+            return StructurePreset.JUNGLE_PYRAMID;
         }
+        if (path.contains("swamp_hut")) return StructurePreset.SWAMP_HUT;
+        if (path.contains("igloo")) return StructurePreset.IGLOO;
+        if (path.contains("monument")) return StructurePreset.OCEAN_MONUMENT;
         if (path.contains("outpost")) return StructurePreset.OUTPOST;
-        if (path.contains("mineshaft")) return StructurePreset.MINE;
-        if (path.contains("portal")) return StructurePreset.PORTAL;
-        if (path.contains("shipwreck")) return StructurePreset.SHIP;
-        if (path.contains("city")) return StructurePreset.CITY;
-        if (path.contains("fortress") || path.contains("stronghold") || path.contains("bastion")) {
-            return StructurePreset.FORTRESS;
-        }
+        if (path.contains("mineshaft")) return StructurePreset.MINESHAFT;
+        if (path.contains("ruined_portal")) return StructurePreset.RUINED_PORTAL;
+        if (path.contains("shipwreck")) return StructurePreset.SHIPWRECK;
+        if (path.contains("ocean_ruin")) return StructurePreset.OCEAN_RUIN;
+        if (path.contains("buried_treasure")) return StructurePreset.BURIED_TREASURE;
+        if (path.contains("trail_ruins")) return StructurePreset.TRAIL_RUINS;
+        if (path.contains("trial_chambers")) return StructurePreset.TRIAL_CHAMBERS;
+        if (path.contains("ancient_city")) return StructurePreset.ANCIENT_CITY;
+        if (path.contains("stronghold")) return StructurePreset.STRONGHOLD;
+        if (path.contains("fortress")) return StructurePreset.NETHER_FORTRESS;
+        if (path.contains("bastion")) return StructurePreset.BASTION;
+        if (path.contains("nether_fossil")) return StructurePreset.NETHER_FOSSIL;
+        if (path.contains("end_city")) return StructurePreset.END_CITY;
         return StructurePreset.OTHER;
     }
 

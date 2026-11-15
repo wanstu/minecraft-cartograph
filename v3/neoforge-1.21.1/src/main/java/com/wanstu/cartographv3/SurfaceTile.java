@@ -62,6 +62,14 @@ public record SurfaceTile(
         return stateIds != null;
     }
 
+
+    boolean hasRenderedRgb() {
+        for (int color : rgb) {
+            if (color != 0) return true;
+        }
+        return false;
+    }
+
     @Override public int[] rgb() { return rgb.clone(); }
     @Override public int[] stateIds() { return stateIds == null ? null : stateIds.clone(); }
     @Override public int[] biomeIds() { return biomeIds == null ? null : biomeIds.clone(); }

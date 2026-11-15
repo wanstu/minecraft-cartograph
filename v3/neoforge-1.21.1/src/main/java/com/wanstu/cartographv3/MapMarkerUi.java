@@ -257,7 +257,7 @@ final class MapMarkerUi {
         graphics.drawString(font, "图标", l.labelX(), l.iconY() + 7, 0xffdbe1e6, false);
         graphics.drawString(font, "主色", l.labelX(), l.primaryColorY() + 7, 0xffdbe1e6, false);
         graphics.drawString(font, "辅色", l.labelX(), l.accentColorY() + 7, 0xffdbe1e6, false);
-        graphics.drawString(font, "线条色", l.labelX(), l.lineColorY() + 7, 0xffdbe1e6, false);
+        graphics.drawString(font, "边框色", l.labelX(), l.lineColorY() + 7, 0xffdbe1e6, false);
         graphics.drawString(font, "简介", l.labelX(), l.descriptionY() + 7, 0xffdbe1e6, false);
         graphics.drawString(font, "位置  " + editorX + ", " + editorZ,
                 l.labelX(), l.locationY(), 0xff8f989f, false);

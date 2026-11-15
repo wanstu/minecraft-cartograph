@@ -20,7 +20,7 @@ final class MapUiSettings {
     private static final int DEFAULT_SIZE = 12;
     private static final int DEFAULT_REQUEST_BATCH = 64;
     private static final int DEFAULT_LIVE_SCAN_INTERVAL = 10;
-    private static final int STRUCTURE_PRESET_VERSION = 2;
+    private static final int STRUCTURE_PRESET_VERSION = 3;
 
     private static boolean loaded;
     private static MarkerType markerType = MarkerType.ARROW;

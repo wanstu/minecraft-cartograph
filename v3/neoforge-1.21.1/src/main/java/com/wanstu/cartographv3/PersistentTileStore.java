@@ -16,6 +16,7 @@ final class PersistentTileStore {
     private static final int MAGIC = 0x43545633; // CTV3
     private static final int VERSION_RGB_ONLY = 1;
     private static final int VERSION_SURFACE_FACTS = 2;
+    private static final int VERSION_RENDERED_FACTS = 3;
 
     private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "cartograph-v3-client-cache-writer");
@@ -34,7 +35,12 @@ final class PersistentTileStore {
         Optional<SurfaceTile> raw = loadRaw(worldId, key);
         if (raw.isEmpty()) return raw;
         SurfaceTile tile = raw.get();
-        return Optional.of(tile.hasSurfaceFacts() ? SatelliteSurfaceRenderer.render(tile) : tile);
+        if (tile.hasSurfaceFacts() && !tile.hasRenderedRgb()) {
+            SurfaceTile rendered = SatelliteSurfaceRenderer.render(tile);
+            save(worldId, rendered);
+            return Optional.of(rendered);
+        }
+        return Optional.of(tile);
     }
 
     private static Optional<SurfaceTile> loadRaw(UUID worldId, ChunkKey key) {
@@ -55,7 +61,12 @@ final class PersistentTileStore {
                 int[] rgb = new int[SurfaceTile.PIXELS];
                 for (int i = 0; i < rgb.length; i++) rgb[i] = input.readInt();
                 tile = new SurfaceTile(key, rgb);
-            } else if (version == VERSION_SURFACE_FACTS) {
+            } else if (version == VERSION_SURFACE_FACTS
+                    || version == VERSION_RENDERED_FACTS) {
+                int[] rgb = new int[SurfaceTile.PIXELS];
+                if (version == VERSION_RENDERED_FACTS) {
+                    for (int i = 0; i < rgb.length; i++) rgb[i] = input.readInt();
+                }
                 int[] states = new int[SurfaceTile.PIXELS];
                 int[] biomes = new int[SurfaceTile.PIXELS];
                 short[] surface = new short[SurfaceTile.PIXELS];
@@ -69,7 +80,8 @@ final class PersistentTileStore {
                     relief[i] = input.readShort();
                     water[i] = input.readByte();
                 }
-                tile = SurfaceTile.fromFacts(key, states, biomes, surface, relief, water);
+                tile = new SurfaceTile(
+                        key, rgb, states, biomes, surface, relief, water);
             } else {
                 return Optional.empty();
             }
@@ -154,9 +166,12 @@ final class PersistentTileStore {
                         new BufferedOutputStream(Files.newOutputStream(tmp,
                                 StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)))) {
                     output.writeInt(MAGIC);
-                    output.writeInt(VERSION_SURFACE_FACTS);
+                    output.writeInt(VERSION_RENDERED_FACTS);
                     output.writeInt(tile.key().x());
                     output.writeInt(tile.key().z());
+
+                    int[] rgb = tile.rgb();
+                    for (int color : rgb) output.writeInt(color);
 
                     for (int i = 0; i < SurfaceTile.PIXELS; i++) {
                         output.writeInt(states[i]);

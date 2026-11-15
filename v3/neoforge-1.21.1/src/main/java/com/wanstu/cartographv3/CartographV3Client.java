@@ -36,6 +36,7 @@ public final class CartographV3Client {
     private static void tick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
         MapClientCache.ensureWorld(mc.level);
+        MapClientCache.tick();
         if (mc.level == null) {
             qaOpened = false;
             qaWorld = null;

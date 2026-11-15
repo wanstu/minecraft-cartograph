@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 PREVIEW = ROOT / "design" / "icon-preview.html"
@@ -139,50 +139,25 @@ BASE_STYLE = f"""
 
 PRIMARY_STYLE = f"""
 svg * {{ opacity:0 !important; }}
-.fill {{
+.stroke,.thin,.fill,.gold,.blue,.green,.water,.sand {{
   opacity:1 !important;
   fill:#ffffff !important;
-  stroke:none !important;
+  stroke:#ffffff !important;
+  stroke-width:1.15 !important;
+  stroke-linecap:round;
+  stroke-linejoin:round;
 }}
-.soft {{
-  opacity:.18 !important;
-  fill:#ffffff !important;
-  stroke:none !important;
+.stroke,.thin {{
+  fill:none !important;
 }}
 """
 
 ACCENT_STYLE = f"""
 svg * {{ opacity:0 !important; }}
-.gold,.blue,.green,.brown,.purple,.water,.sand,.stone {{
+.soft,.brown,.purple,.stone {{
   opacity:1 !important;
   fill:#ffffff !important;
   stroke:none !important;
-}}
-"""
-
-LINE_STYLE = f"""
-svg * {{ opacity:0 !important; }}
-.stroke {{
-  opacity:1 !important;
-  fill:none !important;
-  stroke:#ffffff !important;
-  stroke-width:2.0 !important;
-  stroke-linecap:round;
-  stroke-linejoin:round;
-}}
-.thin {{
-  opacity:1 !important;
-  fill:none !important;
-  stroke:#ffffff !important;
-  stroke-width:1.25 !important;
-  stroke-linecap:round;
-  stroke-linejoin:round;
-}}
-.soft {{
-  opacity:1 !important;
-  fill:none !important;
-  stroke:#ffffff !important;
-  stroke-width:1.0 !important;
 }}
 """
 
@@ -286,6 +261,46 @@ html,body{{margin:0;padding:0;width:{width}px;height:{height}px;background:trans
     return resources
 
 
+def white_mask(alpha: Image.Image) -> Image.Image:
+    out = Image.new("RGBA", alpha.size, (255, 255, 255, 0))
+    out.putalpha(alpha)
+    return out
+
+
+def build_semantic_layers(
+        primary_path: Path,
+        accent_path: Path,
+        mono_path: Path,
+        primary_out: Path,
+        accent_out: Path,
+        border_out: Path) -> None:
+    primary = Image.open(primary_path).convert("RGBA").getchannel("A")
+    accent = Image.open(accent_path).convert("RGBA").getchannel("A")
+    mono = Image.open(mono_path).convert("RGBA").getchannel("A")
+
+    if primary.getbbox() is None:
+        if accent.getbbox() is not None:
+            primary = accent
+            accent = Image.new("L", primary.size, 0)
+        else:
+            primary = mono
+
+    union = Image.new("L", primary.size, 0)
+    union = ImageChops.lighter(union, primary)
+    union = ImageChops.lighter(union, accent)
+    if union.getbbox() is None:
+        union = mono
+
+    hard = union.point(lambda a: 255 if a >= 24 else 0)
+    expanded = hard.filter(ImageFilter.MaxFilter(5))
+    border = ImageChops.subtract(expanded, hard)
+
+    primary_out.parent.mkdir(parents=True, exist_ok=True)
+    white_mask(primary).save(primary_out)
+    white_mask(accent).save(accent_out)
+    white_mask(border).save(border_out)
+
+
 def main() -> None:
     entries = parse_preview()
 
@@ -303,14 +318,11 @@ def main() -> None:
         base = tmpdir / "base"
         primary = tmpdir / "primary"
         accent = tmpdir / "accent"
-        line = tmpdir / "line"
-
         resources = render_sheet(entries, DUO_STYLE, duo)
         render_sheet(entries, MONO_STYLE, mono)
         render_sheet(entries, BASE_STYLE, base)
         render_sheet(entries, PRIMARY_STYLE, primary)
         render_sheet(entries, ACCENT_STYLE, accent)
-        render_sheet(entries, LINE_STYLE, line)
 
         for resource in resources:
             normal = TEXTURE_ROOT / f"{resource}.png"
@@ -318,18 +330,20 @@ def main() -> None:
             base_layer = TEXTURE_ROOT / f"{resource}_base.png"
             primary_layer = TEXTURE_ROOT / f"{resource}_primary.png"
             accent_layer = TEXTURE_ROOT / f"{resource}_accent.png"
-            line_layer = TEXTURE_ROOT / f"{resource}_line.png"
+            border_layer = TEXTURE_ROOT / f"{resource}_border.png"
             normal.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(duo / f"{resource}.png", normal)
             shutil.copy2(mono / f"{resource}.png", monochrome)
             shutil.copy2(base / f"{resource}.png", base_layer)
-            shutil.copy2(primary / f"{resource}.png", primary_layer)
-            shutil.copy2(accent / f"{resource}.png", accent_layer)
-            shutil.copy2(line / f"{resource}.png", line_layer)
+            build_semantic_layers(
+                    primary / f"{resource}.png",
+                    accent / f"{resource}.png",
+                    mono / f"{resource}.png",
+                    primary_layer, accent_layer, border_layer)
 
     print(
         f"synced {len(ASSETS)} HTML SVG icons -> "
-        "64x64 duo/mono + base/primary/accent/line layers")
+        "64x64 duo/mono + semantic primary/accent/outer-border layers")
 
 
 if __name__ == "__main__":

@@ -1188,28 +1188,49 @@ final class MapUiControls {
         @Override
         boolean mouseClicked(double mouseX, double mouseY, int button) {
             if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT || !enabled) return false;
-            if (!compact && hexInput.mouseClicked(mouseX, mouseY, button)) return true;
             int swatchW = compact ? Math.max(18, Math.min(width, height)) : 24;
-            if (mouseX >= x && mouseX < x + swatchW && mouseY >= y && mouseY < y + height) {
-                open = !open;
-                return true;
-            }
-            if (!open) return false;
 
-            int px = pickerX();
-            int py = pickerY();
-            if (inside(mouseX, mouseY, px + SV_X, py + SV_Y, SV_W, SV_H)) {
-                dragMode = 1;
-                updateSv(mouseX, mouseY);
+            // The popup is visually above the closed control. When it is
+            // clamped upward near the bottom of the screen it can overlap the
+            // swatch/HEX field, so popup hit-testing must happen first.
+            if (open) {
+                int px = pickerX();
+                int py = pickerY();
+                if (inside(mouseX, mouseY, px + SV_X, py + SV_Y, SV_W, SV_H)) {
+                    dragMode = 1;
+                    updateSv(mouseX, mouseY);
+                    return true;
+                }
+                if (inside(mouseX, mouseY, px + HUE_X, py + SV_Y, HUE_W, SV_H)) {
+                    dragMode = 2;
+                    updateHue(mouseY);
+                    return true;
+                }
+                if (inside(mouseX, mouseY, px, py, PICKER_W, PICKER_H)) {
+                    return true;
+                }
+
+                if (mouseX >= x && mouseX < x + swatchW
+                        && mouseY >= y && mouseY < y + height) {
+                    open = false;
+                    dragMode = 0;
+                    return true;
+                }
+
+                open = false;
+                dragMode = 0;
+                if (!compact && hexInput.mouseClicked(mouseX, mouseY, button)) {
+                    return true;
+                }
+                return false;
+            }
+
+            if (!compact && hexInput.mouseClicked(mouseX, mouseY, button)) return true;
+            if (mouseX >= x && mouseX < x + swatchW
+                    && mouseY >= y && mouseY < y + height) {
+                open = true;
                 return true;
             }
-            if (inside(mouseX, mouseY, px + HUE_X, py + SV_Y, HUE_W, SV_H)) {
-                dragMode = 2;
-                updateHue(mouseY);
-                return true;
-            }
-            if (inside(mouseX, mouseY, px, py, PICKER_W, PICKER_H)) return true;
-            open = false;
             return false;
         }
 

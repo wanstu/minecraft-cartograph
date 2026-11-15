@@ -94,6 +94,40 @@ public final class MapClientCache {
                         DISK_RESTORE_QUEUE.add(new DiskRestore(restoreWorldId, tile)));
     }
 
+    private static void preloadCurrentDimensionFromDisk(String dimension) {
+        java.util.UUID currentWorldId = worldId;
+        if (world == null || currentWorldId == null
+                || dimension == null || dimension.isBlank()) {
+            return;
+        }
+
+        var player = net.minecraft.client.Minecraft.getInstance().player;
+        if (player != null) {
+            int centerChunkX = Math.floorDiv((int) Math.floor(player.getX()), 16);
+            int centerChunkZ = Math.floorDiv((int) Math.floor(player.getZ()), 16);
+            int radius = 1024;
+            PersistentTileStore.loadVisibleAsync(
+                    currentWorldId,
+                    dimension,
+                    centerChunkX - radius, centerChunkX + radius,
+                    centerChunkZ - radius, centerChunkZ + radius,
+                    DISK_RESTORE_SCHEDULED,
+                    (restoreWorldId, tile) ->
+                            DISK_RESTORE_QUEUE.add(new DiskRestore(restoreWorldId, tile)));
+        }
+
+        // Then continue with the complete dimension in the same single-reader
+        // queue. Already scheduled nearby tiles are skipped.
+        PersistentTileStore.loadVisibleAsync(
+                currentWorldId,
+                dimension,
+                Integer.MIN_VALUE, Integer.MAX_VALUE,
+                Integer.MIN_VALUE, Integer.MAX_VALUE,
+                DISK_RESTORE_SCHEDULED,
+                (restoreWorldId, tile) ->
+                        DISK_RESTORE_QUEUE.add(new DiskRestore(restoreWorldId, tile)));
+    }
+
     private static void drainDiskRestores() {
         int restored = 0;
         while (restored < MAX_DISK_RESTORES_PER_TICK) {
@@ -105,10 +139,15 @@ public final class MapClientCache {
             ChunkKey key = raw.key();
             if (MISSING_AT.containsKey(key) || TILES.containsKey(key)) continue;
 
-            SurfaceTile tile = raw.hasSurfaceFacts()
+            boolean needsRenderUpgrade =
+                    raw.hasSurfaceFacts() && !raw.hasRenderedRgb();
+            SurfaceTile tile = needsRenderUpgrade
                     ? SatelliteSurfaceRenderer.render(raw)
                     : raw;
             TILES.put(key, tile);
+            if (needsRenderUpgrade && worldId != null) {
+                PersistentTileStore.save(worldId, tile);
+            }
             addRegionTile(key);
             tileRevision++;
             restored++;
@@ -188,7 +227,9 @@ public final class MapClientCache {
             }
             worldId = next;
             MapMarkerStore.ensureWorld(worldId);
-            LOG.info("V3_WORLD_ID world={} dimension={}", worldId, current);
+            preloadCurrentDimensionFromDisk(current);
+            LOG.info("V3_WORLD_ID world={} dimension={} cache_preload=started",
+                    worldId, current);
         } catch (IllegalArgumentException invalid) {
             worldId = null;
             MapMarkerStore.ensureWorld(null);

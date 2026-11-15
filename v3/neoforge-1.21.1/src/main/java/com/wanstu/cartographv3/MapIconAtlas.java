@@ -40,33 +40,33 @@ final class MapIconAtlas {
 
     static void drawPlayerArrow(
             GuiGraphics graphics, int centerX, int centerY, int size,
-            int primary, int accent, int line) {
+            int primary, int accent, int border) {
         drawChannels(
                 graphics, "player/arrow",
                 centerX, centerY, size,
-                primary, accent, line);
+                primary, accent, border);
     }
 
     static void drawPlayerCross(
             GuiGraphics graphics, int centerX, int centerY, int size,
-            int primary, int accent, int line) {
+            int primary, int accent, int border) {
         drawChannels(
                 graphics, "player/cross",
                 centerX, centerY, size,
-                primary, accent, line);
+                primary, accent, border);
     }
 
     static void drawMarker(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
             int centerX, int centerY, int size,
-            int primary, int accent, int line,
+            int primary, int accent, int border,
             boolean hovered) {
         int drawSize = hovered ? size + 1 : size;
         drawChannels(
                 graphics,
                 "marker/" + icon.name().toLowerCase(Locale.ROOT),
                 centerX, centerY, drawSize,
-                primary, accent, line);
+                primary, accent, border);
     }
 
     static void drawMarkerPreview(
@@ -83,11 +83,11 @@ final class MapIconAtlas {
     private static void drawChannels(
             GuiGraphics graphics, String base,
             int centerX, int centerY, int size,
-            int primary, int accent, int line) {
+            int primary, int accent, int border) {
+        draw(graphics, texture(base + "_border"), centerX, centerY, size, border, 1.0f);
         draw(graphics, texture(base + "_base"), centerX, centerY, size, 0xffffff, 1.0f);
         draw(graphics, texture(base + "_primary"), centerX, centerY, size, primary, 1.0f);
         draw(graphics, texture(base + "_accent"), centerX, centerY, size, accent, 1.0f);
-        draw(graphics, texture(base + "_line"), centerX, centerY, size, line, 1.0f);
     }
 
     private static void draw(

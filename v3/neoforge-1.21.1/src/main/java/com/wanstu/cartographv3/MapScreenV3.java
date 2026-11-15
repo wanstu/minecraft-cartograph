@@ -299,7 +299,6 @@ public final class MapScreenV3 extends Screen {
 
     @Override
     public void tick() {
-        MapClientCache.tick();
         requestTicks++;
         int pendingLimit = maxPendingRequests();
         if (!dragging && MapClientCache.pendingCount() < pendingLimit) {
@@ -717,7 +716,7 @@ public final class MapScreenV3 extends Screen {
             graphics.drawString(font, "图标类型", contentX, row1 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "主色", contentX, row2 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "辅色", contentX, row3 + 7, 0xffd8dde2, false);
-            graphics.drawString(font, "线条色", contentX, row4 + 7, 0xffd8dde2, false);
+            graphics.drawString(font, "边框色", contentX, row4 + 7, 0xffd8dde2, false);
             graphics.drawString(font, "图标大小", contentX, row5 + 5, 0xffd8dde2, false);
 
             markerTypeSelect.render(graphics, font, mouseX, mouseY);
@@ -747,9 +746,12 @@ public final class MapScreenV3 extends Screen {
             int[] columns = structureColumns();
             graphics.drawString(font, "结构", columns[0], listTop - 12, 0xffaeb7be, false);
             graphics.drawString(font, "图标", columns[1], listTop - 12, 0xffaeb7be, false);
-            graphics.drawCenteredString(font, "主", columns[2] + 11, listTop - 12, 0xffaeb7be);
-            graphics.drawCenteredString(font, "辅", columns[3] + 11, listTop - 12, 0xffaeb7be);
-            graphics.drawCenteredString(font, "线", columns[4] + 11, listTop - 12, 0xffaeb7be);
+            graphics.drawCenteredString(
+                    font, "主", columns[2] + columns[6] / 2, listTop - 12, 0xffaeb7be);
+            graphics.drawCenteredString(
+                    font, "辅", columns[3] + columns[6] / 2, listTop - 12, 0xffaeb7be);
+            graphics.drawCenteredString(
+                    font, "边", columns[4] + columns[6] / 2, listTop - 12, 0xffaeb7be);
 
             int row = 0;
             for (MapMarkerStore.StructurePreset preset : MapMarkerStore.StructurePreset.values()) {
@@ -781,28 +783,33 @@ public final class MapScreenV3 extends Screen {
             renderStructureScrollBar(graphics, contentRight, listTop, listBottom);
         } else if (settingsTab == SettingsTab.MAP) {
             graphics.drawString(font, "地图性能", contentX, contentY, 0xfff0f3f5, false);
-            graphics.fill(contentX, contentY + 18, contentRight, contentY + 19, 0xff39424a);
+            graphics.fill(contentX, contentY + 15, contentRight, contentY + 16, 0xff39424a);
 
             layoutPerformanceSettings();
             requestBatchSlider.setValue(MapUiSettings.requestBatchSize());
             liveScanIntervalSlider.setValue(MapUiSettings.liveScanIntervalTicks());
 
-            int row1 = contentY + 38;
-            int row2 = contentY + 112;
-            graphics.drawString(font, "每批请求区块数", contentX, row1 + 6, 0xffd8dde2, false);
+            int[] cols = performanceColumns();
+            int row1 = contentY + 28;
+            int row2 = contentY + 86;
+
+            graphics.drawString(font, "每批请求区块数",
+                    cols[0], row1 + 5, 0xffd8dde2, false);
             requestBatchSlider.render(graphics, font, mouseX, mouseY);
-            int requestValueX = Math.min(contentRight - 72, contentX + 380);
-            graphics.drawString(font,
-                    "当前 " + MapUiSettings.requestBatchSize(),
-                    requestValueX, row1 + 6, 0xffd7dde2, false);
+            String requestValue = Integer.toString(MapUiSettings.requestBatchSize());
+            graphics.drawString(font, requestValue,
+                    cols[2] + cols[4] - font.width(requestValue),
+                    row1 + 5, 0xffd7dde2, false);
             requestBatchHelp.render(graphics, font, mouseX, mouseY);
 
-            graphics.drawString(font, "实时扫描间隔", contentX, row2 + 6, 0xffd8dde2, false);
+            graphics.drawString(font, "实时扫描间隔",
+                    cols[0], row2 + 5, 0xffd8dde2, false);
             double seconds = MapUiSettings.liveScanIntervalTicks() / 20.0;
-            graphics.drawString(font,
-                    MapUiSettings.liveScanIntervalTicks() + " tick / "
-                            + String.format(java.util.Locale.ROOT, "%.2f s", seconds),
-                    contentX + 300, row2 + 6, 0xffb8c0c7, false);
+            String scanValue = MapUiSettings.liveScanIntervalTicks() + " tick / "
+                    + String.format(java.util.Locale.ROOT, "%.2f s", seconds);
+            graphics.drawString(font, scanValue,
+                    cols[2] + cols[4] - font.width(scanValue),
+                    row2 + 5, 0xffd7dde2, false);
             liveScanIntervalSlider.render(graphics, font, mouseX, mouseY);
             liveScanHelp.render(graphics, font, mouseX, mouseY);
         } else {
@@ -840,14 +847,17 @@ public final class MapScreenV3 extends Screen {
     private void layoutSettingsControls() {
         int contentX = SETTINGS_TAB_W + 28;
         int contentY = 58;
-        int controlX = Math.min(width - 210, contentX + 110);
-        int controlW = Math.max(120, Math.min(210, width - controlX - 28));
+        int contentRight = width - 28;
+        int available = Math.max(1, contentRight - contentX);
+        int labelW = Math.min(96, Math.max(58, available / 3));
+        int controlX = contentX + labelW + 8;
+        int controlW = Math.max(72, contentRight - controlX);
 
         markerTypeSelect.setBounds(controlX, contentY + 24, controlW, 22);
         markerPrimaryColorInput.setBounds(controlX, contentY + 52, controlW, 22);
         markerColorInput.setBounds(controlX, contentY + 80, controlW, 22);
         markerLineColorInput.setBounds(controlX, contentY + 108, controlW, 22);
-        markerSizeSlider.setBounds(controlX, contentY + 140, Math.min(150, controlW), 18);
+        markerSizeSlider.setBounds(controlX, contentY + 140, Math.max(72, controlW - 48), 18);
     }
 
     private int structureListTop() {
@@ -876,11 +886,19 @@ public final class MapScreenV3 extends Screen {
     private int[] structureColumns() {
         int contentX = SETTINGS_TAB_W + 28;
         int contentRight = width - 28;
-        int available = Math.max(220, contentRight - contentX);
-        int nameW = Math.min(88, Math.max(64, available / 4));
-        int colorBlock = 28;
+        int available = Math.max(1, contentRight - contentX);
+        int colorBlock = available < 220 ? 20 : 28;
         int colorsTotal = colorBlock * 3;
-        int iconW = Math.max(88, available - nameW - colorsTotal - 12);
+        int nameW = Math.min(88, Math.max(44, available * 27 / 100));
+        int iconW = Math.max(52, available - nameW - colorsTotal - 4);
+
+        int total = nameW + iconW + colorsTotal + 4;
+        if (total > available) {
+            int excess = total - available;
+            nameW = Math.max(40, nameW - excess);
+            iconW = Math.max(44, available - nameW - colorsTotal - 4);
+        }
+
         int iconX = contentX + nameW;
         int colorX = iconX + iconW + 4;
         return new int[] {
@@ -889,7 +907,8 @@ public final class MapScreenV3 extends Screen {
                 colorX,
                 colorX + colorBlock,
                 colorX + colorBlock * 2,
-                iconW
+                iconW,
+                colorBlock
         };
     }
 
@@ -906,9 +925,10 @@ public final class MapScreenV3 extends Screen {
         for (MapMarkerStore.StructurePreset preset : MapMarkerStore.StructurePreset.values()) {
             int rowY = structureRowY(row);
             structurePresetSelects.get(preset).setBounds(c[1], rowY, c[5], 22);
-            structurePrimaryInputs.get(preset).setBounds(c[2], rowY, 22, 22);
-            structureAccentInputs.get(preset).setBounds(c[3], rowY, 22, 22);
-            structureLineInputs.get(preset).setBounds(c[4], rowY, 22, 22);
+            int colorW = Math.max(18, c[6] - 2);
+            structurePrimaryInputs.get(preset).setBounds(c[2], rowY, colorW, 22);
+            structureAccentInputs.get(preset).setBounds(c[3], rowY, colorW, 22);
+            structureLineInputs.get(preset).setBounds(c[4], rowY, colorW, 22);
             row++;
         }
     }
@@ -965,21 +985,38 @@ public final class MapScreenV3 extends Screen {
         }
     }
 
-    private void layoutPerformanceSettings() {
+    private int[] performanceColumns() {
         int contentX = SETTINGS_TAB_W + 28;
+        int contentRight = width - 28;
+        int available = Math.max(1, contentRight - contentX);
+        int labelW = Math.min(105, Math.max(58, available * 30 / 100));
+        int valueW = Math.min(92, Math.max(58, available * 24 / 100));
+        int controlX = contentX + labelW + 8;
+        int valueX = contentRight - valueW;
+        int controlW = Math.max(48, valueX - controlX - 8);
+
+        // On very narrow GUI scales, sacrifice label/value width before
+        // allowing the slider to overlap either column.
+        int overflow = controlX + controlW + 8 - valueX;
+        if (overflow > 0) {
+            controlW = Math.max(40, controlW - overflow);
+        }
+        return new int[] { contentX, controlX, valueX, controlW, valueW };
+    }
+
+    private void layoutPerformanceSettings() {
         int contentY = 58;
-        int controlX = Math.min(width - 230, contentX + 180);
-        int controlW = Math.max(140, Math.min(180, width - controlX - 28));
+        int[] cols = performanceColumns();
 
-        requestBatchSlider.setBounds(controlX, contentY + 38, controlW, 18);
+        requestBatchSlider.setBounds(cols[1], contentY + 28, cols[3], 18);
         requestBatchHelp.setBounds(
-                contentX, contentY + 62,
-                Math.max(160, width - contentX - 28), 42);
+                cols[0], contentY + 50,
+                Math.max(160, width - 28 - cols[0]), 28);
 
-        liveScanIntervalSlider.setBounds(controlX, contentY + 112, controlW, 18);
+        liveScanIntervalSlider.setBounds(cols[1], contentY + 86, cols[3], 18);
         liveScanHelp.setBounds(
-                contentX, contentY + 136,
-                Math.max(160, width - contentX - 28), 42);
+                cols[0], contentY + 108,
+                Math.max(160, width - 28 - cols[0]), 32);
     }
 
     private int maxPendingRequests() {
@@ -1109,29 +1146,25 @@ public final class MapScreenV3 extends Screen {
         layoutSettingsTabs();
         settingsCloseIcon.setBounds(width - 28, 10, 16, 16);
 
+        // Visual z-order must also be input z-order:
+        // open popup > close/navigation > page controls > background.
+        // This prevents a color/icon popup drawn over the left navigation from
+        // accidentally activating the tab underneath it.
+        if (handleOpenSettingsPopupClick(mouseX, mouseY)) {
+            return true;
+        }
+
+        if (settingsCloseIcon.contains(mouseX, mouseY)) {
+            closeSettings();
+            return true;
+        }
+        if (settingsTabsTable.mouseClicked(
+                mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+            return true;
+        }
+
         if (settingsTab == SettingsTab.PLAYER) {
             layoutSettingsControls();
-
-            if (markerTypeSelect.popupOpen()
-                    && markerTypeSelect.mouseClicked(
-                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
-                return true;
-            }
-            if (markerPrimaryColorInput.popupOpen()
-                    && markerPrimaryColorInput.mouseClicked(
-                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
-                return true;
-            }
-            if (markerColorInput.popupOpen()
-                    && markerColorInput.mouseClicked(
-                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
-                return true;
-            }
-            if (markerLineColorInput.popupOpen()
-                    && markerLineColorInput.mouseClicked(
-                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
-                return true;
-            }
 
             if (markerTypeSelect.mouseClicked(
                     mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
@@ -1171,26 +1204,6 @@ public final class MapScreenV3 extends Screen {
             }
         } else if (settingsTab == SettingsTab.STRUCTURE) {
             layoutStructurePresetSettings();
-
-            for (MapMarkerStore.StructurePreset preset
-                    : MapMarkerStore.StructurePreset.values()) {
-                int row = preset.ordinal();
-                if (!structureRowVisible(row)) continue;
-                MapUiControls.Control[] controls = {
-                        structurePresetSelects.get(preset),
-                        structurePrimaryInputs.get(preset),
-                        structureAccentInputs.get(preset),
-                        structureLineInputs.get(preset)
-                };
-                for (MapUiControls.Control control : controls) {
-                    if (control.popupOpen()
-                            && control.mouseClicked(
-                                    mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
-                        closeStructurePresetPopupsExcept(control);
-                        return true;
-                    }
-                }
-            }
 
             if (structureResetTable.mouseClicked(
                     mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
@@ -1232,17 +1245,53 @@ public final class MapScreenV3 extends Screen {
             }
         }
 
-        if (settingsCloseIcon.contains(mouseX, mouseY)) {
-            closeSettings();
-            return true;
-        }
-
-        if (settingsTabsTable.mouseClicked(
-                mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
-            return true;
-        }
-
         return true;
+    }
+
+    private boolean handleOpenSettingsPopupClick(int mouseX, int mouseY) {
+        if (settingsTab == SettingsTab.PLAYER) {
+            MapUiControls.Control[] controls = {
+                    markerTypeSelect,
+                    markerPrimaryColorInput,
+                    markerColorInput,
+                    markerLineColorInput
+            };
+            for (MapUiControls.Control control : controls) {
+                if (control.popupOpen()) {
+                    if (control.mouseClicked(
+                            mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                        return true;
+                    }
+                    // Click outside the active popup closes it, then the same
+                    // click may continue to navigation/page controls.
+                    break;
+                }
+            }
+            return false;
+        }
+
+        if (settingsTab == SettingsTab.STRUCTURE) {
+            for (MapMarkerStore.StructurePreset preset
+                    : MapMarkerStore.StructurePreset.values()) {
+                MapUiControls.Control[] controls = {
+                        structurePresetSelects.get(preset),
+                        structurePrimaryInputs.get(preset),
+                        structureAccentInputs.get(preset),
+                        structureLineInputs.get(preset)
+                };
+                for (MapUiControls.Control control : controls) {
+                    if (control.popupOpen()) {
+                        if (control.mouseClicked(
+                                mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) {
+                            closeStructurePresetPopupsExcept(control);
+                            return true;
+                        }
+                        return false;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private void closeSettings() {
