@@ -961,6 +961,19 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   function closeContextMenus(){
     mapCtx.style.display='none';markerCtx.style.display='none';
   }
+  const MAP_UI_SELECTOR='.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box';
+  function isMapUiTarget(target){return !!(target&&target.closest&&target.closest(MAP_UI_SELECTOR));}
+  function installMapInteractionShields(){
+    qa(MAP_UI_SELECTOR).forEach(surface=>{
+      ['pointerdown','pointerup','pointermove','click','dblclick'].forEach(type=>{
+        surface.addEventListener(type,e=>e.stopPropagation());
+      });
+      surface.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();});
+      // Keep native scrolling inside scrollable panels, but never let the wheel
+      // bubble to the map zoom handler.
+      surface.addEventListener('wheel',e=>e.stopPropagation(),{passive:false});
+    });
+  }
   function panelElement(which){return which==='layers'?layers:markersPanel;}
   function clampPanelPosition(panel,left,top){
     const maxLeft=Math.max(8,mapStage.clientWidth-panel.offsetWidth-8);
@@ -1101,7 +1114,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     return {name,icon,y:Math.max(54,base+ripple)};
   }
   function updateCursorInfo(e){
-    if(e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box'))return;
+    if(isMapUiTarget(e.target))return;
     const p=pointFromEvent(e),info=terrainInfoAt(p);
     q('#cursorCoords').textContent='X '+p.x+'　Z '+p.z+'　Y '+info.y;
     q('#cursorBiome').textContent=info.name;
@@ -1214,11 +1227,15 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   q('#zoomIn').onclick=()=>{closeContextMenus();setZoom(committed.view.zoom*1.25);};q('#zoomOut').onclick=()=>{closeContextMenus();setZoom(committed.view.zoom/1.25);};
   q('#locateBtn').onclick=()=>{closeContextMenus();committed.view={zoom:1,panX:0,panY:0};save();renderView();toast('已回到玩家位置');};
   q('#homeBtn').onclick=()=>{closeContextMenus();committed.view={zoom:.8,panX:180,panY:-80};save();renderView();toast('已回到出生点');};
-  mapStage.addEventListener('wheel',e=>{if(isModalOpen()){e.preventDefault();return;}closeContextMenus();e.preventDefault();setZoom(e.deltaY<0?committed.view.zoom*1.12:committed.view.zoom/1.12);},{passive:false});
+  mapStage.addEventListener('wheel',e=>{
+    if(isModalOpen()){e.preventDefault();return;}
+    if(isMapUiTarget(e.target))return;
+    closeContextMenus();e.preventDefault();setZoom(e.deltaY<0?committed.view.zoom*1.12:committed.view.zoom/1.12);
+  },{passive:false});
   mapStage.addEventListener('pointerdown',e=>{
     if(isModalOpen())return;
     if(e.button===0&&!e.target.closest('.context-menu'))closeContextMenus();
-    if(e.button!==0||!committed.settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box,.map-marker'))return;
+    if(e.button!==0||!committed.settings.dragMap||isMapUiTarget(e.target)||e.target.closest('.map-marker'))return;
     dragging=true;mapStage.classList.add('dragging');dragStartX=e.clientX;dragStartY=e.clientY;basePanX=committed.view.panX;basePanY=committed.view.panY;mapStage.setPointerCapture(e.pointerId);
   });
   mapStage.addEventListener('pointermove',e=>{
@@ -1230,7 +1247,9 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   mapStage.addEventListener('pointerup',()=>{if(dragging){dragging=false;mapStage.classList.remove('dragging');save();}});
   mapStage.addEventListener('contextmenu',e=>{
     if(isModalOpen()){e.preventDefault();return;}
-    if(e.target.closest('.map-marker'))return;e.preventDefault();contextPoint=pointFromEvent(e);
+    if(isMapUiTarget(e.target)){e.preventDefault();e.stopPropagation();return;}
+    if(e.target.closest('.map-marker'))return;
+    e.preventDefault();contextPoint=pointFromEvent(e);
     q('#mapContext .ctx-meta span').textContent='X '+contextPoint.x+', Z '+contextPoint.z;markerCtx.style.display='none';positionMenu(mapCtx,e.clientX,e.clientY);
   });
   q('#ctxAdd').onclick=()=>openEditor('add',null,contextPoint);
@@ -1268,12 +1287,13 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
 
   document.addEventListener('pointerdown',e=>{
     if(dropdown.classList.contains('open')&&!e.target.closest('#dropdown,.select,.structure-select'))closeDropdown();
-    if(e.button===0&&!e.target.closest('.context-menu'))closeContextMenus();
+    if(e.button===0&&!isMapUiTarget(e.target))closeContextMenus();
   });
 
   q('.window-close').onclick=()=>toast('游戏内此按钮关闭地图（原型保留页面）');
 
   // boot
+  installMapInteractionShields();
   enablePanelDrag(layers,'layers');enablePanelDrag(markersPanel,'markers');
   renderAppSettings(committed.settings);renderView();renderSettings();
   const demo=new URLSearchParams(location.search).get('demo');
