@@ -2,13 +2,11 @@ package com.wanstu.cartographv3;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
 import net.minecraft.client.Minecraft;
 
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
-import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -18,6 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class MapMarkerStore {
+    private static final int STORE_SCHEMA = 1;
     static final int DEFAULT_PRIMARY_COLOR = 0xe8eef5;
     static final int DEFAULT_ACCENT_COLOR = 0xf2bd45;
     static final int DEFAULT_LINE_COLOR = 0xb8c3cc;
@@ -121,10 +120,9 @@ final class MapMarkerStore {
         int z;
         String name;
         Icon icon;
-        // Kept as "color" for backward compatibility: this is the accent channel.
-        int color;
-        Integer primaryColor;
-        Integer lineColor;
+        int primaryColor;
+        int accentColor;
+        int lineColor;
         String description;
         Origin origin;
         String autoKey;
@@ -140,7 +138,7 @@ final class MapMarkerStore {
             next.z = z;
             next.name = name;
             next.icon = icon;
-            next.color = color;
+            next.accentColor = accentColor;
             next.primaryColor = primaryColor;
             next.lineColor = lineColor;
             next.description = description;
@@ -155,17 +153,24 @@ final class MapMarkerStore {
         UUID uuid() { return UUID.fromString(id); }
         boolean isAuto() { return origin == Origin.AUTO; }
         boolean appearsAsCustom() { return origin == Origin.CUSTOM || modifiedAuto; }
-        int primary() {
-            return primaryColor == null ? DEFAULT_PRIMARY_COLOR : primaryColor & 0x00ffffff;
-        }
-        int accent() { return color & 0x00ffffff; }
-        int line() {
-            return lineColor == null ? DEFAULT_LINE_COLOR : lineColor & 0x00ffffff;
-        }
+        int primary() { return primaryColor & 0x00ffffff; }
+        int accent() { return accentColor & 0x00ffffff; }
+        int line() { return lineColor & 0x00ffffff; }
     }
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Type LIST_TYPE = new TypeToken<List<Marker>>() {}.getType();
+
+    private static final class StoreFile {
+        int schema = STORE_SCHEMA;
+        List<Marker> markers = List.of();
+
+        StoreFile() {}
+
+        StoreFile(List<Marker> markers) {
+            this.schema = STORE_SCHEMA;
+            this.markers = markers;
+        }
+    }
     private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "cartograph-v3-marker-store");
         thread.setDaemon(true);
@@ -188,15 +193,15 @@ final class MapMarkerStore {
         Path file = file(worldId);
         if (!Files.isRegularFile(file)) return;
         try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            List<Marker> loaded = GSON.fromJson(reader, LIST_TYPE);
-            if (loaded == null) return;
-            for (Marker marker : loaded) {
+            StoreFile store = GSON.fromJson(reader, StoreFile.class);
+            if (store == null || store.schema != STORE_SCHEMA || store.markers == null) return;
+            for (Marker marker : store.markers) {
                 if (!valid(marker)) continue;
                 if (marker.origin == Origin.AUTO && !marker.modifiedAuto) {
                     marker.name = defaultStructureName(marker.structureId);
                     marker.icon = defaultStructureIcon(marker.structureId);
                     marker.primaryColor = defaultStructurePrimaryColor(marker.structureId);
-                    marker.color = defaultStructureColor(marker.structureId);
+                    marker.accentColor = defaultStructureColor(marker.structureId);
                     marker.lineColor = defaultStructureLineColor(marker.structureId);
                     marker.description = defaultStructureDescription(marker.structureId);
                 }
@@ -226,7 +231,7 @@ final class MapMarkerStore {
         marker.name = normalizeName(name, "标点");
         marker.icon = icon == null ? Icon.PIN : icon;
         marker.primaryColor = primaryColor & 0x00ffffff;
-        marker.color = accentColor & 0x00ffffff;
+        marker.accentColor = accentColor & 0x00ffffff;
         marker.lineColor = lineColor & 0x00ffffff;
         marker.description = normalizeDescription(description);
         marker.origin = Origin.CUSTOM;
@@ -271,7 +276,7 @@ final class MapMarkerStore {
                         marker.name = nextName;
                         marker.icon = nextIcon;
                         marker.primaryColor = nextPrimary;
-                        marker.color = nextAccent;
+                        marker.accentColor = nextAccent;
                         marker.lineColor = nextBorder;
                         marker.description = nextDescription;
                         marker.structureId = hit.structureId();
@@ -290,7 +295,7 @@ final class MapMarkerStore {
             marker.name = defaultStructureName(hit.structureId());
             marker.icon = defaultStructureIcon(hit.structureId());
             marker.primaryColor = defaultStructurePrimaryColor(hit.structureId());
-            marker.color = defaultStructureColor(hit.structureId());
+            marker.accentColor = defaultStructureColor(hit.structureId());
             marker.lineColor = defaultStructureLineColor(hit.structureId());
             marker.description = defaultStructureDescription(hit.structureId());
             marker.origin = Origin.AUTO;
@@ -354,7 +359,7 @@ final class MapMarkerStore {
         marker.name = normalizeName(name, marker.name);
         marker.icon = icon == null ? marker.icon : icon;
         marker.primaryColor = primaryColor & 0x00ffffff;
-        marker.color = accentColor & 0x00ffffff;
+        marker.accentColor = accentColor & 0x00ffffff;
         marker.lineColor = lineColor & 0x00ffffff;
         marker.description = normalizeDescription(description);
         if (marker.origin == Origin.AUTO) marker.modifiedAuto = true;
@@ -382,7 +387,7 @@ final class MapMarkerStore {
         marker.name = defaultStructureName(marker.structureId);
         marker.icon = defaultStructureIcon(marker.structureId);
         marker.primaryColor = defaultStructurePrimaryColor(marker.structureId);
-        marker.color = defaultStructureColor(marker.structureId);
+        marker.accentColor = defaultStructureColor(marker.structureId);
         marker.lineColor = defaultStructureLineColor(marker.structureId);
         marker.description = defaultStructureDescription(marker.structureId);
         marker.modifiedAuto = false;
@@ -393,11 +398,9 @@ final class MapMarkerStore {
     private static boolean valid(Marker marker) {
         if (marker == null || marker.id == null || marker.dimension == null || marker.origin == null) return false;
         try { UUID.fromString(marker.id); } catch (IllegalArgumentException invalid) { return false; }
-        if (marker.icon == null) marker.icon = Icon.PIN;
-        if (marker.primaryColor == null) marker.primaryColor = DEFAULT_PRIMARY_COLOR;
-        if (marker.lineColor == null) marker.lineColor = DEFAULT_LINE_COLOR;
-        marker.color &= 0x00ffffff;
+        if (marker.icon == null) return false;
         marker.primaryColor &= 0x00ffffff;
+        marker.accentColor &= 0x00ffffff;
         marker.lineColor &= 0x00ffffff;
         marker.name = normalizeName(marker.name, "标点");
         marker.description = normalizeDescription(marker.description);
@@ -426,7 +429,7 @@ final class MapMarkerStore {
                 try (Writer writer = Files.newBufferedWriter(
                         target, StandardCharsets.UTF_8,
                         StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-                    GSON.toJson(snapshot, LIST_TYPE, writer);
+                    GSON.toJson(new StoreFile(snapshot), writer);
                 }
             } catch (IOException ignored) {}
         });
@@ -515,7 +518,7 @@ final class MapMarkerStore {
                     || marker.line() != nextLine) {
                 marker.icon = nextIcon;
                 marker.primaryColor = nextPrimary;
-                marker.color = nextAccent;
+                marker.accentColor = nextAccent;
                 marker.lineColor = nextLine;
                 changed = true;
             }

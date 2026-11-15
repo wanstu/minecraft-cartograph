@@ -23,7 +23,6 @@ public final class MapClientCache {
     private static final ConcurrentLinkedQueue<DiskRestore> DISK_RESTORE_QUEUE =
             new ConcurrentLinkedQueue<>();
     private static final int MAX_DISK_RESTORES_PER_TICK = 512;
-    private static final int MAX_RENDER_UPGRADES_PER_TICK = 12;
 
     private static ClientLevel world;
     private static java.util.UUID worldId;
@@ -138,7 +137,6 @@ public final class MapClientCache {
 
     private static void drainDiskRestores() {
         int restored = 0;
-        int renderedUpgrades = 0;
         while (restored < MAX_DISK_RESTORES_PER_TICK) {
             DiskRestore next = DISK_RESTORE_QUEUE.poll();
             if (next == null) break;
@@ -151,25 +149,12 @@ public final class MapClientCache {
             ChunkKey key = raw.key();
             if (MISSING_AT.containsKey(key) || TILES.containsKey(key)) continue;
 
-            boolean needsRenderUpgrade =
-                    raw.hasSurfaceFacts() && !raw.hasRenderedRgb();
-            if (needsRenderUpgrade
-                    && renderedUpgrades >= MAX_RENDER_UPGRADES_PER_TICK) {
-                // Rendering old fact-only cache is deliberately throttled.
-                // Requeue one item and stop this tick so cache migration cannot
-                // monopolize the client CPU / starve the integrated server.
-                DISK_RESTORE_QUEUE.add(next);
-                break;
-            }
+            // V3 only accepts the current rendered tile format.
+            // Fact-only / previous-format cache entries are intentionally ignored.
+            if (!raw.hasRenderedRgb()) continue;
 
-            SurfaceTile tile = needsRenderUpgrade
-                    ? SatelliteSurfaceRenderer.render(raw)
-                    : raw;
-            if (needsRenderUpgrade) renderedUpgrades++;
+            SurfaceTile tile = raw;
             TILES.put(key, tile);
-            if (needsRenderUpgrade && worldId != null) {
-                PersistentTileStore.save(worldId, tile);
-            }
             addRegionTile(key);
             markRegionChanged(key);
             restored++;

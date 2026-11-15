@@ -116,7 +116,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .advanced-warning{padding:10px 12px;border:1px solid #776d43;background:#332f1f;border-radius:6px;color:#e8d9a2;font-size:12px;line-height:1.6}
 
 .editor-modal{width:min(620px,90vw);max-height:calc(100vh - var(--header) - 20px);overflow:auto}
-.editor-body{padding:16px 18px 18px}.editor-grid{display:grid;grid-template-columns:85px 1fr;gap:11px 13px;align-items:center}.editor-grid input[type=text],.editor-grid textarea{width:100%;border:1px solid #4a5861;background:#202a31;color:#eef2f4;border-radius:5px;padding:8px 10px}.editor-grid input[type=text]{height:36px}.editor-grid textarea{height:88px;resize:none}.editor-actions{margin-top:16px;display:flex;gap:8px}.editor-actions .spacer{flex:1}
+.editor-body{padding:16px 18px 18px}.editor-grid{display:grid;grid-template-columns:85px 1fr;gap:11px 13px;align-items:center}.editor-grid input[type=text],.editor-grid input[type=number],.editor-grid textarea{width:100%;border:1px solid #4a5861;background:#202a31;color:#eef2f4;border-radius:5px;padding:8px 10px}.editor-grid input[type=text],.editor-grid input[type=number]{height:36px}.editor-grid textarea{height:88px;resize:none}.coord-inputs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.coord-input{display:grid;grid-template-columns:20px 1fr;align-items:center;border:1px solid #43515a;background:#1b242a;border-radius:5px;overflow:hidden}.coord-input span{text-align:center;color:#91a0a8;font-size:12px}.coord-input input{border:0!important;border-left:1px solid #43515a!important;border-radius:0!important;min-width:0}.editor-actions{margin-top:16px;display:flex;gap:8px}.editor-actions .spacer{flex:1}
 
 .toast{position:absolute;z-index:100;left:50%;bottom:30px;transform:translate(-50%,15px);opacity:0;background:#162026f2;border:1px solid #596771;border-radius:6px;padding:9px 14px;box-shadow:0 10px 30px #0007;transition:.18s;pointer-events:none}.toast.show{opacity:1;transform:translate(-50%,0)}
 .hidden{display:none!important}
@@ -307,6 +307,24 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
 <symbol id="i-cross" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="3"/></symbol>
 <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/></symbol>
 <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5V4zM8 4v6h8V4M8 20v-6h8v6"/></symbol>
+<symbol id="i-desert-pyramid" viewBox="0 0 24 24"><path d="M3 20h18L12 4 3 20zM7 17h10M9 13h6M11 9h2"/></symbol>
+<symbol id="i-jungle-temple" viewBox="0 0 24 24"><path d="M5 20h14M7 20V9h10v11M5 9h14l-2-4H7L5 9M9 13h2M13 13h2M4 6l2 1M20 6l-2 1"/></symbol>
+<symbol id="i-swamp-hut" viewBox="0 0 24 24"><path d="M5 11l7-5 7 5M7 10v7h10v-7M8 17l-2 4M16 17l2 4M10 13h4"/></symbol>
+<symbol id="i-igloo" viewBox="0 0 24 24"><path d="M4 18a8 8 0 0116 0H4zM8 18v-3h8v3M17 15h4v3h-4"/></symbol>
+<symbol id="i-ocean-monument" viewBox="0 0 24 24"><path d="M4 20h16M6 18V9h12v9M8 9l4-5 4 5M9 13h6M12 9v9M3 14h3M18 14h3"/></symbol>
+<symbol id="i-ruined-portal" viewBox="0 0 24 24"><path d="M6 20V4h12v5M9 17V7h6v5M17 13l3 3M20 13l-3 3M14 20h5"/></symbol>
+<symbol id="i-shipwreck" viewBox="0 0 24 24"><path d="M4 16l15-3-2 6H8l-4-3zM11 6l5 5-6 1 1-6zM10 5l-1 8"/></symbol>
+<symbol id="i-ocean-ruin" viewBox="0 0 24 24"><path d="M4 20h16M6 18V9h3v9M12 18V6h3v12M18 18v-7h2M5 9h5M11 6h5M3 15c4 2 14 2 18 0"/></symbol>
+<symbol id="i-buried-treasure" viewBox="0 0 24 24"><path d="M5 10h14v9H5v-9zM5 13h14M10 10V8h4v2M9 5l6 6M15 5L9 11"/></symbol>
+<symbol id="i-trail-ruins" viewBox="0 0 24 24"><path d="M4 20h16M6 20v-5h4v-4h4V7h4M6 12l3-3M15 18l3-3M5 6h3v3H5z"/></symbol>
+<symbol id="i-trial-chambers" viewBox="0 0 24 24"><path d="M5 20V7h14v13M8 7V4h8v3M8 11h3v3H8M13 11h3v3h-3M10 20v-4h4v4"/></symbol>
+<symbol id="i-ancient-city" viewBox="0 0 24 24"><path d="M3 20h18M5 20v-8l4-4 3 3 3-5 4 6v8M8 20v-5h3v5M15 20v-4h2v4M4 7l3 2M20 7l-3 2"/></symbol>
+<symbol id="i-stronghold" viewBox="0 0 24 24"><path d="M4 20V8h16v12M4 11h16M8 8V5h8v3M8 15h3v5M14 14h3v3h-3"/></symbol>
+<symbol id="i-nether-fortress" viewBox="0 0 24 24"><path d="M3 20h18M5 20V8h4V5h3v3h3V5h4v15M8 13h3M14 13h3M10 20v-4h4v4"/></symbol>
+<symbol id="i-bastion-remnant" viewBox="0 0 24 24"><path d="M4 20V7h5V4h6v3h5v13M4 10h16M7 14h3v3H7M14 13h3v4h-3M10 20v-4h4"/></symbol>
+<symbol id="i-nether-fossil" viewBox="0 0 24 24"><path d="M5 19l14-14M7 7l4 4M11 4l4 4M10 14l4 4M14 10l4 4M4 17l3 3M17 4l3 3"/></symbol>
+<symbol id="i-end-city" viewBox="0 0 24 24"><path d="M6 20V9h5V4h4v5h3v11M4 20h16M8 13h3M14 12h4M9 9h6M11 4V2h2v2"/></symbol>
+
 </defs>
 </svg>
 
@@ -363,14 +381,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     </div>
 
     <div class="map-grid"></div><div class="map-shade"></div>
-    <div class="marker-layer" id="markerLayer">
-      <div class="map-marker structure" style="left:20%;top:32%" data-name="村庄" data-kind="structure"><svg class="icon glyph"><use href="#i-village"/></svg><div class="marker-label">村庄</div></div>
-      <div class="map-marker structure" style="left:33%;top:18%" data-name="林地府邸" data-kind="structure"><svg class="icon glyph"><use href="#i-mansion"/></svg><div class="marker-label">林地府邸</div></div>
-      <div class="map-marker structure" style="left:68%;top:29%" data-name="海底神殿" data-kind="structure"><svg class="icon glyph"><use href="#i-temple"/></svg><div class="marker-label">海底神殿</div></div>
-      <div class="map-marker structure" style="left:76%;top:60%" data-name="废弃矿井" data-kind="structure"><svg class="icon glyph"><use href="#i-mine"/></svg><div class="marker-label">废弃矿井</div></div>
-      <div class="map-marker custom" style="left:41%;top:56%" data-name="临时营地" data-kind="custom"><svg class="icon glyph"><use href="#i-home"/></svg><div class="marker-label">临时营地</div></div>
-      <div class="map-marker structure" style="left:58%;top:72%" data-name="沉船" data-kind="structure"><svg class="icon glyph"><use href="#i-ship"/></svg><div class="marker-label">沉船</div></div>
-    </div>
+    <div class="marker-layer" id="markerLayer"></div>
     <div class="player-ring"></div>
     <div class="player"><svg class="icon solid"><use href="#i-player"/></svg></div>
 
@@ -380,14 +391,8 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
         <div class="panel-section-title">显示内容</div>
         <div class="layer-row"><div class="checkbox on" data-toggle="custom"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-pin"/></svg><div class="name">自定义标点</div><div class="count">12</div></div>
         <div class="layer-group expanded" id="structureGroup">
-          <div class="layer-row"><div class="checkbox on" data-toggle="structures"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-temple"/></svg><div class="name">自然结构</div><div class="count">86</div><button class="expand" id="structureExpand"><svg class="icon"><use href="#i-chevron"/></svg></button></div>
-          <div class="structure-children">
-            <div class="layer-row indent"><div class="checkbox on" data-structure-filter="village"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-village"/></svg><div class="name">村庄</div><div class="count">9</div></div>
-            <div class="layer-row indent"><div class="checkbox on" data-structure-filter="mansion"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-mansion"/></svg><div class="name">林地府邸</div><div class="count">1</div></div>
-            <div class="layer-row indent"><div class="checkbox on" data-structure-filter="temple"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-temple"/></svg><div class="name">神殿 / 遗迹</div><div class="count">8</div></div>
-            <div class="layer-row indent"><div class="checkbox on" data-structure-filter="mine"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-mine"/></svg><div class="name">矿井 / 地下结构</div><div class="count">14</div></div>
-            <div class="layer-row indent"><div class="checkbox" data-structure-filter="other"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-city"/></svg><div class="name">其他结构</div><div class="count">54</div></div>
-          </div>
+          <div class="layer-row"><div class="checkbox on" data-toggle="structures"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-temple"/></svg><div class="name">自然结构</div><div class="count" id="structureTotalCount">86</div><button class="expand" id="structureExpand"><svg class="icon"><use href="#i-chevron"/></svg></button></div>
+          <div class="structure-children" id="structureLayerList"></div>
         </div>
         <div class="layer-row"><div class="checkbox on" data-toggle="labels"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-info"/></svg><div class="name">名称标签</div></div>
         <div class="layer-row"><div class="checkbox" data-toggle="grid"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#i-frame"/></svg><div class="name">区块网格</div></div>
@@ -414,7 +419,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     </div>
 
     <div class="coord-box" title="鼠标所在地图位置">
-      <div class="coord-line"><svg class="icon"><use href="#i-locate"/></svg><span id="cursorCoords">X 1254　Z -376　Y 72</span></div>
+      <div class="coord-line"><svg class="icon"><use href="#i-locate"/></svg><span id="cursorCoords">X 1254　Y 72　Z -376</span></div>
       <div class="coord-line"><svg class="icon"><use id="cursorBiomeIconUse" href="#i-tree"/></svg><span id="cursorBiome">草原 / 山麓</span></div>
     </div>
     <div class="scale-box"><div id="scaleText">2 km</div><div class="scale-line"></div></div>
@@ -546,7 +551,11 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
         <div>图标</div><div class="select editor-icon-select" id="markerIconSelect"><div class="left"><svg class="icon"><use href="#i-home"/></svg><span>营地</span></div><svg class="icon"><use href="#i-chevron"/></svg></div>
         <div>颜色</div><label class="color-field" id="markerColorField"><span class="swatch" id="markerSwatch" style="background:#ffd34e"></span><span id="markerColorText">#FFD34E</span><input class="native-color" id="markerColor" type="color" value="#ffd34e"></label>
         <div>简介</div><textarea id="markerDescription">临时驻点，附近有平地与水源。</textarea>
-        <div>坐标</div><div class="small" id="markerCoords">X 1254　Z -376</div>
+        <div>坐标</div><div class="coord-inputs" id="markerCoords">
+          <label class="coord-input"><span>X</span><input id="markerX" type="number" step="1" value="1254"></label>
+          <label class="coord-input"><span>Y</span><input id="markerY" type="number" step="1" value="72"></label>
+          <label class="coord-input"><span>Z</span><input id="markerZ" type="number" step="1" value="-376"></label>
+        </div>
       </div>
       <div class="editor-actions"><button class="btn danger" id="deleteMarkerButton"><svg class="icon" style="display:none;vertical-align:middle;width:15px"><use href="#i-trash"/></svg><span id="deleteMarkerButtonText">删除</span></button><div class="spacer"></div><button class="btn" data-editor-close>取消</button><button class="btn primary" id="saveMarkerButton"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-save"/></svg> 保存</button></div>
     </div>
@@ -574,31 +583,58 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   const app=q('#app'), overlay=q('#overlay'), settings=q('#settingsModal'), editor=q('#editorModal'), about=q('#aboutModal');
   const layers=q('#layersPanel'), markersPanel=q('#markersPanel'), mapCtx=q('#mapContext'), markerCtx=q('#markerContext');
   const worldWrap=q('#worldWrap'), mapStage=q('#mapStage'), dropdown=q('#dropdown');
-  const STORAGE_KEY='cartograph-v3-hifi-state-v3';
+  const STATE_SCHEMA=5;
+  const STORAGE_KEY='cartograph-v3-hifi-state-v5';
 
   const ICONS={
     pin:['i-pin','定位点'],home:['i-home','营地'],mine:['i-mine','矿井'],ship:['i-ship','船 / 码头'],
     mountain:['i-mountain','山地'],temple:['i-temple','神殿'],village:['i-village','村庄'],
     mansion:['i-mansion','府邸'],outpost:['i-outpost','前哨站'],portal:['i-portal','传送门'],
-    city:['i-city','城市'],fortress:['i-fortress','要塞'],cave:['i-cave','洞穴'],water:['i-water','水域']
+    city:['i-city','城市'],fortress:['i-fortress','要塞'],cave:['i-cave','洞穴'],water:['i-water','水域'],
+    desert_pyramid:['i-desert-pyramid','沙漠神殿'],jungle_temple:['i-jungle-temple','丛林神庙'],
+    swamp_hut:['i-swamp-hut','沼泽小屋'],igloo:['i-igloo','雪屋'],ocean_monument:['i-ocean-monument','海底神殿'],
+    ruined_portal:['i-ruined-portal','废弃传送门'],shipwreck:['i-shipwreck','沉船'],ocean_ruin:['i-ocean-ruin','海底废墟'],
+    buried_treasure:['i-buried-treasure','埋藏的宝藏'],trail_ruins:['i-trail-ruins','古迹废墟'],
+    trial_chambers:['i-trial-chambers','试炼密室'],ancient_city:['i-ancient-city','远古城市'],
+    stronghold:['i-stronghold','要塞'],nether_fortress:['i-nether-fortress','下界要塞'],
+    bastion_remnant:['i-bastion-remnant','堡垒遗迹'],nether_fossil:['i-nether-fossil','下界化石'],
+    end_city:['i-end-city','末地城']
   };
-  const FIXED_STRUCTURES=[
-    {id:'s-village',name:'村庄',type:'village',preset:'村庄',x:420,z:260,left:20,top:32},
-    {id:'s-mansion',name:'林地府邸',type:'mansion',preset:'林地府邸',x:780,z:-420,left:33,top:18},
-    {id:'s-temple',name:'海底神殿',type:'temple',preset:'海底神殿',x:2060,z:-680,left:68,top:29},
-    {id:'s-mine',name:'废弃矿井',type:'mine',preset:'废弃矿井',x:2380,z:920,left:76,top:60},
-    {id:'s-ship',name:'沉船',type:'other',preset:'沉船',x:1510,z:1390,left:58,top:72}
+
+  const STRUCTURE_DEFS=[
+    {key:'village',name:'村庄',icon:'village',color:'#F4C84F',count:9},
+    {key:'mansion',name:'林地府邸',icon:'mansion',color:'#E7D7C0',count:1},
+    {key:'desert_pyramid',name:'沙漠神殿',icon:'desert_pyramid',color:'#DDB85E',count:4},
+    {key:'jungle_temple',name:'丛林神庙',icon:'jungle_temple',color:'#8FCB73',count:2},
+    {key:'swamp_hut',name:'沼泽小屋',icon:'swamp_hut',color:'#A6B17F',count:3},
+    {key:'igloo',name:'雪屋',icon:'igloo',color:'#EDF4F6',count:2},
+    {key:'ocean_monument',name:'海底神殿',icon:'ocean_monument',color:'#70C7CE',count:3},
+    {key:'pillager_outpost',name:'掠夺者前哨站',icon:'outpost',color:'#C89A76',count:5},
+    {key:'mineshaft',name:'废弃矿井',icon:'mine',color:'#C08A55',count:14},
+    {key:'ruined_portal',name:'废弃传送门',icon:'ruined_portal',color:'#A77CE8',count:6},
+    {key:'shipwreck',name:'沉船',icon:'shipwreck',color:'#6EB5D1',count:7},
+    {key:'ocean_ruin',name:'海底废墟',icon:'ocean_ruin',color:'#64C0D3',count:8},
+    {key:'buried_treasure',name:'埋藏的宝藏',icon:'buried_treasure',color:'#F3D66A',count:5},
+    {key:'trail_ruins',name:'古迹废墟',icon:'trail_ruins',color:'#BA9673',count:3},
+    {key:'trial_chambers',name:'试炼密室',icon:'trial_chambers',color:'#D6A06A',count:2},
+    {key:'ancient_city',name:'远古城市',icon:'ancient_city',color:'#6DABA8',count:1},
+    {key:'stronghold',name:'要塞',icon:'stronghold',color:'#B7ADA0',count:1},
+    {key:'nether_fortress',name:'下界要塞',icon:'nether_fortress',color:'#B8554E',count:2},
+    {key:'bastion_remnant',name:'堡垒遗迹',icon:'bastion_remnant',color:'#84695A',count:2},
+    {key:'nether_fossil',name:'下界化石',icon:'nether_fossil',color:'#D7C2A3',count:3},
+    {key:'end_city',name:'末地城',icon:'end_city',color:'#C7A3D5',count:3}
   ];
-  const DEFAULT_STRUCTURE_PRESETS=[
-    ['村庄','village','#F4C84F'],['林地府邸','mansion','#E7D7C0'],['沙漠神殿','temple','#DDB85E'],['丛林神庙','temple','#8FCB73'],
-    ['沼泽小屋','home','#A6B17F'],['雪屋','home','#EDF4F6'],['海底神殿','temple','#70C7CE'],['掠夺者前哨站','outpost','#C89A76'],
-    ['废弃矿井','mine','#C08A55'],['废弃传送门','portal','#A77CE8'],['沉船','ship','#6EB5D1'],['海底废墟','water','#64C0D3'],
-    ['埋藏的宝藏','pin','#F3D66A'],['古迹废墟','temple','#BA9673'],['试炼密室','temple','#D6A06A'],['远古城市','city','#6DABA8'],
-    ['要塞','fortress','#B7ADA0'],['下界要塞','fortress','#B8554E'],['堡垒遗迹','fortress','#84695A'],['下界化石','cave','#D7C2A3'],
-    ['末地城','city','#C7A3D5'],['其他结构','pin','#D7B85D']
-  ].map(x=>({name:x[0],icon:x[1],color:x[2]}));
+  const FIXED_STRUCTURES=[
+    {id:'s-village',name:'村庄',type:'village',preset:'村庄',x:420,y:68,z:260},
+    {id:'s-mansion',name:'林地府邸',type:'mansion',preset:'林地府邸',x:780,y:91,z:-420},
+    {id:'s-temple',name:'海底神殿',type:'ocean_monument',preset:'海底神殿',x:2060,y:46,z:-680},
+    {id:'s-mine',name:'废弃矿井',type:'mineshaft',preset:'废弃矿井',x:2380,y:31,z:920},
+    {id:'s-ship',name:'沉船',type:'shipwreck',preset:'沉船',x:1510,y:58,z:1390}
+  ];
+  const DEFAULT_STRUCTURE_PRESETS=STRUCTURE_DEFS.map(d=>({name:d.name,icon:d.icon,color:d.color}));
 
   const DEFAULTS={
+    schemaVersion:STATE_SCHEMA,
     settings:{
       showCoords:true,playerRing:true,labels:true,custom:true,structures:true,grid:false,dragMap:true,
       playerFixed:true,playerIcon:'arrow',playerSize:24,playerColor:'#FFE14E',
@@ -606,40 +642,42 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
       markerDefaultIcon:'pin',markerDefaultColor:'#FFD34E',markerDefaultSize:22,
       hideLabelsLowZoom:true,avoidLabels:true,debug:false,
       markerScale:35,style:'satellite',
-      structureFilters:{village:true,mansion:true,temple:true,mine:true,other:false},
+      structureFilters:Object.fromEntries(STRUCTURE_DEFS.map(d=>[d.key,true])),
       shortcuts:{map:'M',locate:'R',add:'Shift+M'},
       structurePresets:DEFAULT_STRUCTURE_PRESETS
     },
     hiddenStructures:[],
     trash:[],
     markers:[
-      {id:'m1',name:'临时营地',icon:'home',color:'#FFD34E',description:'临时驻点，附近有平地与水源。',x:1254,z:-376,left:41,top:56},
-      {id:'m2',name:'矿区 A',icon:'mine',color:'#F2B84B',description:'已确认的采矿区域。',x:1690,z:-188,left:54,top:45},
-      {id:'m3',name:'北岭入口',icon:'mountain',color:'#E9D86A',description:'进入北部山地的入口。',x:882,z:-1012,left:29,top:27},
-      {id:'m4',name:'河口码头',icon:'ship',color:'#66C1D5',description:'沿河航运节点。',x:1418,z:-642,left:49,top:35}
+      {id:'m1',name:'临时营地',icon:'home',color:'#FFD34E',description:'临时驻点，附近有平地与水源。',x:1254,y:72,z:-376},
+      {id:'m2',name:'矿区 A',icon:'mine',color:'#F2B84B',description:'已确认的采矿区域。',x:1690,y:38,z:-188},
+      {id:'m3',name:'北岭入口',icon:'mountain',color:'#E9D86A',description:'进入北部山地的入口。',x:882,y:116,z:-1012},
+      {id:'m4',name:'河口码头',icon:'ship',color:'#66C1D5',description:'沿河航运节点。',x:1418,y:63,z:-642}
     ],
     view:{zoom:1,panX:0,panY:0}
   };
 
   function clone(v){return JSON.parse(JSON.stringify(v));}
-  function mergeDefaults(saved){
-    const d=clone(DEFAULTS); if(!saved||typeof saved!=='object')return d;
-    if(saved.settings)Object.assign(d.settings,saved.settings);
-    if(saved.settings&&saved.settings.structureFilters)Object.assign(d.settings.structureFilters,saved.settings.structureFilters);
-    if(saved.settings&&Array.isArray(saved.settings.structurePresets))d.settings.structurePresets=saved.settings.structurePresets;
-    if(Array.isArray(saved.markers))d.markers=saved.markers;
-    if(Array.isArray(saved.hiddenStructures))d.hiddenStructures=saved.hiddenStructures;
-    if(Array.isArray(saved.trash))d.trash=saved.trash.slice(-100);
-    if(saved.view)Object.assign(d.view,saved.view);
-    return d;
+  function isCurrentState(saved){
+    if(!saved||saved.schemaVersion!==STATE_SCHEMA||!saved.settings)return false;
+    if(!Array.isArray(saved.markers)||!Array.isArray(saved.hiddenStructures)||!Array.isArray(saved.trash))return false;
+    if(saved.markers.some(m=>!Number.isFinite(m.x)||!Number.isFinite(m.y)||!Number.isFinite(m.z)||'left' in m||'top' in m))return false;
+    if(!Array.isArray(saved.settings.structurePresets)||saved.settings.structurePresets.length!==STRUCTURE_DEFS.length)return false;
+    if(saved.settings.structurePresets.some((p,i)=>p.name!==STRUCTURE_DEFS[i].name||!ICONS[p.icon]))return false;
+    if(!saved.settings.structureFilters||STRUCTURE_DEFS.some(d=>typeof saved.settings.structureFilters[d.key]!=='boolean'))return false;
+    if(Object.keys(saved.settings.structureFilters).length!==STRUCTURE_DEFS.length)return false;
+    return true;
   }
   function load(){
-    try{return mergeDefaults(JSON.parse(localStorage.getItem(STORAGE_KEY)||'null'));}catch(e){return clone(DEFAULTS);}
+    try{
+      const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');
+      return isCurrentState(saved)?saved:clone(DEFAULTS);
+    }catch(e){return clone(DEFAULTS);}
   }
   let committed=load(), draft=null;
-  let selectedMarkerId=null, selectedStructureId=null, editorMode='add', editorPoint={x:1254,z:-376,left:50,top:50};
+  let selectedMarkerId=null, selectedStructureId=null, editorMode='add';
   let markerPane='markers', clearTrashArmedUntil=0;
-  let contextPoint={x:1254,z:-376,left:50,top:50};
+  let contextPoint={x:1254,y:72,z:-376,left:50,top:50};
   let dragging=false,dragStartX=0,dragStartY=0,basePanX=0,basePanY=0;
   let panelDrag=null;
   const panelPositions={layers:null,markers:null};
@@ -660,7 +698,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
       closeDropdown();
     }
   }
-  function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(committed));}
+  function save(){committed.schemaVersion=STATE_SCHEMA;localStorage.setItem(STORAGE_KEY,JSON.stringify(committed));}
   function toast(text){
     const el=q('#toast');clearTimeout(toastTimer);el.textContent=text;el.classList.add('show');
     toastTimer=setTimeout(()=>el.classList.remove('show'),1500);
@@ -724,6 +762,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     player.style.color=settings.playerColor;
     pi.classList.toggle('solid',settings.playerIcon!=='cross');
     pi.querySelector('use').setAttribute('href',settings.playerIcon==='arrow'?'#i-player':settings.playerIcon==='cross'?'#i-cross':'#i-dot');
+    renderStructureLayerList(settings);
     syncLayerControls(settings);
     updateWorldAnchors(settings);
     renderMarkers(settings);
@@ -745,7 +784,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
         if(settings.structureFilters[st.type]===false)return;
         const p=presetFor(st.preset,settings);
         const el=document.createElement('div');
-        const pos=screenPercent(st.left,st.top);
+        const wp=worldPositionFor(st.x,st.z),pos=screenPercent(wp.left,wp.top);
         el.className='map-marker structure';el.style.left=pos.left+'%';el.style.top=pos.top+'%';el.dataset.kind='structure';el.dataset.structureId=st.id;el.dataset.name=st.name;
         el.style.color=p.color;
         el.innerHTML='<svg class="icon glyph" style="width:'+size+'px;height:'+size+'px"><use href="#'+iconUse(p.icon)+'"/></svg>'+(showLabels?'<div class="marker-label">'+escapeHtml(st.name)+'</div>':'');
@@ -755,7 +794,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     if(settings.custom){
       committed.markers.forEach(m=>{
         const el=document.createElement('div');
-        const pos=screenPercent(m.left,m.top);
+        const wp=worldPositionFor(m.x,m.z),pos=screenPercent(wp.left,wp.top);
         el.className='map-marker custom';el.style.left=pos.left+'%';el.style.top=pos.top+'%';el.dataset.kind='custom';el.dataset.markerId=m.id;el.dataset.name=m.name;el.style.color=m.color;
         el.innerHTML='<svg class="icon glyph" style="width:'+size+'px;height:'+size+'px"><use href="#'+iconUse(m.icon)+'"/></svg>'+(showLabels?'<div class="marker-label">'+escapeHtml(m.name)+'</div>':'');
         layer.appendChild(el);
@@ -789,7 +828,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
         const secondary=edited
           ?'<button class="mini reset reset-row" title="重置为自动"><svg class="icon"><use href="#i-reset"/></svg></button>'
           :'<button class="mini danger delete-row" title="删除"><svg class="icon"><use href="#i-trash"/></svg></button>';
-        return '<div class="marker-row" data-marker-id="'+m.id+'"><svg class="icon mi" style="color:'+m.color+'"><use href="#'+iconUse(m.icon)+'"/></svg><div class="info"><div class="title">'+escapeHtml(m.name)+origin+'</div><div class="meta">'+m.x+', '+m.z+'</div><div class="marker-description">'+escapeHtml(m.description||'')+'</div></div><div class="row-actions"><button class="mini edit-row" title="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>'+secondary+'</div></div>';
+        return '<div class="marker-row" data-marker-id="'+m.id+'"><svg class="icon mi" style="color:'+m.color+'"><use href="#'+iconUse(m.icon)+'"/></svg><div class="info"><div class="title">'+escapeHtml(m.name)+origin+'</div><div class="meta">X '+m.x+' · Y '+m.y+' · Z '+m.z+'</div><div class="marker-description">'+escapeHtml(m.description||'')+'</div></div><div class="row-actions"><button class="mini edit-row" title="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>'+secondary+'</div></div>';
       }).join('');
       qa('#markerList .edit-row').forEach(b=>b.onclick=()=>openEditor('edit',b.closest('.marker-row').dataset.markerId));
       qa('#markerList .delete-row').forEach(b=>b.onclick=()=>deleteMarker(b.closest('.marker-row').dataset.markerId));
@@ -854,8 +893,6 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     }else if(t.kind==='custom'){
       const m=clone(t.marker);
       if(committed.markers.some(x=>x.id===m.id))m.id='m'+Date.now().toString(36);
-      // A pure custom trash entry should not have a source. Strip stale legacy source to avoid two origins.
-      delete m.sourceStructureId;
       committed.markers.push(m);
     }
     committed.trash.splice(idx,1);
@@ -873,6 +910,17 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     }
     committed.trash=[];clearTrashArmedUntil=0;btn.textContent='清空';btn.classList.remove('confirm-danger');
     save();renderTrashList();toast('回收站已清空');
+  }
+  function renderStructureLayerList(settings=currentSettings()){
+    const list=q('#structureLayerList');if(!list)return;
+    list.innerHTML=STRUCTURE_DEFS.map(d=>{
+      const preset=presetFor(d.name,settings),on=settings.structureFilters[d.key]!==false;
+      return '<div class="layer-row indent"><div class="checkbox '+(on?'on':'')+'" data-structure-filter="'+d.key+'"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon" style="color:'+preset.color+'"><use href="#'+iconUse(preset.icon)+'"/></svg><div class="name">'+escapeHtml(d.name)+'</div><div class="count">'+d.count+'</div></div>';
+    }).join('');
+    Array.from(list.querySelectorAll('.checkbox[data-structure-filter]')).forEach(cb=>cb.onclick=()=>{
+      const k=cb.dataset.structureFilter;committed.settings.structureFilters[k]=!committed.settings.structureFilters[k];save();renderAppSettings();
+    });
+    const total=q('#structureTotalCount');if(total)total.textContent=STRUCTURE_DEFS.reduce((a,d)=>a+d.count,0);
   }
   function renderLayerCounts(){
     const customCount=q('#layersPanel .layer-row .count');if(customCount)customCount.textContent=committed.markers.length;
@@ -1035,17 +1083,16 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
       const st=FIXED_STRUCTURES.find(x=>x.id===id);
       if(st){
         const preset=presetFor(st.preset,committed.settings);
-        m={name:st.name,icon:preset.icon,color:preset.color,description:'自动识别结构：'+st.preset,x:st.x,z:st.z,left:st.left,top:st.top};
+        m={name:st.name,icon:preset.icon,color:preset.color,description:'自动识别结构：'+st.preset,x:st.x,y:st.y,z:st.z};
       }
     }
     if(!m){
       const s=committed.settings,p=point||contextPoint;
-      m={name:'新标点',icon:s.markerDefaultIcon,color:s.markerDefaultColor,description:'',x:p.x,z:p.z,left:p.left,top:p.top};
+      m={name:'新标点',icon:s.markerDefaultIcon,color:s.markerDefaultColor,description:'',x:p.x,y:p.y,z:p.z};
     }
-    editorPoint={x:m.x,z:m.z,left:m.left,top:m.top};
     q('#editorTitle').textContent=mode==='edit'?'编辑标点':mode==='structure'?'编辑结构标点':'添加标点';q('#markerName').value=m.name;q('#markerDescription').value=m.description||'';
     q('#markerColor').value=m.color;q('#markerSwatch').style.background=m.color;q('#markerColorText').textContent=m.color.toUpperCase();
-    q('#markerCoords').textContent='X '+m.x+'　Z '+m.z;
+    q('#markerX').value=m.x;q('#markerY').value=m.y;q('#markerZ').value=m.z;
     const secondary=q('#deleteMarkerButton'),secondaryText=q('#deleteMarkerButtonText'),secondaryUse=secondary.querySelector('use'),editedAuto=mode==='edit'&&isEditedAutoMarker(m);
     secondary.style.visibility=(mode==='edit'||mode==='structure')?'visible':'hidden';
     secondary.dataset.action=editedAuto?'reset':'delete';
@@ -1056,9 +1103,14 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     secondary.querySelector('.icon').style.display='inline-block';
     q('#markerIconSelect').dataset.value=m.icon;updateSelectDisplay(q('#markerIconSelect'),m.icon);
   }
+  function worldPositionFor(x,z){
+    return {left:Math.max(1,Math.min(99,50+(x-1254)/36)),top:Math.max(1,Math.min(99,50+(z+376)/36))};
+  }
   function saveEditor(){
     const name=q('#markerName').value.trim();if(!name){toast('请输入标点名称');q('#markerName').focus();return;}
-    const m={name,icon:q('#markerIconSelect').dataset.value||'pin',color:q('#markerColor').value.toUpperCase(),description:q('#markerDescription').value.trim(),...editorPoint};
+    const x=Number(q('#markerX').value),y=Number(q('#markerY').value),z=Number(q('#markerZ').value);
+    if(!Number.isFinite(x)||!Number.isFinite(y)||!Number.isFinite(z)){toast('请输入有效的 X / Y / Z 坐标');return;}
+    const m={name,icon:q('#markerIconSelect').dataset.value||'pin',color:q('#markerColor').value.toUpperCase(),description:q('#markerDescription').value.trim(),x:Math.round(x),y:Math.round(y),z:Math.round(z)};
     if(editorMode==='edit'){
       const i=committed.markers.findIndex(x=>x.id===selectedMarkerId);if(i>=0)committed.markers[i]={...committed.markers[i],...m};
     }else if(editorMode==='structure'){
@@ -1100,7 +1152,9 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     const left=50+(screenLeft-50-panPctX)/committed.view.zoom;
     const top=50+(screenTop-50-panPctY)/committed.view.zoom;
     const cl=Math.max(1,Math.min(99,left)),ct=Math.max(1,Math.min(99,top));
-    return {left:cl,top:ct,x:Math.round(1254+(cl-50)*36),z:Math.round(-376+(ct-50)*36)};
+    const point={left:cl,top:ct,x:Math.round(1254+(cl-50)*36),z:Math.round(-376+(ct-50)*36)};
+    point.y=terrainInfoAt(point).y;
+    return point;
   }
   function terrainInfoAt(p){
     let name='草原 / 林缘',icon='#i-tree',base=72;
@@ -1116,7 +1170,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   function updateCursorInfo(e){
     if(isMapUiTarget(e.target))return;
     const p=pointFromEvent(e),info=terrainInfoAt(p);
-    q('#cursorCoords').textContent='X '+p.x+'　Z '+p.z+'　Y '+info.y;
+    q('#cursorCoords').textContent='X '+p.x+'　Y '+p.y+'　Z '+p.z;
     q('#cursorBiome').textContent=info.name;
     q('#cursorBiomeIconUse').setAttribute('href',info.icon);
   }
@@ -1127,14 +1181,15 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
       if(el.dataset.kind==='custom'){
         selectedMarkerId=el.dataset.markerId;selectedStructureId=null;
         const m=committed.markers.find(x=>x.id===selectedMarkerId),edited=isEditedAutoMarker(m);
-        q('#markerContextMeta').textContent=el.dataset.name+(edited?' · 自动→自定义':' · 自定义');
+        q('#markerContextMeta').textContent=el.dataset.name+' · X '+m.x+' Y '+m.y+' Z '+m.z+(edited?' · 自动→自定义':' · 自定义');
         secondary.dataset.action=edited?'reset':'delete';
         secondary.classList.toggle('danger',!edited);
         secondaryText.textContent=edited?'重置为自动':'删除';
         secondaryUse.setAttribute('href',edited?'#i-reset':'#i-trash');
       }else{
         selectedMarkerId=null;selectedStructureId=el.dataset.structureId;
-        q('#markerContextMeta').textContent=el.dataset.name+' · 自动结构';
+        const st=FIXED_STRUCTURES.find(x=>x.id===selectedStructureId);
+        q('#markerContextMeta').textContent=el.dataset.name+' · X '+st.x+' Y '+st.y+' Z '+st.z+' · 自动结构';
         secondary.dataset.action='delete';secondary.classList.add('danger');secondaryText.textContent='删除';secondaryUse.setAttribute('href','#i-trash');
       }
       q('#ctxEdit').classList.remove('disabled');secondary.classList.remove('disabled');positionMenu(markerCtx,e.clientX,e.clientY);
@@ -1204,7 +1259,6 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   // layer controls modify committed state immediately
   q('#structureExpand').onclick=()=>q('#structureGroup').classList.toggle('expanded');
   qa('.checkbox[data-toggle]').forEach(cb=>cb.onclick=()=>{const k=cb.dataset.toggle;committed.settings[k]=!committed.settings[k];save();renderAppSettings();});
-  qa('.checkbox[data-structure-filter]').forEach(cb=>cb.onclick=()=>{const k=cb.dataset.structureFilter;committed.settings.structureFilters[k]=!committed.settings.structureFilters[k];save();renderAppSettings();});
 
   // marker editor
   q('#markerIconSelect').onclick=()=>openIconDropdown(q('#markerIconSelect'),q('#markerIconSelect').dataset.value||'pin',v=>{q('#markerIconSelect').dataset.value=v;updateSelectDisplay(q('#markerIconSelect'),v);});
@@ -1219,7 +1273,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     }
   };
   qa('[data-editor-close]').forEach(b=>b.onclick=()=>closeModal(false));
-  q('#addMarkerButton').onclick=()=>openEditor('add',null,{x:1254,z:-376,left:50,top:50});
+  q('#addMarkerButton').onclick=()=>openEditor('add',null,{x:1254,y:72,z:-376,left:50,top:50});
   qa('[data-marker-pane]').forEach(b=>b.onclick=()=>setMarkerPane(b.dataset.markerPane));
   q('#clearTrashButton').onclick=clearTrash;
 
@@ -1250,16 +1304,16 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     if(isMapUiTarget(e.target)){e.preventDefault();e.stopPropagation();return;}
     if(e.target.closest('.map-marker'))return;
     e.preventDefault();contextPoint=pointFromEvent(e);
-    q('#mapContext .ctx-meta span').textContent='X '+contextPoint.x+', Z '+contextPoint.z;markerCtx.style.display='none';positionMenu(mapCtx,e.clientX,e.clientY);
+    q('#mapContext .ctx-meta span').textContent='X '+contextPoint.x+', Y '+contextPoint.y+', Z '+contextPoint.z;markerCtx.style.display='none';positionMenu(mapCtx,e.clientX,e.clientY);
   });
   q('#ctxAdd').onclick=()=>openEditor('add',null,contextPoint);
-  q('#ctxTeleport').onclick=()=>{mapCtx.style.display='none';toast('已传送至 '+contextPoint.x+', '+contextPoint.z+'（原型模拟）');};
-  q('#ctxCopy').onclick=async()=>{const txt=contextPoint.x+', '+contextPoint.z;try{await navigator.clipboard.writeText(txt);}catch(e){}mapCtx.style.display='none';toast('已复制坐标：'+txt);};
+  q('#ctxTeleport').onclick=()=>{mapCtx.style.display='none';toast('已传送至 '+contextPoint.x+', '+contextPoint.y+', '+contextPoint.z+'（原型模拟）');};
+  q('#ctxCopy').onclick=async()=>{const txt=contextPoint.x+', '+contextPoint.y+', '+contextPoint.z;try{await navigator.clipboard.writeText(txt);}catch(e){}mapCtx.style.display='none';toast('已复制坐标：'+txt);};
   q('#markerTeleport').onclick=()=>{
     const m=committed.markers.find(x=>x.id===selectedMarkerId),st=FIXED_STRUCTURES.find(x=>x.id===selectedStructureId);
     markerCtx.style.display='none';
-    if(m)toast('已传送到 '+m.name+' · '+m.x+', '+m.z+'（原型模拟）');
-    else if(st)toast('已传送到 '+st.name+' · '+st.x+', '+st.z+'（原型模拟）');
+    if(m)toast('已传送到 '+m.name+' · '+m.x+', '+m.y+', '+m.z+'（原型模拟）');
+    else if(st)toast('已传送到 '+st.name+' · '+st.x+', '+st.y+', '+st.z+'（原型模拟）');
   };
   q('#ctxEdit').onclick=()=>{if(selectedMarkerId)openEditor('edit',selectedMarkerId);else if(selectedStructureId)openEditor('structure',selectedStructureId);};
   q('#ctxDelete').onclick=()=>{
@@ -1281,7 +1335,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     if(e.key==='Escape'){if(dropdown.classList.contains('open'))closeDropdown();else if(editor.style.display==='block'||settings.style.display==='block'||about.style.display==='block')closeModal(true);else if(mapCtx.style.display==='block'||markerCtx.style.display==='block')hidePanels();else if(layers.style.display==='block'||markersPanel.style.display==='block')hidePanels();return;}
     const s=committed.settings.shortcuts, key=keyString(e);if(!key)return;
     if(key===s.locate){q('#locateBtn').click();}
-    if(key===s.add){e.preventDefault();openEditor('add',null,{x:1254,z:-376,left:50,top:50});}
+    if(key===s.add){e.preventDefault();openEditor('add',null,{x:1254,y:72,z:-376,left:50,top:50});}
     if(key===s.map){e.preventDefault();toast('地图快捷键 '+s.map+'（游戏内用于打开 / 关闭地图）');}
   });
 
