@@ -55,7 +55,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .floating-panel,.modal,.context-menu{background:linear-gradient(180deg,#182228f8,#151e23f7);border:1px solid #53616a;box-shadow:var(--shadow);backdrop-filter:blur(8px);border-radius:8px;color:var(--text)}
 .floating-panel{position:absolute;z-index:40;top:18px}
 .panel-head,.modal-head{height:50px;padding:0 14px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #43505a;font-weight:700;font-size:16px}
-.panel-head .icon,.modal-head .icon{width:22px;height:22px}.panel-head .spacer,.modal-head .spacer{flex:1}
+.panel-head .icon,.modal-head .icon{width:22px;height:22px}.panel-head .spacer,.modal-head .spacer{flex:1}\n.floating-panel .panel-head{cursor:move;user-select:none}.floating-panel .panel-head .close-btn{cursor:pointer}
 .close-btn{width:30px;height:30px;background:transparent;display:grid;place-items:center;cursor:pointer;color:#e2e7ea}.close-btn:hover{background:#ffffff0d;border-radius:4px}.close-btn .icon{width:18px;height:18px}
 .layers-panel{left:16px;width:300px;display:none;max-height:calc(100vh - var(--header) - 36px);overflow:hidden}
 .markers-panel{left:16px;width:345px;display:none;max-height:calc(100vh - 130px)}
@@ -148,7 +148,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .about-note{font-size:12px;line-height:1.7;color:#a3adb3;margin-top:14px}
 .debug-hud{position:absolute;z-index:34;right:18px;top:78px;background:#11191ee8;border:1px solid #4c5a63;border-radius:6px;padding:9px 11px;font:11px/1.6 Consolas,monospace;color:#b9d3c2;display:none;pointer-events:none}
 .app[data-debug="on"] .debug-hud{display:block}
-.app[data-coords="off"] .coord-box,.app[data-coords="off"] .location-info{display:none}
+.app[data-coords="off"] .coord-box{display:none}
 .readonly-field{opacity:.86;cursor:default}
 .notice-inline{display:flex;align-items:center;gap:8px;font-size:12px;color:#95a1a8;margin-top:9px}
 .notice-inline .icon{width:15px;height:15px}
@@ -314,7 +314,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   <header class="topbar">
     <div class="brand"><svg class="icon"><use href="#i-map"/></svg><span>地图册</span><small>Map Atlas · V3</small></div>
     <div class="sep-v"></div>
-    <div class="location-info"><span>X: 1254</span><span>Z: -376</span><div class="sep-v" style="margin:0 4px;height:18px"></div><svg class="icon"><use href="#i-mountain"/></svg><span>草原 / 山麓</span></div>
+    <div class="location-info"><svg class="icon"><use href="#i-map"/></svg><span>卫星 · 写实</span><div class="sep-v" style="margin:0 4px;height:18px"></div><span id="mapDataStatus">结构 0 · 标点 0</span></div>
     <div class="top-spacer"></div>
     <nav class="nav">
       <button class="nav-btn active" data-nav="map"><svg class="icon"><use href="#i-map"/></svg><span>地图</span></button>
@@ -413,9 +413,9 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
       </div>
     </div>
 
-    <div class="coord-box">
-      <div class="coord-line"><svg class="icon"><use href="#i-locate"/></svg><span>X 1254　Z -376　Y 72</span></div>
-      <div class="coord-line"><svg class="icon"><use href="#i-tree"/></svg><span>草原 / 山麓</span></div>
+    <div class="coord-box" title="鼠标所在地图位置">
+      <div class="coord-line"><svg class="icon"><use href="#i-locate"/></svg><span id="cursorCoords">X 1254　Z -376　Y 72</span></div>
+      <div class="coord-line"><svg class="icon"><use id="cursorBiomeIconUse" href="#i-tree"/></svg><span id="cursorBiome">草原 / 山麓</span></div>
     </div>
     <div class="scale-box"><div id="scaleText">2 km</div><div class="scale-line"></div></div>
     <div class="right-controls">
@@ -641,6 +641,8 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   let markerPane='markers', clearTrashArmedUntil=0;
   let contextPoint={x:1254,z:-376,left:50,top:50};
   let dragging=false,dragStartX=0,dragStartY=0,basePanX=0,basePanY=0;
+  let panelDrag=null;
+  const panelPositions={layers:null,markers:null};
   let captureShortcut=null, dropdownHandler=null, toastTimer=null;
 
   function currentSettings(){return draft?draft.settings:committed.settings;}
@@ -874,6 +876,10 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   }
   function renderLayerCounts(){
     const customCount=q('#layersPanel .layer-row .count');if(customCount)customCount.textContent=committed.markers.length;
+    const s=currentSettings();
+    const visibleStructures=s.structures?FIXED_STRUCTURES.filter(st=>!committed.hiddenStructures.includes(st.id)&&s.structureFilters[st.type]!==false).length:0;
+    const visibleMarkers=s.custom?committed.markers.length:0;
+    const status=q('#mapDataStatus');if(status)status.textContent='结构 '+visibleStructures+' · 标点 '+visibleMarkers;
   }
   function syncLayerControls(settings=currentSettings()){
     qa('.checkbox[data-toggle]').forEach(cb=>{
@@ -952,14 +958,57 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     renderSettings();renderAppSettings(draft.settings);toast('已恢复此页默认值');
   }
 
+  function closeContextMenus(){
+    mapCtx.style.display='none';markerCtx.style.display='none';
+  }
+  function panelElement(which){return which==='layers'?layers:markersPanel;}
+  function clampPanelPosition(panel,left,top){
+    const maxLeft=Math.max(8,mapStage.clientWidth-panel.offsetWidth-8);
+    const maxTop=Math.max(8,mapStage.clientHeight-panel.offsetHeight-8);
+    return {left:Math.max(8,Math.min(maxLeft,left)),top:Math.max(8,Math.min(maxTop,top))};
+  }
+  function placePanel(which){
+    const panel=panelElement(which),saved=panelPositions[which];
+    if(saved){
+      const p=clampPanelPosition(panel,saved.left,saved.top);
+      panel.style.left=p.left+'px';panel.style.top=p.top+'px';panelPositions[which]=p;return;
+    }
+    const btn=q('[data-nav="'+which+'"]'),br=btn.getBoundingClientRect(),sr=mapStage.getBoundingClientRect();
+    const left=br.left-sr.left+br.width/2-panel.offsetWidth/2;
+    const p=clampPanelPosition(panel,left,8);
+    panel.style.left=p.left+'px';panel.style.top=p.top+'px';
+  }
+  function enablePanelDrag(panel,which){
+    const head=panel.querySelector('.panel-head');
+    head.addEventListener('pointerdown',e=>{
+      if(e.button!==0||e.target.closest('button'))return;
+      const pr=panel.getBoundingClientRect(),sr=mapStage.getBoundingClientRect();
+      panelDrag={panel,which,pointerId:e.pointerId,dx:e.clientX-pr.left,dy:e.clientY-pr.top,stageLeft:sr.left,stageTop:sr.top};
+      head.setPointerCapture(e.pointerId);e.preventDefault();
+    });
+    head.addEventListener('pointermove',e=>{
+      if(!panelDrag||panelDrag.panel!==panel||panelDrag.pointerId!==e.pointerId)return;
+      const p=clampPanelPosition(panel,e.clientX-panelDrag.stageLeft-panelDrag.dx,e.clientY-panelDrag.stageTop-panelDrag.dy);
+      panel.style.left=p.left+'px';panel.style.top=p.top+'px';
+    });
+    const finish=e=>{
+      if(!panelDrag||panelDrag.panel!==panel||panelDrag.pointerId!==e.pointerId)return;
+      panelPositions[which]={left:parseFloat(panel.style.left)||8,top:parseFloat(panel.style.top)||8};
+      panelDrag=null;
+      if(head.hasPointerCapture(e.pointerId))head.releasePointerCapture(e.pointerId);
+    };
+    head.addEventListener('pointerup',finish);head.addEventListener('pointercancel',finish);
+  }
   function hidePanels(){
-    layers.style.display='none';markersPanel.style.display='none';mapCtx.style.display='none';markerCtx.style.display='none';closeDropdown();
+    layers.style.display='none';markersPanel.style.display='none';closeContextMenus();closeDropdown();
     qa('.nav-btn').forEach(b=>b.classList.remove('active'));q('[data-nav="map"]').classList.add('active');
   }
   function openPanel(which){
     hidePanels();q('[data-nav="map"]').classList.remove('active');
-    if(which==='layers'){layers.style.display='block';q('[data-nav="layers"]').classList.add('active');}
-    if(which==='markers'){markersPanel.style.display='block';q('[data-nav="markers"]').classList.add('active');renderMarkerList();setMarkerPane(markerPane);}
+    const panel=panelElement(which);
+    panel.style.display='block';placePanel(which);
+    if(which==='layers')q('[data-nav="layers"]').classList.add('active');
+    if(which==='markers'){q('[data-nav="markers"]').classList.add('active');renderMarkerList();setMarkerPane(markerPane);}
   }
   function openAbout(){
     hidePanels();setModalLock(true);overlay.style.display='block';about.style.display='block';q('[data-nav="about"]').classList.add('active');
@@ -1023,8 +1072,13 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   }
 
   function positionMenu(el,x,y){
-    el.style.display='block';const r=el.getBoundingClientRect();
-    el.style.left=Math.max(8,Math.min(innerWidth-r.width-8,x))+'px';el.style.top=Math.max(70,Math.min(innerHeight-r.height-8,y))+'px';
+    el.style.display='block';
+    const host=el.offsetParent||app,hr=host.getBoundingClientRect(),r=el.getBoundingClientRect(),gap=8;
+    let left=x-hr.left+gap,top=y-hr.top+gap;
+    if(left+r.width>hr.width-gap)left=x-hr.left-r.width-gap;
+    if(top+r.height>hr.height-gap)top=y-hr.top-r.height-gap;
+    el.style.left=Math.max(gap,Math.min(hr.width-r.width-gap,left))+'px';
+    el.style.top=Math.max(gap,Math.min(hr.height-r.height-gap,top))+'px';
   }
   function pointFromEvent(e){
     const r=mapStage.getBoundingClientRect();
@@ -1034,6 +1088,24 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     const top=50+(screenTop-50-panPctY)/committed.view.zoom;
     const cl=Math.max(1,Math.min(99,left)),ct=Math.max(1,Math.min(99,top));
     return {left:cl,top:ct,x:Math.round(1254+(cl-50)*36),z:Math.round(-376+(ct-50)*36)};
+  }
+  function terrainInfoAt(p){
+    let name='草原 / 林缘',icon='#i-tree',base=72;
+    if(p.top<19){name='雪峰 / 高山';icon='#i-mountain';base=142;}
+    else if(p.top<34){name='山地 / 针叶林';icon='#i-mountain';base=104;}
+    else if(p.top>72){name='海洋 / 近海';icon='#i-water';base=62;}
+    else if(p.top>57&&p.left>40&&p.left<69){name='河口 / 湿地';icon='#i-water';base=64;}
+    else if(p.top<50&&p.left>48){name='森林 / 河谷';icon='#i-tree';base=78;}
+    else if(p.top<52){name='草原 / 山麓';icon='#i-tree';base=82;}
+    const ripple=Math.round(Math.sin(p.left*.19)*4+Math.cos(p.top*.17)*3);
+    return {name,icon,y:Math.max(54,base+ripple)};
+  }
+  function updateCursorInfo(e){
+    if(e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box'))return;
+    const p=pointFromEvent(e),info=terrainInfoAt(p);
+    q('#cursorCoords').textContent='X '+p.x+'　Z '+p.z+'　Y '+info.y;
+    q('#cursorBiome').textContent=info.name;
+    q('#cursorBiomeIconUse').setAttribute('href',info.icon);
   }
   function bindMarkerContext(){
     qa('.map-marker').forEach(el=>el.oncontextmenu=e=>{
@@ -1139,16 +1211,22 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   q('#clearTrashButton').onclick=clearTrash;
 
   // map controls
-  q('#zoomIn').onclick=()=>setZoom(committed.view.zoom*1.25);q('#zoomOut').onclick=()=>setZoom(committed.view.zoom/1.25);
-  q('#locateBtn').onclick=()=>{committed.view={zoom:1,panX:0,panY:0};save();renderView();toast('已回到玩家位置');};
-  q('#homeBtn').onclick=()=>{committed.view={zoom:.8,panX:180,panY:-80};save();renderView();toast('已回到出生点');};
-  mapStage.addEventListener('wheel',e=>{if(isModalOpen()){e.preventDefault();return;}e.preventDefault();setZoom(e.deltaY<0?committed.view.zoom*1.12:committed.view.zoom/1.12);},{passive:false});
+  q('#zoomIn').onclick=()=>{closeContextMenus();setZoom(committed.view.zoom*1.25);};q('#zoomOut').onclick=()=>{closeContextMenus();setZoom(committed.view.zoom/1.25);};
+  q('#locateBtn').onclick=()=>{closeContextMenus();committed.view={zoom:1,panX:0,panY:0};save();renderView();toast('已回到玩家位置');};
+  q('#homeBtn').onclick=()=>{closeContextMenus();committed.view={zoom:.8,panX:180,panY:-80};save();renderView();toast('已回到出生点');};
+  mapStage.addEventListener('wheel',e=>{if(isModalOpen()){e.preventDefault();return;}closeContextMenus();e.preventDefault();setZoom(e.deltaY<0?committed.view.zoom*1.12:committed.view.zoom/1.12);},{passive:false});
   mapStage.addEventListener('pointerdown',e=>{
     if(isModalOpen())return;
+    if(e.button===0&&!e.target.closest('.context-menu'))closeContextMenus();
     if(e.button!==0||!committed.settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box,.map-marker'))return;
     dragging=true;mapStage.classList.add('dragging');dragStartX=e.clientX;dragStartY=e.clientY;basePanX=committed.view.panX;basePanY=committed.view.panY;mapStage.setPointerCapture(e.pointerId);
   });
-  mapStage.addEventListener('pointermove',e=>{if(!dragging)return;committed.view.panX=basePanX+(e.clientX-dragStartX);committed.view.panY=basePanY+(e.clientY-dragStartY);renderView();});
+  mapStage.addEventListener('pointermove',e=>{
+    updateCursorInfo(e);
+    if(!dragging)return;
+    closeContextMenus();
+    committed.view.panX=basePanX+(e.clientX-dragStartX);committed.view.panY=basePanY+(e.clientY-dragStartY);renderView();
+  });
   mapStage.addEventListener('pointerup',()=>{if(dragging){dragging=false;mapStage.classList.remove('dragging');save();}});
   mapStage.addEventListener('contextmenu',e=>{
     if(isModalOpen()){e.preventDefault();return;}
@@ -1188,11 +1266,15 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     if(key===s.map){e.preventDefault();toast('地图快捷键 '+s.map+'（游戏内用于打开 / 关闭地图）');}
   });
 
-  document.addEventListener('pointerdown',e=>{if(dropdown.classList.contains('open')&&!e.target.closest('#dropdown,.select,.structure-select'))closeDropdown();});
+  document.addEventListener('pointerdown',e=>{
+    if(dropdown.classList.contains('open')&&!e.target.closest('#dropdown,.select,.structure-select'))closeDropdown();
+    if(e.button===0&&!e.target.closest('.context-menu'))closeContextMenus();
+  });
 
   q('.window-close').onclick=()=>toast('游戏内此按钮关闭地图（原型保留页面）');
 
   // boot
+  enablePanelDrag(layers,'layers');enablePanelDrag(markersPanel,'markers');
   renderAppSettings(committed.settings);renderView();renderSettings();
   const demo=new URLSearchParams(location.search).get('demo');
   if(demo==='settings')openSettings('general');else if(demo==='layers')openPanel('layers');else if(demo==='markers')openPanel('markers');
