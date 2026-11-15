@@ -240,6 +240,30 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   border-top:1px solid #3d4a53;
 }
 
+
+/* marker manager + recycle bin */
+.marker-panel-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:10px;padding:3px;background:#10181d;border:1px solid #39464f;border-radius:6px}
+.marker-tab{height:32px;border-radius:4px;background:transparent;color:#98a5ac;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;font-size:13px}
+.marker-tab.active{background:#27343c;color:#fff;box-shadow:0 0 0 1px #485761 inset}
+.marker-tab .badge{min-width:18px;height:18px;padding:0 5px;border-radius:10px;background:#3a4650;color:#ccd4d8;display:grid;place-items:center;font-size:10px}
+.marker-tab.active .badge{background:#50606a}
+.marker-pane{display:none}.marker-pane.active{display:block}
+.marker-origin{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:9px;border:1px solid #596771;color:#aeb8be;font-size:10px;margin-left:5px;vertical-align:1px}
+.marker-origin.edited-auto{border-color:#8f7841;color:#e4c66f;background:#5b481d44}
+.mini.reset:hover{color:#f0cf69}
+.recycle-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.recycle-toolbar .hint{flex:1;color:#87949b;font-size:11px;line-height:1.35}
+.recycle-list{max-height:calc(100vh - 245px);overflow:auto;scrollbar-gutter:stable}
+.recycle-row{display:flex;align-items:center;gap:9px;padding:10px 4px;border-bottom:1px solid #ffffff0b}
+.recycle-row .trash-icon{width:25px;height:25px;color:#86939a}
+.recycle-row .info{min-width:0;flex:1}.recycle-row .title{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recycle-row .meta{font-size:10px;color:#849198;margin-top:3px}
+.recycle-kind{display:inline-flex;height:17px;align-items:center;padding:0 5px;border:1px solid #4f5c64;border-radius:8px;margin-right:5px;color:#aab4b9}
+.recycle-empty{padding:30px 10px;text-align:center;color:#829098;font-size:12px;line-height:1.7}
+.recycle-footer{margin-top:8px;padding-top:8px;border-top:1px solid #ffffff0b;color:#78858d;font-size:10px;text-align:center}
+.btn.compact{height:30px;padding:0 9px;font-size:11px}
+.btn.confirm-danger{border-color:#9a5551;background:#5e2e2b;color:#ffd4d1}
+
 </style>
 </head>
 <body>
@@ -372,7 +396,21 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
 
     <div class="floating-panel markers-panel" id="markersPanel">
       <div class="panel-head"><svg class="icon"><use href="#i-pin"/></svg>标点<div class="spacer"></div><button class="close-btn" data-panel-close><svg class="icon"><use href="#i-close"/></svg></button></div>
-      <div class="panel-body"><button class="btn primary" id="addMarkerButton" style="width:100%;margin-bottom:10px"><svg class="icon" style="display:inline-block;vertical-align:middle;width:16px"><use href="#i-add"/></svg> 添加标点</button><div class="marker-list" id="markerList"></div></div>
+      <div class="panel-body">
+        <div class="marker-panel-tabs">
+          <button class="marker-tab active" data-marker-pane="markers"><svg class="icon" style="width:15px;height:15px"><use href="#i-pin"/></svg>标点 <span class="badge" id="markerCountBadge">0</span></button>
+          <button class="marker-tab" data-marker-pane="trash"><svg class="icon" style="width:15px;height:15px"><use href="#i-trash"/></svg>回收站 <span class="badge" id="trashCountBadge">0</span></button>
+        </div>
+        <div class="marker-pane active" data-marker-pane-content="markers">
+          <button class="btn primary" id="addMarkerButton" style="width:100%;margin-bottom:10px"><svg class="icon" style="display:inline-block;vertical-align:middle;width:16px"><use href="#i-add"/></svg> 添加标点</button>
+          <div class="marker-list" id="markerList"></div>
+        </div>
+        <div class="marker-pane" data-marker-pane-content="trash">
+          <div class="recycle-toolbar"><div class="hint">删除的标点会保留在这里，可单独恢复。</div><button class="btn compact" id="clearTrashButton">清空</button></div>
+          <div class="recycle-list" id="trashList"></div>
+          <div class="recycle-footer">最多保留 100 条；超出后自动清理最早删除的记录。</div>
+        </div>
+      </div>
     </div>
 
     <div class="coord-box">
@@ -394,7 +432,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     <div class="context-menu" id="markerContext">
       <div class="ctx-item" id="markerTeleport"><svg class="icon"><use href="#i-teleport"/></svg>传送</div>
       <div class="ctx-item" id="ctxEdit"><svg class="icon"><use href="#i-edit"/></svg>编辑</div>
-      <div class="ctx-item danger" id="ctxDelete"><svg class="icon"><use href="#i-trash"/></svg>删除</div>
+      <div class="ctx-item danger" id="ctxDelete"><svg class="icon"><use href="#i-trash"/></svg><span id="ctxDeleteText">删除</span></div>
       <div class="ctx-sep"></div><div class="ctx-meta"><svg class="icon"><use href="#i-info"/></svg><span id="markerContextMeta">标点</span></div>
     </div>
   </main>
@@ -443,7 +481,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
             <div class="card"><div class="card-title">缩放范围</div><div class="form-row"><div class="label">最小 / 最大</div><div class="field readonly-field">6.25% ～ 1024%</div><div></div></div><div class="notice-inline"><svg class="icon"><use href="#i-info"/></svg>手绘风格目前仅预留入口，不参与地图渲染。</div></div>
           </div>
           <div class="subpage hidden" data-subpage="function">
-            <div class="card"><div class="card-title">地图行为</div><div class="form-row"><div class="label">右键地图</div><div class="field readonly-field">添加标点 / 传送 / 复制坐标</div><div></div></div><div class="form-row"><div class="label">右键标点</div><div class="field readonly-field">传送 / 编辑 / 删除</div><div></div></div><div class="form-row"><div class="label">拖拽地图</div><div></div><div class="switch on" data-switch data-setting="dragMap"></div></div></div>
+            <div class="card"><div class="card-title">地图行为</div><div class="form-row"><div class="label">右键地图</div><div class="field readonly-field">添加标点 / 传送 / 复制坐标</div><div></div></div><div class="form-row"><div class="label">右键标点</div><div class="field readonly-field">传送 / 编辑 / 删除或重置</div><div></div></div><div class="form-row"><div class="label">拖拽地图</div><div></div><div class="switch on" data-switch data-setting="dragMap"></div></div></div>
           </div>
           <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-reset"/></svg> 恢复默认</button><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
@@ -510,7 +548,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
         <div>简介</div><textarea id="markerDescription">临时驻点，附近有平地与水源。</textarea>
         <div>坐标</div><div class="small" id="markerCoords">X 1254　Z -376</div>
       </div>
-      <div class="editor-actions"><button class="btn danger" id="deleteMarkerButton">删除</button><div class="spacer"></div><button class="btn" data-editor-close>取消</button><button class="btn primary" id="saveMarkerButton"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-save"/></svg> 保存</button></div>
+      <div class="editor-actions"><button class="btn danger" id="deleteMarkerButton"><svg class="icon" style="display:none;vertical-align:middle;width:15px"><use href="#i-trash"/></svg><span id="deleteMarkerButtonText">删除</span></button><div class="spacer"></div><button class="btn" data-editor-close>取消</button><button class="btn primary" id="saveMarkerButton"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-save"/></svg> 保存</button></div>
     </div>
   </div>
 
@@ -573,6 +611,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
       structurePresets:DEFAULT_STRUCTURE_PRESETS
     },
     hiddenStructures:[],
+    trash:[],
     markers:[
       {id:'m1',name:'临时营地',icon:'home',color:'#FFD34E',description:'临时驻点，附近有平地与水源。',x:1254,z:-376,left:41,top:56},
       {id:'m2',name:'矿区 A',icon:'mine',color:'#F2B84B',description:'已确认的采矿区域。',x:1690,z:-188,left:54,top:45},
@@ -590,6 +629,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     if(saved.settings&&Array.isArray(saved.settings.structurePresets))d.settings.structurePresets=saved.settings.structurePresets;
     if(Array.isArray(saved.markers))d.markers=saved.markers;
     if(Array.isArray(saved.hiddenStructures))d.hiddenStructures=saved.hiddenStructures;
+    if(Array.isArray(saved.trash))d.trash=saved.trash.slice(-100);
     if(saved.view)Object.assign(d.view,saved.view);
     return d;
   }
@@ -598,6 +638,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   }
   let committed=load(), draft=null;
   let selectedMarkerId=null, selectedStructureId=null, editorMode='add', editorPoint={x:1254,z:-376,left:50,top:50};
+  let markerPane='markers', clearTrashArmedUntil=0;
   let contextPoint={x:1254,z:-376,left:50,top:50};
   let dragging=false,dragStartX=0,dragStartY=0,basePanX=0,basePanY=0;
   let captureShortcut=null, dropdownHandler=null, toastTimer=null;
@@ -625,6 +666,19 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   function iconUse(icon){return ICONS[icon]?ICONS[icon][0]:'i-pin';}
   function iconLabel(icon){return ICONS[icon]?ICONS[icon][1]:'定位点';}
   function presetFor(name,settings=currentSettings()){return settings.structurePresets.find(p=>p.name===name)||{icon:'pin',color:'#FFFFFF'};}
+  function sourceStructureForMarker(m){return m&&m.sourceStructureId?FIXED_STRUCTURES.find(x=>x.id===m.sourceStructureId):null;}
+  function isEditedAutoMarker(m){return !!sourceStructureForMarker(m);}
+  function trashPush(entry){
+    const now=Date.now();
+    const item={trashId:'t'+now.toString(36)+Math.random().toString(36).slice(2,6),deletedAt:now,...clone(entry)};
+    committed.trash.push(item);
+    if(committed.trash.length>100)committed.trash.splice(0,committed.trash.length-100);
+    return item;
+  }
+  function formatTrashTime(ts){
+    const d=new Date(ts||Date.now()),pad=n=>String(n).padStart(2,'0');
+    return pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+  }
   function screenPercent(left,top){
     const r=mapStage.getBoundingClientRect();
     return {
@@ -722,10 +776,101 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   }
   function renderMarkerList(){
     const list=q('#markerList');
-    if(!committed.markers.length){list.innerHTML='<div class="marker-empty">还没有自定义标点</div>';return;}
-    list.innerHTML=committed.markers.map(m=>'<div class="marker-row" data-marker-id="'+m.id+'"><svg class="icon mi" style="color:'+m.color+'"><use href="#'+iconUse(m.icon)+'"/></svg><div class="info"><div class="title">'+escapeHtml(m.name)+'</div><div class="meta">'+m.x+', '+m.z+'</div><div class="marker-description">'+escapeHtml(m.description||'')+'</div></div><div class="row-actions"><button class="mini edit-row" title="编辑"><svg class="icon"><use href="#i-edit"/></svg></button><button class="mini danger delete-row" title="删除"><svg class="icon"><use href="#i-trash"/></svg></button></div></div>').join('');
-    qa('#markerList .edit-row').forEach(b=>b.onclick=()=>openEditor('edit',b.closest('.marker-row').dataset.markerId));
-    qa('#markerList .delete-row').forEach(b=>b.onclick=()=>deleteMarker(b.closest('.marker-row').dataset.markerId));
+    q('#markerCountBadge').textContent=committed.markers.length;
+    q('#trashCountBadge').textContent=committed.trash.length;
+    if(!committed.markers.length){
+      list.innerHTML='<div class="marker-empty">还没有自定义标点<br><span class="small">自动结构可直接在地图上右键编辑。</span></div>';
+    }else{
+      list.innerHTML=committed.markers.map(m=>{
+        const edited=isEditedAutoMarker(m);
+        const origin=edited?'<span class="marker-origin edited-auto">自动→自定义</span>':'<span class="marker-origin">自定义</span>';
+        const secondary=edited
+          ?'<button class="mini reset reset-row" title="重置为自动"><svg class="icon"><use href="#i-reset"/></svg></button>'
+          :'<button class="mini danger delete-row" title="删除"><svg class="icon"><use href="#i-trash"/></svg></button>';
+        return '<div class="marker-row" data-marker-id="'+m.id+'"><svg class="icon mi" style="color:'+m.color+'"><use href="#'+iconUse(m.icon)+'"/></svg><div class="info"><div class="title">'+escapeHtml(m.name)+origin+'</div><div class="meta">'+m.x+', '+m.z+'</div><div class="marker-description">'+escapeHtml(m.description||'')+'</div></div><div class="row-actions"><button class="mini edit-row" title="编辑"><svg class="icon"><use href="#i-edit"/></svg></button>'+secondary+'</div></div>';
+      }).join('');
+      qa('#markerList .edit-row').forEach(b=>b.onclick=()=>openEditor('edit',b.closest('.marker-row').dataset.markerId));
+      qa('#markerList .delete-row').forEach(b=>b.onclick=()=>deleteMarker(b.closest('.marker-row').dataset.markerId));
+      qa('#markerList .reset-row').forEach(b=>b.onclick=()=>resetEditedAuto(b.closest('.marker-row').dataset.markerId));
+    }
+    renderTrashList();
+  }
+  function renderTrashList(){
+    const list=q('#trashList');
+    q('#trashCountBadge').textContent=committed.trash.length;
+    if(!committed.trash.length){
+      list.innerHTML='<div class="recycle-empty"><svg class="icon" style="width:30px;height:30px;margin-bottom:6px;color:#77858d"><use href="#i-trash"/></svg><br>回收站是空的<br><span class="small">删除的自定义标点和自动结构会出现在这里。</span></div>';
+      return;
+    }
+    list.innerHTML=committed.trash.slice().reverse().map(t=>{
+      const isStructure=t.kind==='structure';
+      const snap=isStructure?t.structure:(t.marker||{});
+      const name=snap.name||'未命名标点';
+      const meta=(isStructure?'自动结构':'自定义')+' · '+formatTrashTime(t.deletedAt);
+      return '<div class="recycle-row" data-trash-id="'+t.trashId+'"><svg class="icon trash-icon"><use href="#'+(isStructure?'i-temple':'i-pin')+'"/></svg><div class="info"><div class="title">'+escapeHtml(name)+'</div><div class="meta"><span class="recycle-kind">'+(isStructure?'自动结构':'自定义')+'</span>'+escapeHtml(meta.split(' · ')[1]||'')+'</div></div><button class="mini restore-trash" title="恢复"><svg class="icon"><use href="#i-reset"/></svg></button></div>';
+    }).join('');
+    qa('#trashList .restore-trash').forEach(b=>b.onclick=()=>restoreTrash(b.closest('.recycle-row').dataset.trashId));
+  }
+  function setMarkerPane(mode){
+    markerPane=mode;
+    qa('[data-marker-pane]').forEach(x=>x.classList.toggle('active',x.dataset.markerPane===mode));
+    qa('[data-marker-pane-content]').forEach(x=>x.classList.toggle('active',x.dataset.markerPaneContent===mode));
+    if(mode==='trash')renderTrashList();
+  }
+  function resetEditedAuto(id){
+    const i=committed.markers.findIndex(m=>m.id===id);
+    if(i<0)return;
+    const m=committed.markers[i],source=sourceStructureForMarker(m);
+    if(!source){toast('该标点不是编辑后的自动标点');return;}
+    committed.markers.splice(i,1);
+    committed.hiddenStructures=committed.hiddenStructures.filter(x=>x!==source.id);
+    // Defensive cleanup for stale trash entries from older prototypes.
+    committed.trash=committed.trash.filter(t=>!(t.kind==='structure'&&t.structureId===source.id));
+    save();renderAppSettings();renderMarkerList();
+    toast('已重置为自动标点：'+source.name);
+  }
+  function deleteAutoStructure(id){
+    const st=FIXED_STRUCTURES.find(x=>x.id===id);
+    if(!st)return;
+    if(committed.markers.some(m=>m.sourceStructureId===id)){toast('该自动标点已有编辑版本，请先重置');return;}
+    if(!committed.hiddenStructures.includes(id))committed.hiddenStructures.push(id);
+    trashPush({kind:'structure',structureId:id,structure:{...clone(st),name:st.name}});
+    save();markerCtx.style.display='none';renderAppSettings();renderMarkerList();
+    toast('已移入回收站：'+st.name);
+  }
+  function restoreTrash(trashId){
+    const idx=committed.trash.findIndex(t=>t.trashId===trashId);
+    if(idx<0)return;
+    const t=committed.trash[idx];
+    if(t.kind==='structure'){
+      const sid=t.structureId;
+      if(committed.markers.some(m=>m.sourceStructureId===sid)){
+        toast('该自动标点已有编辑版本，无法同时恢复原自动标点');
+        return;
+      }
+      committed.hiddenStructures=committed.hiddenStructures.filter(x=>x!==sid);
+    }else if(t.kind==='custom'){
+      const m=clone(t.marker);
+      if(committed.markers.some(x=>x.id===m.id))m.id='m'+Date.now().toString(36);
+      // A pure custom trash entry should not have a source. Strip stale legacy source to avoid two origins.
+      delete m.sourceStructureId;
+      committed.markers.push(m);
+    }
+    committed.trash.splice(idx,1);
+    save();renderAppSettings();renderMarkerList();
+    toast('已从回收站恢复');
+  }
+  function clearTrash(){
+    const now=Date.now(),btn=q('#clearTrashButton');
+    if(!committed.trash.length){toast('回收站已经是空的');return;}
+    if(now>clearTrashArmedUntil){
+      clearTrashArmedUntil=now+3000;
+      btn.textContent='再次点击确认';btn.classList.add('confirm-danger');
+      setTimeout(()=>{if(Date.now()>clearTrashArmedUntil){btn.textContent='清空';btn.classList.remove('confirm-danger');}},3100);
+      return;
+    }
+    committed.trash=[];clearTrashArmedUntil=0;btn.textContent='清空';btn.classList.remove('confirm-danger');
+    save();renderTrashList();toast('回收站已清空');
   }
   function renderLayerCounts(){
     const customCount=q('#layersPanel .layer-row .count');if(customCount)customCount.textContent=committed.markers.length;
@@ -814,7 +959,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   function openPanel(which){
     hidePanels();q('[data-nav="map"]').classList.remove('active');
     if(which==='layers'){layers.style.display='block';q('[data-nav="layers"]').classList.add('active');}
-    if(which==='markers'){markersPanel.style.display='block';q('[data-nav="markers"]').classList.add('active');renderMarkerList();}
+    if(which==='markers'){markersPanel.style.display='block';q('[data-nav="markers"]').classList.add('active');renderMarkerList();setMarkerPane(markerPane);}
   }
   function openAbout(){
     hidePanels();setModalLock(true);overlay.style.display='block';about.style.display='block';q('[data-nav="about"]').classList.add('active');
@@ -838,7 +983,15 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
     editorPoint={x:m.x,z:m.z,left:m.left,top:m.top};
     q('#editorTitle').textContent=mode==='edit'?'编辑标点':mode==='structure'?'编辑结构标点':'添加标点';q('#markerName').value=m.name;q('#markerDescription').value=m.description||'';
     q('#markerColor').value=m.color;q('#markerSwatch').style.background=m.color;q('#markerColorText').textContent=m.color.toUpperCase();
-    q('#markerCoords').textContent='X '+m.x+'　Z '+m.z;q('#deleteMarkerButton').style.visibility=(mode==='edit'||mode==='structure')?'visible':'hidden';
+    q('#markerCoords').textContent='X '+m.x+'　Z '+m.z;
+    const secondary=q('#deleteMarkerButton'),secondaryText=q('#deleteMarkerButtonText'),secondaryUse=secondary.querySelector('use'),editedAuto=mode==='edit'&&isEditedAutoMarker(m);
+    secondary.style.visibility=(mode==='edit'||mode==='structure')?'visible':'hidden';
+    secondary.dataset.action=editedAuto?'reset':'delete';
+    secondary.classList.toggle('danger',!editedAuto);
+    secondary.classList.toggle('reset',editedAuto);
+    secondaryText.textContent=editedAuto?'重置为自动':'删除';
+    secondaryUse.setAttribute('href',editedAuto?'#i-reset':'#i-trash');
+    secondary.querySelector('.icon').style.display='inline-block';
     q('#markerIconSelect').dataset.value=m.icon;updateSelectDisplay(q('#markerIconSelect'),m.icon);
   }
   function saveEditor(){
@@ -856,7 +1009,17 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   }
   function deleteMarker(id){
     const i=committed.markers.findIndex(x=>x.id===id);if(i<0)return;
-    const removed=committed.markers.splice(i,1)[0];save();renderAppSettings();closeModal(false);toast('已删除：'+removed.name);
+    const m=committed.markers[i];
+    if(isEditedAutoMarker(m)){
+      toast('编辑后的自动标点不能删除，请使用“重置为自动”');
+      return;
+    }
+    const fromEditor=editor.style.display==='block';
+    committed.markers.splice(i,1);
+    trashPush({kind:'custom',marker:clone(m)});
+    save();renderAppSettings();renderMarkerList();
+    if(fromEditor)closeModal(false);else markerCtx.style.display='none';
+    toast('已移入回收站：'+m.name);
   }
 
   function positionMenu(el,x,y){
@@ -875,12 +1038,21 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   function bindMarkerContext(){
     qa('.map-marker').forEach(el=>el.oncontextmenu=e=>{
       e.preventDefault();e.stopPropagation();mapCtx.style.display='none';
+      const secondary=q('#ctxDelete'),secondaryText=q('#ctxDeleteText'),secondaryUse=secondary.querySelector('use');
       if(el.dataset.kind==='custom'){
-        selectedMarkerId=el.dataset.markerId;selectedStructureId=null;q('#markerContextMeta').textContent=el.dataset.name;
+        selectedMarkerId=el.dataset.markerId;selectedStructureId=null;
+        const m=committed.markers.find(x=>x.id===selectedMarkerId),edited=isEditedAutoMarker(m);
+        q('#markerContextMeta').textContent=el.dataset.name+(edited?' · 自动→自定义':' · 自定义');
+        secondary.dataset.action=edited?'reset':'delete';
+        secondary.classList.toggle('danger',!edited);
+        secondaryText.textContent=edited?'重置为自动':'删除';
+        secondaryUse.setAttribute('href',edited?'#i-reset':'#i-trash');
       }else{
-        selectedMarkerId=null;selectedStructureId=el.dataset.structureId;q('#markerContextMeta').textContent=el.dataset.name+' · 自动结构';
+        selectedMarkerId=null;selectedStructureId=el.dataset.structureId;
+        q('#markerContextMeta').textContent=el.dataset.name+' · 自动结构';
+        secondary.dataset.action='delete';secondary.classList.add('danger');secondaryText.textContent='删除';secondaryUse.setAttribute('href','#i-trash');
       }
-      q('#ctxEdit').classList.remove('disabled');q('#ctxDelete').classList.remove('disabled');positionMenu(markerCtx,e.clientX,e.clientY);
+      q('#ctxEdit').classList.remove('disabled');secondary.classList.remove('disabled');positionMenu(markerCtx,e.clientX,e.clientY);
     });
   }
 
@@ -953,14 +1125,18 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   q('#markerIconSelect').onclick=()=>openIconDropdown(q('#markerIconSelect'),q('#markerIconSelect').dataset.value||'pin',v=>{q('#markerIconSelect').dataset.value=v;updateSelectDisplay(q('#markerIconSelect'),v);});
   q('#markerColor').oninput=e=>{q('#markerSwatch').style.background=e.target.value;q('#markerColorText').textContent=e.target.value.toUpperCase();};
   q('#saveMarkerButton').onclick=saveEditor;q('#deleteMarkerButton').onclick=()=>{
-    if(editorMode==='edit'&&selectedMarkerId)deleteMarker(selectedMarkerId);
-    else if(editorMode==='structure'&&selectedStructureId){
-      if(!committed.hiddenStructures.includes(selectedStructureId))committed.hiddenStructures.push(selectedStructureId);
-      save();closeModal(false);renderAppSettings();toast('自动结构标点已隐藏');
+    const action=q('#deleteMarkerButton').dataset.action;
+    if(editorMode==='edit'&&selectedMarkerId){
+      if(action==='reset'){closeModal(false);resetEditedAuto(selectedMarkerId);}
+      else deleteMarker(selectedMarkerId);
+    }else if(editorMode==='structure'&&selectedStructureId){
+      closeModal(false);deleteAutoStructure(selectedStructureId);
     }
   };
   qa('[data-editor-close]').forEach(b=>b.onclick=()=>closeModal(false));
   q('#addMarkerButton').onclick=()=>openEditor('add',null,{x:1254,z:-376,left:50,top:50});
+  qa('[data-marker-pane]').forEach(b=>b.onclick=()=>setMarkerPane(b.dataset.markerPane));
+  q('#clearTrashButton').onclick=clearTrash;
 
   // map controls
   q('#zoomIn').onclick=()=>setZoom(committed.view.zoom*1.25);q('#zoomOut').onclick=()=>setZoom(committed.view.zoom/1.25);
@@ -990,11 +1166,12 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   };
   q('#ctxEdit').onclick=()=>{if(selectedMarkerId)openEditor('edit',selectedMarkerId);else if(selectedStructureId)openEditor('structure',selectedStructureId);};
   q('#ctxDelete').onclick=()=>{
-    if(selectedMarkerId)deleteMarker(selectedMarkerId);
-    else if(selectedStructureId){
-      if(!committed.hiddenStructures.includes(selectedStructureId))committed.hiddenStructures.push(selectedStructureId);
-      const st=FIXED_STRUCTURES.find(x=>x.id===selectedStructureId);save();markerCtx.style.display='none';renderAppSettings();toast('已隐藏自动结构标点：'+(st?st.name:'结构'));
-    }
+    if(selectedMarkerId){
+      const m=committed.markers.find(x=>x.id===selectedMarkerId);
+      if(isEditedAutoMarker(m))resetEditedAuto(selectedMarkerId);
+      else deleteMarker(selectedMarkerId);
+      markerCtx.style.display='none';
+    }else if(selectedStructureId)deleteAutoStructure(selectedStructureId);
   };
 
   // shortcut editing and actual shortcuts
