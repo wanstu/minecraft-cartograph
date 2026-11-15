@@ -439,44 +439,85 @@ public final class MapScreenV3 extends Screen {
             withLayer(graphics, Z_PLAYER, () -> renderPlayerMarker(graphics));
         }
 
-        withLayer(graphics, Z_HUD, () -> renderHifiHud(graphics, mouseX, mouseY));
-        withLayer(graphics, Z_MENU, () -> renderHifiTopbar(graphics, mouseX, mouseY));
+        int uiWidth = pixelUiWidth();
+        int uiHeight = pixelUiHeight();
+        int uiMouseX = pixelUiX(mouseX);
+        int uiMouseY = pixelUiY(mouseY);
+
+        withLayer(graphics, Z_HUD, () ->
+                withPixelUi(graphics, () -> renderHifiHud(graphics, uiMouseX, uiMouseY)));
+        withLayer(graphics, Z_MENU, () ->
+                withPixelUi(graphics, () -> renderHifiTopbar(graphics, uiMouseX, uiMouseY)));
 
         if (markerUi.managerOpen()) {
             withLayer(graphics, Z_MENU + 10.0f, () ->
-                    markerUi.renderManagerPanel(
-                            graphics, font, width, height, mouseX, mouseY));
+                    withPixelUi(graphics, () ->
+                            markerUi.renderManagerPanel(
+                                    graphics, font, uiWidth, uiHeight, uiMouseX, uiMouseY)));
         }
         if (layerPanelUi.open()) {
             withLayer(graphics, Z_MENU + 10.0f, () ->
-                    layerPanelUi.render(
-                            graphics, font, dimension(), width, height, mouseX, mouseY));
+                    withPixelUi(graphics, () ->
+                            layerPanelUi.render(
+                                    graphics, font, dimension(),
+                                    uiWidth, uiHeight, uiMouseX, uiMouseY)));
         }
 
         if (contextOpen) {
             withLayer(graphics, Z_CONTEXT, () -> renderContextMenu(graphics, mouseX, mouseY));
         }
         if (aboutOpen) {
-            withLayer(graphics, Z_SETTINGS, () -> renderAbout(graphics, mouseX, mouseY));
+            withLayer(graphics, Z_SETTINGS, () ->
+                    withPixelUi(graphics, () -> renderAbout(graphics, uiMouseX, uiMouseY)));
         }
         if (hifiSettingsUi.isOpen()) {
             withLayer(graphics, Z_SETTINGS, () ->
-                    hifiSettingsUi.render(
-                            graphics, font, width, height, mouseX, mouseY));
+                    withPixelUi(graphics, () ->
+                            hifiSettingsUi.render(
+                                    graphics, font,
+                                    uiWidth, uiHeight, uiMouseX, uiMouseY)));
         }
         if (markerUi.overlayOpen()) {
             withLayer(graphics, Z_MARKER_OVERLAY, () ->
-                    markerUi.renderOverlay(graphics, font, width, height, mouseX, mouseY));
+                    withPixelUi(graphics, () ->
+                            markerUi.renderOverlay(
+                                    graphics, font,
+                                    uiWidth, uiHeight, uiMouseX, uiMouseY)));
+        }
+    }
+
+    private int pixelUiWidth() {
+        return MapHifiUi.pixelWidth(width);
+    }
+
+    private int pixelUiHeight() {
+        return MapHifiUi.pixelHeight(height);
+    }
+
+    private int pixelUiX(double mouseX) {
+        return MapHifiUi.toPixel(mouseX);
+    }
+
+    private int pixelUiY(double mouseY) {
+        return MapHifiUi.toPixel(mouseY);
+    }
+
+    private static void withPixelUi(GuiGraphics graphics, Runnable draw) {
+        MapHifiUi.beginPixelSpace(graphics);
+        try {
+            draw.run();
+        } finally {
+            MapHifiUi.endPixelSpace(graphics);
         }
     }
 
     private int navItemWidth() {
-        return width < 620 ? 42 : 58;
+        return pixelUiWidth() < 900 ? 70 : 88;
     }
 
     private int navStartX() {
         int itemW = navItemWidth();
-        return Math.max(4, width - 5 * itemW - 34);
+        return Math.max(4, pixelUiWidth() - 5 * itemW - 72);
     }
 
     private int navX(int index) {
@@ -484,26 +525,30 @@ public final class MapScreenV3 extends Screen {
     }
 
     private boolean topbarContains(double mouseX, double mouseY) {
-        return mouseY >= 0 && mouseY < MapHifiUi.HEADER_H;
+        return mouseY >= 0 && mouseY < MapHifiUi.headerGui();
     }
 
     private void renderHifiTopbar(
             GuiGraphics graphics, int mouseX, int mouseY) {
-        MapHifiUi.topbar(graphics, width);
+        int uiW = pixelUiWidth();
+        MapHifiUi.topbar(graphics, uiW);
 
-        if (navStartX() > 104) {
+        int navStart = navStartX();
+        if (navStart > 190) {
             MapIconAtlas.drawUi(
                     graphics, MapIconAtlas.UiIcon.MAP,
-                    17, MapHifiUi.HEADER_H / 2, 17, 0xffeef2f4);
-            graphics.drawString(font, "地图册", 31, 10, 0xffffffff, false);
+                    37, MapHifiUi.HEADER_H / 2, 29, 0xffeef2f4);
+            MapHifiUi.text(graphics, font, "地图册", 63, 20, 0xffffffff, 21);
         }
-        if (navStartX() > 205) {
-            graphics.drawString(font, "Map Atlas · V3", 76, 11, 0xff8f9ca4, false);
+        if (navStart > 360) {
+            MapHifiUi.text(
+                    graphics, font, "Map Atlas · V3",
+                    140, 24, 0xff98a4ac, 13);
         }
 
-        int statusX = navStartX() > 330 ? 154 : 76;
-        int maxStatus = navStartX() - statusX - 8;
-        if (maxStatus > 70) {
+        int statusX = navStart > 620 ? 285 : 155;
+        int maxStatus = navStart - statusX - 18;
+        if (maxStatus > 120) {
             List<MapMarkerStore.Marker> entries = MapMarkerStore.visible(dimension());
             int custom = 0;
             int structures = 0;
@@ -514,12 +559,11 @@ public final class MapScreenV3 extends Screen {
                     custom++;
                 }
             }
-            String status = "卫星 · 写实   |   结构 " + structures + " · 标点 " + custom;
-            while (font.width(status) > maxStatus && status.contains("   |   ")) {
+            String status = "卫星 · 写实   ·   结构 " + structures + " · 标点 " + custom;
+            if (MapHifiUi.textWidth(font, status, 14) > maxStatus) {
                 status = "结构 " + structures + " · 标点 " + custom;
-                break;
             }
-            graphics.drawString(font, status, statusX, 11, 0xffaeb9bf, false);
+            MapHifiUi.text(graphics, font, status, statusX, 24, 0xffaeb9bf, 14);
         }
 
         MapHifiUi.nav(
@@ -545,12 +589,12 @@ public final class MapScreenV3 extends Screen {
                 MapIconAtlas.UiIcon.ABOUT, "关于",
                 aboutOpen, mouseX, mouseY);
 
-        int closeX = width - 29;
-        boolean closeHover = inside(mouseX, mouseY, closeX, 4, 24, 28);
-        if (closeHover) graphics.fill(closeX, 4, closeX + 24, 32, 0xff28343b);
+        int closeX = uiW - 64;
+        boolean closeHover = inside(mouseX, mouseY, closeX, 10, 42, 42);
+        if (closeHover) graphics.fill(closeX, 10, closeX + 42, 52, 0xff28343b);
         MapIconAtlas.drawUi(
                 graphics, MapIconAtlas.UiIcon.CLOSE,
-                closeX + 12, 18, 14,
+                closeX + 21, 31, 23,
                 closeHover ? 0xffffffff : 0xffd9e0e4);
     }
 
@@ -569,64 +613,92 @@ public final class MapScreenV3 extends Screen {
         int guard = 0;
         for (int bx = minBlockX; bx <= maxBlockX && guard++ < 2000; bx += 16) {
             int sx = (int) Math.round(width * 0.5 + (bx - centerX) * zoom);
-            graphics.fill(sx, MapHifiUi.HEADER_H, sx + 1, height, color);
+            graphics.fill(sx, MapHifiUi.headerGui(), sx + 1, height, color);
         }
         guard = 0;
         for (int bz = minBlockZ; bz <= maxBlockZ && guard++ < 2000; bz += 16) {
             int sy = (int) Math.round(height * 0.5 + (bz - centerZ) * zoom);
-            if (sy < MapHifiUi.HEADER_H) continue;
+            if (sy < MapHifiUi.headerGui()) continue;
             graphics.fill(0, sy, width, sy + 1, color);
         }
     }
 
     private void renderHifiHud(GuiGraphics graphics, int mouseX, int mouseY) {
-        int zoomY = height - 36;
-        int zoomX = width - 156;
-        int locateX = width - 36;
-        int locateY = zoomY - 35;
+        int uiW = pixelUiWidth();
+        int uiH = pixelUiHeight();
 
-        MapHifiUi.panel(graphics, zoomX, zoomY, 148, 28);
+        int zoomW = 166;
+        int zoomH = 44;
+        int zoomX = uiW - 18 - zoomW;
+        int zoomY = uiH - 20 - zoomH;
+        int locateX = uiW - 18 - 44;
+        int locateY = zoomY - 7 - 44;
+
+        MapHifiUi.panel(graphics, zoomX, zoomY, zoomW, zoomH);
         MapHifiUi.button(
-                graphics, font, zoomX, zoomY, 31, 28,
+                graphics, font, zoomX, zoomY, 44, zoomH,
                 "−", false, false, mouseX, mouseY);
-        graphics.drawCenteredString(
-                font, formatZoom(zoom), zoomX + 74, zoomY + 10, 0xffeef2f4);
+        MapHifiUi.centeredText(
+                graphics, font, formatZoom(zoom),
+                zoomX + zoomW / 2, zoomY + 13, 0xffeef2f4, 17);
         MapHifiUi.button(
-                graphics, font, zoomX + 117, zoomY, 31, 28,
+                graphics, font, zoomX + zoomW - 44, zoomY, 44, zoomH,
                 "+", false, false, mouseX, mouseY);
 
-        MapHifiUi.panel(graphics, locateX, locateY, 28, 28);
+        MapHifiUi.panel(graphics, locateX, locateY, 44, 44);
         MapIconAtlas.drawUi(
                 graphics, MapIconAtlas.UiIcon.LOCATE,
-                locateX + 14, locateY + 14, 14,
-                inside(mouseX, mouseY, locateX, locateY, 28, 28)
+                locateX + 22, locateY + 22, 22,
+                inside(mouseX, mouseY, locateX, locateY, 44, 44)
                         ? 0xffffffff : 0xffdce4e8);
 
         if (MapUiSettings.showCoords() && mouseY >= MapHifiUi.HEADER_H) {
-            int bx = (int) Math.floor(centerX + (mouseX - width * 0.5) / zoom);
-            int bz = (int) Math.floor(centerZ + (mouseY - height * 0.5) / zoom);
+            double guiMouseX = MapHifiUi.toGuiD(mouseX);
+            double guiMouseY = MapHifiUi.toGuiD(mouseY);
+            int bx = (int) Math.floor(centerX + (guiMouseX - width * 0.5) / zoom);
+            int bz = (int) Math.floor(centerZ + (guiMouseY - height * 0.5) / zoom);
             int by = surfaceYAt(bx, bz);
+            String coords = "X " + bx + "   Y " + by + "   Z " + bz;
             String biome = biomeLabelAt(bx, bz);
-            int panelW = Math.max(148, Math.max(
-                    font.width("X " + bx + "   Y " + by + "   Z " + bz),
-                    font.width(biome)) + 18);
-            int panelY = height - 75;
-            MapHifiUi.panel(graphics, 8, panelY, panelW, 42);
-            graphics.drawString(
-                    font, "X " + bx + "   Y " + by + "   Z " + bz,
-                    17, panelY + 9, 0xffeef2f4, false);
-            graphics.drawString(font, biome, 17, panelY + 25, 0xffaeb9bf, false);
+            int panelW = Math.max(220, Math.max(
+                    MapHifiUi.textWidth(font, coords, 12),
+                    MapHifiUi.textWidth(font, biome, 12)) + 24);
+            int panelH = 58;
+            int panelY = uiH - 82 - panelH;
+            MapHifiUi.panel(graphics, 18, panelY, panelW, panelH);
+            MapHifiUi.text(
+                    graphics, font, coords,
+                    30, panelY + 10, 0xffeef2f4, 12);
+            MapHifiUi.text(
+                    graphics, font, biome,
+                    30, panelY + 31, 0xffaeb9bf, 12);
         }
 
-        int scaleY = height - 27;
-        int scaleW = 110;
-        MapHifiUi.panel(graphics, 8, scaleY, scaleW + 16, 19);
-        int worldBlocks = Math.max(1, (int) Math.round(scaleW / Math.max(0.0001, zoom)));
+        int scaleLineW = 145;
+        int scaleBoxW = scaleLineW + 24;
+        int scaleBoxH = 38;
+        int scaleX = 18;
+        int scaleY = uiH - 20 - scaleBoxH;
+        MapHifiUi.panel(graphics, scaleX, scaleY, scaleBoxW, scaleBoxH);
+        int worldBlocks = Math.max(
+                1,
+                (int) Math.round(
+                        MapHifiUi.toGuiD(scaleLineW) / Math.max(0.0001, zoom)));
         String scale = worldBlocks >= 1000
                 ? String.format(java.util.Locale.ROOT, "%.1f km", worldBlocks / 1000.0)
                 : worldBlocks + " m";
-        graphics.drawCenteredString(font, scale, 8 + (scaleW + 16) / 2, scaleY + 4,
-                0xffdce4e8);
+        MapHifiUi.centeredText(
+                graphics, font, scale,
+                scaleX + scaleBoxW / 2, scaleY + 8, 0xffdce4e8, 12);
+        graphics.fill(
+                scaleX + 12, scaleY + 27,
+                scaleX + 12 + scaleLineW, scaleY + 29,
+                0xfff1f3f4);
+        graphics.fill(scaleX + 12, scaleY + 21, scaleX + 14, scaleY + 29, 0xfff1f3f4);
+        graphics.fill(
+                scaleX + 10 + scaleLineW, scaleY + 21,
+                scaleX + 12 + scaleLineW, scaleY + 29,
+                0xfff1f3f4);
     }
 
     private int surfaceYAt(int blockX, int blockZ) {
@@ -668,32 +740,39 @@ public final class MapScreenV3 extends Screen {
 
     private void renderAbout(
             GuiGraphics graphics, int mouseX, int mouseY) {
-        int w = Math.min(520, width - 36);
-        int h = Math.min(270, height - MapHifiUi.HEADER_H - 30);
-        int x = (width - w) / 2;
+        int uiW = pixelUiWidth();
+        int uiH = pixelUiHeight();
+        int w = Math.min(520, uiW - 36);
+        int h = Math.min(270, uiH - MapHifiUi.HEADER_H - 30);
+        int x = (uiW - w) / 2;
         int y = MapHifiUi.HEADER_H
-                + Math.max(10, (height - MapHifiUi.HEADER_H - h) / 2);
-        MapHifiUi.modalShade(graphics, width, height);
+                + Math.max(10, (uiH - MapHifiUi.HEADER_H - h) / 2);
+        MapHifiUi.modalShade(graphics, uiW, uiH);
         MapHifiUi.modal(graphics, x, y, w, h);
-        MapHifiUi.panelHeader(
+        MapHifiUi.modalHeader(
                 graphics, font, x, y, w,
                 MapIconAtlas.UiIcon.ABOUT, "关于", mouseX, mouseY);
         MapIconAtlas.drawUi(
                 graphics, MapIconAtlas.UiIcon.MAP,
-                x + 34, y + 63, 30, 0xffeef2f4);
-        graphics.drawString(font, "地图册 · Map Atlas", x + 61, y + 50, 0xffffffff, false);
-        graphics.drawString(font, "Cartograph V3", x + 61, y + 67, MapHifiUi.MUTED, false);
-        MapHifiUi.divider(graphics, x + 18, y + 91, x + w - 18);
-        graphics.drawString(font, "地图事实", x + 24, y + 111, MapHifiUi.MUTED, false);
-        graphics.drawString(font, "仅使用真实已生成区块", x + 125, y + 111,
-                MapHifiUi.TEXT, false);
-        graphics.drawString(font, "当前地图风格", x + 24, y + 136, MapHifiUi.MUTED, false);
-        graphics.drawString(font, "卫星 · 写实", x + 125, y + 136, MapHifiUi.TEXT, false);
-        graphics.drawString(font, "手绘风格", x + 24, y + 161, MapHifiUi.MUTED, false);
-        graphics.drawString(font, "现代 / 古式已预留，暂未实现", x + 125, y + 161,
-                MapHifiUi.TEXT, false);
-        graphics.drawString(font, "高保真原型继续保留，游戏内 UI 按原型实现。",
-                x + 24, y + h - 34, 0xffaeb9bf, false);
+                x + 42, y + 86, 36, 0xffeef2f4);
+        MapHifiUi.text(graphics, font, "地图册 · Map Atlas",
+                x + 72, y + 69, 0xffffffff, 18);
+        MapHifiUi.text(graphics, font, "Cartograph V3",
+                x + 72, y + 91, MapHifiUi.MUTED, 12);
+        MapHifiUi.divider(graphics, x + 18, y + 118, x + w - 18);
+        MapHifiUi.text(graphics, font, "地图事实", x + 24, y + 139, MapHifiUi.MUTED, 13);
+        MapHifiUi.text(graphics, font, "仅使用真实已生成区块",
+                x + 145, y + 139, MapHifiUi.TEXT, 13);
+        MapHifiUi.text(graphics, font, "当前地图风格",
+                x + 24, y + 167, MapHifiUi.MUTED, 13);
+        MapHifiUi.text(graphics, font, "卫星 · 写实",
+                x + 145, y + 167, MapHifiUi.TEXT, 13);
+        MapHifiUi.text(graphics, font, "手绘风格",
+                x + 24, y + 195, MapHifiUi.MUTED, 13);
+        MapHifiUi.text(graphics, font, "现代 / 古式已预留，暂未实现",
+                x + 145, y + 195, MapHifiUi.TEXT, 13);
+        MapHifiUi.text(graphics, font, "高保真原型继续保留，游戏内 UI 按原型实现。",
+                x + 24, y + h - 34, 0xffaeb9bf, 12);
     }
 
     private void renderPlayerMarker(GuiGraphics graphics) {
@@ -1447,14 +1526,22 @@ public final class MapScreenV3 extends Screen {
 
         // Strict visual/input z-order: modal editor > modal settings/about >
         // top bar > floating panels > context menu > HUD > map.
+        double uiMouseX = MapHifiUi.toPixelD(mouseX);
+        double uiMouseY = MapHifiUi.toPixelD(mouseY);
+        int uiWidth = pixelUiWidth();
+        int uiHeight = pixelUiHeight();
+
         if (markerUi.overlayOpen()) {
-            return markerUi.mouseClicked(mouseX, mouseY, button, width, height);
+            return markerUi.mouseClicked(
+                    uiMouseX, uiMouseY, button, uiWidth, uiHeight);
         }
         if (hifiSettingsUi.isOpen()) {
-            return hifiSettingsUi.mouseClicked(mouseX, mouseY, button, width, height);
+            return hifiSettingsUi.mouseClicked(
+                    uiMouseX, uiMouseY, button, uiWidth, uiHeight);
         }
         if (aboutOpen) {
-            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && aboutCloseHit(mouseX, mouseY)) {
+            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT
+                    && aboutCloseHit(uiMouseX, uiMouseY)) {
                 aboutOpen = false;
             }
             return true;
@@ -1462,21 +1549,23 @@ public final class MapScreenV3 extends Screen {
 
         if (topbarContains(mouseX, mouseY)) {
             if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-                handleHifiTopbarClick(mx, my);
+                handleHifiTopbarClick((int) uiMouseX, (int) uiMouseY);
             }
             return true;
         }
 
-        if (markerUi.managerOpen() && markerUi.managerContains(mouseX, mouseY)) {
+        if (markerUi.managerOpen()
+                && markerUi.managerContains(uiMouseX, uiMouseY)) {
             return markerUi.managerMouseClicked(
-                    mouseX, mouseY, button, width, height,
+                    uiMouseX, uiMouseY, button, uiWidth, uiHeight,
                     dimension(),
                     (int) Math.floor(centerX),
                     surfaceYAt((int) Math.floor(centerX), (int) Math.floor(centerZ)),
                     (int) Math.floor(centerZ));
         }
-        if (layerPanelUi.open() && layerPanelUi.contains(mouseX, mouseY)) {
-            return layerPanelUi.mouseClicked(mouseX, mouseY, button, width, height);
+        if (layerPanelUi.open() && layerPanelUi.contains(uiMouseX, uiMouseY)) {
+            return layerPanelUi.mouseClicked(
+                    uiMouseX, uiMouseY, button, uiWidth, uiHeight);
         }
 
         if (contextOpen) {
@@ -1522,8 +1611,8 @@ public final class MapScreenV3 extends Screen {
                 contextBlockY = surfaceYAt(contextBlockX, contextBlockZ);
             }
             contextX = clamp(mx + 4, 4, Math.max(4, width - CONTEXT_W - 4));
-            contextY = clamp(my + 4, MapHifiUi.HEADER_H + 2,
-                    Math.max(MapHifiUi.HEADER_H + 2, height - contextMenuHeight() - 4));
+            contextY = clamp(my + 4, MapHifiUi.headerGui() + 2,
+                    Math.max(MapHifiUi.headerGui() + 2, height - contextMenuHeight() - 4));
             contextOpen = true;
             dragging = false;
             return true;
@@ -1539,8 +1628,10 @@ public final class MapScreenV3 extends Screen {
     }
 
     private void handleHifiTopbarClick(int mouseX, int mouseY) {
-        int closeX = width - 29;
-        if (inside(mouseX, mouseY, closeX, 4, 24, 28)) {
+        int uiWidth = pixelUiWidth();
+        int uiHeight = pixelUiHeight();
+        int closeX = uiWidth - 64;
+        if (inside(mouseX, mouseY, closeX, 10, 42, 42)) {
             onClose();
             return;
         }
@@ -1565,7 +1656,10 @@ public final class MapScreenV3 extends Screen {
             hifiSettingsUi.close();
             aboutOpen = false;
             if (markerUi.managerOpen()) markerUi.closeManager();
-            else markerUi.openManager(navX(1) + navItemWidth() / 2, MapHifiUi.HEADER_H + 5, width, height);
+            else markerUi.openManager(
+                    navX(1) + navItemWidth() / 2,
+                    MapHifiUi.HEADER_H + 8,
+                    uiWidth, uiHeight);
             return;
         }
         if (index == 2) {
@@ -1573,7 +1667,10 @@ public final class MapScreenV3 extends Screen {
             hifiSettingsUi.close();
             aboutOpen = false;
             if (layerPanelUi.open()) layerPanelUi.close();
-            else layerPanelUi.openAt(navX(2) + navItemWidth() / 2, MapHifiUi.HEADER_H + 5, width, height);
+            else layerPanelUi.openAt(
+                    navX(2) + navItemWidth() / 2,
+                    MapHifiUi.HEADER_H + 8,
+                    uiWidth, uiHeight);
             return;
         }
         if (index == 3) {
@@ -1590,29 +1687,35 @@ public final class MapScreenV3 extends Screen {
     }
 
     private boolean hudContains(double mouseX, double mouseY) {
-        int zoomY = height - 36;
-        int zoomX = width - 156;
-        int locateX = width - 36;
-        int locateY = zoomY - 35;
-        return MapHifiUi.inside(mouseX, mouseY, zoomX, zoomY, 148, 28)
-                || MapHifiUi.inside(mouseX, mouseY, locateX, locateY, 28, 28);
+        double ux = MapHifiUi.toPixelD(mouseX);
+        double uy = MapHifiUi.toPixelD(mouseY);
+        int uiW = pixelUiWidth();
+        int uiH = pixelUiHeight();
+        int zoomX = uiW - 18 - 166;
+        int zoomY = uiH - 20 - 44;
+        int locateX = uiW - 18 - 44;
+        int locateY = zoomY - 7 - 44;
+        return MapHifiUi.inside(ux, uy, zoomX, zoomY, 166, 44)
+                || MapHifiUi.inside(ux, uy, locateX, locateY, 44, 44);
     }
 
     private void handleHifiHudClick(int mouseX, int mouseY) {
-        int zoomY = height - 36;
-        int zoomX = width - 156;
-        int locateX = width - 36;
-        int locateY = zoomY - 35;
-        if (inside(mouseX, mouseY, locateX, locateY, 28, 28)) {
+        int uiW = pixelUiWidth();
+        int uiH = pixelUiHeight();
+        int zoomX = uiW - 18 - 166;
+        int zoomY = uiH - 20 - 44;
+        int locateX = uiW - 18 - 44;
+        int locateY = zoomY - 7 - 44;
+        if (inside(mouseX, mouseY, locateX, locateY, 44, 44)) {
             centerOnPlayer();
             return;
         }
-        if (inside(mouseX, mouseY, zoomX, zoomY, 31, 28)) {
+        if (inside(mouseX, mouseY, zoomX, zoomY, 44, 44)) {
             int index = nearestZoomIndex(zoom);
             setZoomAt(ZOOM_LEVELS[Math.max(0, index - 1)], width * 0.5, height * 0.5);
             return;
         }
-        if (inside(mouseX, mouseY, zoomX + 117, zoomY, 31, 28)) {
+        if (inside(mouseX, mouseY, zoomX + 122, zoomY, 44, 44)) {
             int index = nearestZoomIndex(zoom);
             setZoomAt(ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, index + 1)],
                     width * 0.5, height * 0.5);
@@ -1620,12 +1723,14 @@ public final class MapScreenV3 extends Screen {
     }
 
     private boolean aboutCloseHit(double mouseX, double mouseY) {
-        int w = Math.min(520, width - 36);
-        int h = Math.min(270, height - MapHifiUi.HEADER_H - 30);
-        int x = (width - w) / 2;
+        int uiW = pixelUiWidth();
+        int uiH = pixelUiHeight();
+        int w = Math.min(520, uiW - 36);
+        int h = Math.min(270, uiH - MapHifiUi.HEADER_H - 30);
+        int x = (uiW - w) / 2;
         int y = MapHifiUi.HEADER_H
-                + Math.max(10, (height - MapHifiUi.HEADER_H - h) / 2);
-        return MapHifiUi.closeHit(mouseX, mouseY, x, y, w);
+                + Math.max(10, (uiH - MapHifiUi.HEADER_H - h) / 2);
+        return MapHifiUi.modalCloseHit(mouseX, mouseY, x, y, w);
     }
 
     private boolean handleSettingsClick(int mouseX, int mouseY) {
@@ -1791,13 +1896,16 @@ public final class MapScreenV3 extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        double uiMouseX = MapHifiUi.toPixelD(mouseX);
+        double uiMouseY = MapHifiUi.toPixelD(mouseY);
         if (markerUi.overlayOpen()) {
-            return markerUi.mouseReleased(mouseX, mouseY, button);
+            return markerUi.mouseReleased(uiMouseX, uiMouseY, button);
         }
         if (hifiSettingsUi.isOpen()) {
-            return hifiSettingsUi.mouseReleased(mouseX, mouseY, button);
+            return hifiSettingsUi.mouseReleased(uiMouseX, uiMouseY, button);
         }
-        if (markerUi.mouseReleased(mouseX, mouseY, button)) return true;
+        if (markerUi.managerOpen()
+                && markerUi.mouseReleased(uiMouseX, uiMouseY, button)) return true;
         if (layerPanelUi.mouseReleased(button)) return true;
 
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && dragging) {
@@ -1811,20 +1919,30 @@ public final class MapScreenV3 extends Screen {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button,
                                 double dragX, double dragY) {
+        double uiMouseX = MapHifiUi.toPixelD(mouseX);
+        double uiMouseY = MapHifiUi.toPixelD(mouseY);
+        double uiDragX = MapHifiUi.toPixelD(dragX);
+        double uiDragY = MapHifiUi.toPixelD(dragY);
+        int uiWidth = pixelUiWidth();
+        int uiHeight = pixelUiHeight();
+
         if (markerUi.overlayOpen()) {
             return markerUi.mouseDragged(
-                    mouseX, mouseY, button, dragX, dragY, width, height);
+                    uiMouseX, uiMouseY, button, uiDragX, uiDragY, uiWidth, uiHeight);
         }
         if (hifiSettingsUi.isOpen()) {
             return hifiSettingsUi.mouseDragged(
-                    mouseX, mouseY, button, dragX, dragY);
+                    uiMouseX, uiMouseY, button, uiDragX, uiDragY);
         }
-        if (markerUi.mouseDragged(
-                mouseX, mouseY, button, dragX, dragY, width, height)) {
+        if (markerUi.managerOpen()
+                && markerUi.mouseDragged(
+                        uiMouseX, uiMouseY, button,
+                        uiDragX, uiDragY, uiWidth, uiHeight)) {
             return true;
         }
-        if (layerPanelUi.mouseDragged(
-                mouseX, mouseY, button, width, height)) {
+        if (layerPanelUi.open()
+                && layerPanelUi.mouseDragged(
+                        uiMouseX, uiMouseY, button, uiWidth, uiHeight)) {
             return true;
         }
 
@@ -1845,16 +1963,21 @@ public final class MapScreenV3 extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY,
                                  double scrollX, double scrollY) {
+        double uiMouseX = MapHifiUi.toPixelD(mouseX);
+        double uiMouseY = MapHifiUi.toPixelD(mouseY);
+        int uiWidth = pixelUiWidth();
+        int uiHeight = pixelUiHeight();
+
         if (markerUi.overlayOpen()) {
-            return markerUi.mouseScrolled(scrollY, width, height);
+            return markerUi.mouseScrolled(scrollY, uiWidth, uiHeight);
         }
         if (hifiSettingsUi.isOpen()) {
             return hifiSettingsUi.mouseScrolled(scrollY);
         }
-        if (markerUi.managerOpen() && markerUi.managerContains(mouseX, mouseY)) {
-            return markerUi.mouseScrolled(scrollY, width, height);
+        if (markerUi.managerOpen() && markerUi.managerContains(uiMouseX, uiMouseY)) {
+            return markerUi.mouseScrolled(scrollY, uiWidth, uiHeight);
         }
-        if (layerPanelUi.mouseScrolled(mouseX, mouseY, scrollY)) {
+        if (layerPanelUi.mouseScrolled(uiMouseX, uiMouseY, scrollY)) {
             return true;
         }
         if (contextOpen || topbarContains(mouseX, mouseY) || scrollY == 0) return true;

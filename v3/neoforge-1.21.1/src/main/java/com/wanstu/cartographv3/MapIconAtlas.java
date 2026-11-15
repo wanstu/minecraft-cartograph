@@ -65,22 +65,30 @@ final class MapIconAtlas {
             int primary, int accent, int border,
             boolean hovered) {
         int drawSize = hovered ? size + 1 : size;
-        drawChannels(
+        drawMarkerMono(graphics, icon, centerX, centerY, drawSize, accent);
+    }
+
+    /**
+     * Marker/structure artwork in the high-fidelity prototype is a single
+     * currentColor stroke.  Keep that contract in-game as well: the generated
+     * *_mono texture is the authoritative artwork and the chosen marker color
+     * is applied once at render time.
+     */
+    static void drawMarkerMono(
+            GuiGraphics graphics, MapMarkerStore.Icon icon,
+            int centerX, int centerY, int size, int rgb) {
+        draw(
                 graphics,
-                "marker/" + icon.name().toLowerCase(Locale.ROOT),
-                centerX, centerY, drawSize,
-                primary, accent, border);
+                texture("marker/" + icon.name().toLowerCase(Locale.ROOT) + "_mono"),
+                centerX, centerY, size, rgb, 1.0f);
     }
 
     static void drawMarkerPreview(
             GuiGraphics graphics, MapMarkerStore.Icon icon,
             int centerX, int centerY, int size) {
-        drawMarker(
-                graphics, icon, centerX, centerY, size,
-                MapMarkerStore.DEFAULT_PRIMARY_COLOR,
-                MapMarkerStore.DEFAULT_ACCENT_COLOR,
-                MapMarkerStore.DEFAULT_LINE_COLOR,
-                false);
+        // Picker/select previews in the prototype inherit the ordinary UI
+        // foreground colour.  The colour swatch is deliberately separate.
+        drawMarkerMono(graphics, icon, centerX, centerY, size, 0xffeef2f4);
     }
 
     private static void drawChannels(

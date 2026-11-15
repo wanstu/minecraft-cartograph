@@ -45,8 +45,8 @@ final class MapMarkerUi {
     private int listScroll;
     private int managerX = -1;
     private int managerY = MapHifiUi.HEADER_H + 6;
-    private int managerW = 292;
-    private int managerH = 380;
+    private int managerW = 300;
+    private int managerH = 500;
     private boolean managerDragging;
     private int managerDragOffsetX;
     private int managerDragOffsetY;
@@ -168,7 +168,7 @@ final class MapMarkerUi {
             if (!layerVisible(marker, markerLayerEnabled, structureLayerEnabled)) continue;
             int sx = (int) Math.round(width * 0.5 + (marker.x - centerX) * zoom);
             int sy = (int) Math.round(height * 0.5 + (marker.z - centerZ) * zoom);
-            if (sx < -margin || sy < MapHifiUi.HEADER_H - margin
+            if (sx < -margin || sy < MapHifiUi.headerGui() - margin
                     || sx > width + margin || sy > height + margin) continue;
             markers.add(new ScreenMarker(marker, sx, sy));
         }
@@ -266,42 +266,42 @@ final class MapMarkerUi {
                 MapIconAtlas.UiIcon.MARKERS, "标点", mouseX, mouseY);
 
         int bodyX = managerX + 10;
-        int bodyY = managerY + 39;
+        int bodyY = managerY + MapHifiUi.PANEL_HEADER_H + 10;
         int innerW = managerW - 20;
 
-        MapHifiUi.tab(graphics, font, bodyX, bodyY, (innerW - 4) / 2, 22,
+        MapHifiUi.tab(graphics, font, bodyX, bodyY, (innerW - 4) / 2, 34,
                 "标点 " + MapMarkerStore.customManagerEntries().size(),
                 managerTab == ManagerTab.LIST, mouseX, mouseY);
         MapHifiUi.tab(graphics, font, bodyX + (innerW - 4) / 2 + 4, bodyY,
-                (innerW - 4) / 2, 22,
+                (innerW - 4) / 2, 34,
                 "回收站 " + MapMarkerStore.recycleCount(),
                 managerTab == ManagerTab.TRASH, mouseX, mouseY);
 
-        int toolY = bodyY + 29;
+        int toolY = bodyY + 42;
         if (managerTab == ManagerTab.LIST) {
             MapHifiUi.button(
-                    graphics, font, bodyX, toolY, innerW, 22,
+                    graphics, font, bodyX, toolY, innerW, 34,
                     "＋ 添加标点", true, false, mouseX, mouseY);
         } else {
             String clearText = clearConfirmUntil > System.currentTimeMillis()
                     ? "再次点击确认清空" : "清空回收站";
             MapHifiUi.button(
-                    graphics, font, bodyX + innerW - 104, toolY, 104, 22,
+                    graphics, font, bodyX + innerW - 122, toolY, 122, 34,
                     clearText, false, true, mouseX, mouseY);
         }
 
         List<MapMarkerStore.Marker> rows = managerRows();
-        int listY = toolY + 29;
-        int rowH = 46;
+        int listY = toolY + 42;
+        int rowH = 56;
         int maxRows = Math.max(1, (managerY + managerH - 8 - listY) / rowH);
         int maxScroll = Math.max(0, rows.size() - maxRows);
         listScroll = Math.max(0, Math.min(listScroll, maxScroll));
 
         if (rows.isEmpty()) {
-            graphics.drawCenteredString(
-                    font,
+            MapHifiUi.centeredText(
+                    graphics, font,
                     managerTab == ManagerTab.LIST ? "暂无自定义标点" : "回收站为空",
-                    managerX + managerW / 2, listY + 18, MapHifiUi.MUTED);
+                    managerX + managerW / 2, listY + 18, MapHifiUi.MUTED, 13);
             return;
         }
 
@@ -313,31 +313,35 @@ final class MapMarkerUi {
             boolean hover = inside(mouseX, mouseY, bodyX, y, innerW, rowH - 3);
             if (hover) graphics.fill(bodyX, y, bodyX + innerW, y + rowH - 3, 0xff223039);
 
-            MapIconAtlas.drawMarker(
-                    graphics, marker.icon, bodyX + 13, y + 15, 18,
-                    marker.primary(), marker.accent(), marker.line(), false);
-            graphics.drawString(font, marker.name, bodyX + 27, y + 7, MapHifiUi.TEXT, false);
+            MapIconAtlas.drawMarkerMono(
+                    graphics, marker.icon, bodyX + 17, y + 20, 22,
+                    marker.accent());
+            MapHifiUi.text(
+                    graphics, font, marker.name,
+                    bodyX + 36, y + 9, MapHifiUi.TEXT, 14);
             String meta = "X " + marker.x + "  Y " + marker.y + "  Z " + marker.z;
-            graphics.drawString(font, meta, bodyX + 27, y + 23, MapHifiUi.MUTED, false);
+            MapHifiUi.text(
+                    graphics, font, meta,
+                    bodyX + 36, y + 31, MapHifiUi.MUTED, 11);
 
-            int actionX = bodyX + innerW - 18;
+            int actionX = bodyX + innerW - 20;
             if (managerTab == ManagerTab.TRASH) {
                 MapIconAtlas.drawUi(
-                        graphics, MapIconAtlas.UiIcon.RESTORE, actionX, y + 16, 12,
+                        graphics, MapIconAtlas.UiIcon.RESTORE, actionX, y + 21, 16,
                         hover ? 0xffffffff : 0xffc5d0d6);
             } else if (marker.origin == MapMarkerStore.Origin.AUTO && marker.modifiedAuto) {
                 MapIconAtlas.drawUi(
-                        graphics, MapIconAtlas.UiIcon.RESET, actionX, y + 16, 12,
+                        graphics, MapIconAtlas.UiIcon.RESET, actionX, y + 21, 16,
                         hover ? 0xffffffff : 0xffc5d0d6);
                 MapIconAtlas.drawUi(
-                        graphics, MapIconAtlas.UiIcon.EDIT, actionX - 24, y + 16, 12,
+                        graphics, MapIconAtlas.UiIcon.EDIT, actionX - 30, y + 21, 16,
                         hover ? 0xffffffff : 0xffc5d0d6);
             } else {
                 MapIconAtlas.drawUi(
-                        graphics, MapIconAtlas.UiIcon.TRASH, actionX, y + 16, 12,
+                        graphics, MapIconAtlas.UiIcon.TRASH, actionX, y + 21, 16,
                         hover ? 0xffff8e8e : 0xffd27777);
                 MapIconAtlas.drawUi(
-                        graphics, MapIconAtlas.UiIcon.EDIT, actionX - 24, y + 16, 12,
+                        graphics, MapIconAtlas.UiIcon.EDIT, actionX - 30, y + 21, 16,
                         hover ? 0xffffffff : 0xffc5d0d6);
             }
         }
@@ -356,33 +360,33 @@ final class MapMarkerUi {
         EditorLayout l = editorLayout(width, height);
         MapHifiUi.modalShade(graphics, width, height);
         MapHifiUi.modal(graphics, l.x(), l.y(), l.w(), l.h());
-        MapHifiUi.panelHeader(
+        MapHifiUi.modalHeader(
                 graphics, font, l.x(), l.y(), l.w(),
                 MapIconAtlas.UiIcon.MARKERS,
                 editingId == null ? "添加标点" : "编辑标点", mouseX, mouseY);
 
-        graphics.drawString(font, "名称", l.labelX(), l.nameY() + 7, MapHifiUi.TEXT, false);
-        graphics.drawString(font, "图标", l.labelX(), l.iconY() + 7, MapHifiUi.TEXT, false);
-        graphics.drawString(font, "颜色", l.labelX(), l.colorY() + 7, MapHifiUi.TEXT, false);
-        graphics.drawString(font, "简介", l.labelX(), l.descriptionY() + 7, MapHifiUi.TEXT, false);
-        graphics.drawString(font, "坐标", l.labelX(), l.coordsY() + 7, MapHifiUi.TEXT, false);
+        MapHifiUi.text(graphics, font, "名称", l.labelX(), l.nameY() + 10, MapHifiUi.TEXT, 14);
+        MapHifiUi.text(graphics, font, "图标", l.labelX(), l.iconY() + 10, MapHifiUi.TEXT, 14);
+        MapHifiUi.text(graphics, font, "颜色", l.labelX(), l.colorY() + 10, MapHifiUi.TEXT, 14);
+        MapHifiUi.text(graphics, font, "简介", l.labelX(), l.descriptionY() + 10, MapHifiUi.TEXT, 14);
+        MapHifiUi.text(graphics, font, "坐标", l.labelX(), l.coordsY() + 10, MapHifiUi.TEXT, 14);
 
-        nameInput.setBounds(l.controlX(), l.nameY(), l.controlW(), 22);
-        iconSelect.setBounds(l.controlX(), l.iconY(), l.controlW(), 22);
-        colorInput.setBounds(l.controlX(), l.colorY(), Math.min(190, l.controlW()), 22);
+        nameInput.setBounds(l.controlX(), l.nameY(), l.controlW(), 34);
+        iconSelect.setBounds(l.controlX(), l.iconY(), l.controlW(), 34);
+        colorInput.setBounds(l.controlX(), l.colorY(), Math.min(230, l.controlW()), 34);
         descriptionInput.setBounds(l.controlX(), l.descriptionY(), l.controlW(), l.descriptionH());
 
         int coordGap = 5;
         int coordW = Math.max(50, (l.controlW() - coordGap * 2) / 3);
         int cx = l.controlX();
-        xInput.setBounds(cx + 14, l.coordsY(), coordW - 14, 22);
-        yInput.setBounds(cx + coordW + coordGap + 14, l.coordsY(), coordW - 14, 22);
-        zInput.setBounds(cx + (coordW + coordGap) * 2 + 14, l.coordsY(), coordW - 14, 22);
-        graphics.drawString(font, "X", cx + 3, l.coordsY() + 7, MapHifiUi.MUTED, false);
-        graphics.drawString(font, "Y", cx + coordW + coordGap + 3, l.coordsY() + 7,
-                MapHifiUi.MUTED, false);
-        graphics.drawString(font, "Z", cx + (coordW + coordGap) * 2 + 3, l.coordsY() + 7,
-                MapHifiUi.MUTED, false);
+        xInput.setBounds(cx + 18, l.coordsY(), coordW - 18, 34);
+        yInput.setBounds(cx + coordW + coordGap + 18, l.coordsY(), coordW - 18, 34);
+        zInput.setBounds(cx + (coordW + coordGap) * 2 + 18, l.coordsY(), coordW - 18, 34);
+        MapHifiUi.text(graphics, font, "X", cx + 3, l.coordsY() + 10, MapHifiUi.MUTED, 12);
+        MapHifiUi.text(graphics, font, "Y",
+                cx + coordW + coordGap + 3, l.coordsY() + 10, MapHifiUi.MUTED, 12);
+        MapHifiUi.text(graphics, font, "Z",
+                cx + (coordW + coordGap) * 2 + 3, l.coordsY() + 10, MapHifiUi.MUTED, 12);
 
         nameInput.render(graphics, font, mouseX, mouseY);
         descriptionInput.render(graphics, font, mouseX, mouseY);
@@ -396,10 +400,10 @@ final class MapMarkerUi {
         if (colorInput.popupOpen()) popup = colorInput;
         else colorInput.render(graphics, font, mouseX, mouseY);
 
-        int saveW = 62;
-        int cancelW = 58;
-        int saveX = l.x() + l.w() - 12 - saveW;
-        int cancelX = saveX - 7 - cancelW;
+        int saveW = 78;
+        int cancelW = 74;
+        int saveX = l.x() + l.w() - 16 - saveW;
+        int cancelX = saveX - 10 - cancelW;
         MapHifiUi.button(graphics, font, cancelX, l.buttonY(), cancelW, l.buttonH(),
                 "取消", false, false, mouseX, mouseY);
         MapHifiUi.button(graphics, font, saveX, l.buttonY(), saveW, l.buttonH(),
@@ -439,7 +443,7 @@ final class MapMarkerUi {
             return true;
         }
 
-        if (inside(mouseX, mouseY, managerX, managerY, managerW, 31)) {
+        if (inside(mouseX, mouseY, managerX, managerY, managerW, MapHifiUi.PANEL_HEADER_H)) {
             managerDragging = true;
             managerDragOffsetX = (int) mouseX - managerX;
             managerDragOffsetY = (int) mouseY - managerY;
@@ -447,28 +451,28 @@ final class MapMarkerUi {
         }
 
         int bodyX = managerX + 10;
-        int bodyY = managerY + 39;
+        int bodyY = managerY + MapHifiUi.PANEL_HEADER_H + 10;
         int innerW = managerW - 20;
         int tabW = (innerW - 4) / 2;
-        if (inside(mouseX, mouseY, bodyX, bodyY, tabW, 22)) {
+        if (inside(mouseX, mouseY, bodyX, bodyY, tabW, 34)) {
             managerTab = ManagerTab.LIST;
             listScroll = 0;
             return true;
         }
-        if (inside(mouseX, mouseY, bodyX + tabW + 4, bodyY, tabW, 22)) {
+        if (inside(mouseX, mouseY, bodyX + tabW + 4, bodyY, tabW, 34)) {
             managerTab = ManagerTab.TRASH;
             listScroll = 0;
             return true;
         }
 
-        int toolY = bodyY + 29;
+        int toolY = bodyY + 42;
         if (managerTab == ManagerTab.LIST
-                && inside(mouseX, mouseY, bodyX, toolY, innerW, 22)) {
+                && inside(mouseX, mouseY, bodyX, toolY, innerW, 34)) {
             openCreate(dimension, centerX, centerY, centerZ);
             return true;
         }
         if (managerTab == ManagerTab.TRASH
-                && inside(mouseX, mouseY, bodyX + innerW - 104, toolY, 104, 22)) {
+                && inside(mouseX, mouseY, bodyX + innerW - 122, toolY, 122, 34)) {
             long now = System.currentTimeMillis();
             if (clearConfirmUntil > now) {
                 MapMarkerStore.clearRecycle();
@@ -481,8 +485,8 @@ final class MapMarkerUi {
         }
 
         List<MapMarkerStore.Marker> rows = managerRows();
-        int listY = toolY + 29;
-        int rowH = 46;
+        int listY = toolY + 42;
+        int rowH = 56;
         int visible = (int) ((mouseY - listY) / rowH);
         int index = listScroll + visible;
         if (mouseY < listY || index < 0 || index >= rows.size()) return true;
@@ -490,22 +494,22 @@ final class MapMarkerUi {
         MapMarkerStore.Marker marker = rows.get(index);
         int rowY = listY + visible * rowH;
         if (mouseY >= rowY + rowH - 3) return true;
-        int actionX = bodyX + innerW - 18;
+        int actionX = bodyX + innerW - 20;
 
         if (managerTab == ManagerTab.TRASH) {
-            if (inside(mouseX, mouseY, actionX - 10, rowY + 5, 20, 24)) {
+            if (inside(mouseX, mouseY, actionX - 12, rowY + 8, 24, 28)) {
                 MapMarkerStore.restore(marker.uuid());
             }
             return true;
         }
 
         boolean modifiedAuto = marker.origin == MapMarkerStore.Origin.AUTO && marker.modifiedAuto;
-        if (inside(mouseX, mouseY, actionX - 10, rowY + 5, 20, 24)) {
+        if (inside(mouseX, mouseY, actionX - 12, rowY + 8, 24, 28)) {
             if (modifiedAuto) MapMarkerStore.resetAutomatic(marker.uuid());
             else MapMarkerStore.delete(marker.uuid());
             return true;
         }
-        if (inside(mouseX, mouseY, actionX - 34, rowY + 5, 20, 24)) {
+        if (inside(mouseX, mouseY, actionX - 42, rowY + 8, 24, 28)) {
             openEdit(marker);
             return true;
         }
@@ -543,9 +547,13 @@ final class MapMarkerUi {
     }
 
     boolean mouseScrolled(double scrollY, int width, int height) {
-        if (!managerOpen) return editorOpen;
+        if (editorOpen) {
+            if (iconSelect.popupOpen() && iconSelect.mouseScrolled(scrollY)) return true;
+            return true;
+        }
+        if (!managerOpen) return false;
         if (scrollY != 0) {
-            int delta = scrollY > 0 ? -2 : 2;
+            int delta = scrollY > 0 ? -1 : 1;
             listScroll = Math.max(0, listScroll + delta);
         }
         return true;
@@ -580,7 +588,7 @@ final class MapMarkerUi {
     private boolean editorMouseClicked(double mouseX, double mouseY, int width, int height) {
         EditorLayout l = editorLayout(width, height);
 
-        if (MapHifiUi.closeHit(mouseX, mouseY, l.x(), l.y(), l.w())) {
+        if (MapHifiUi.modalCloseHit(mouseX, mouseY, l.x(), l.y(), l.w())) {
             closeOverlay();
             return true;
         }
@@ -608,10 +616,10 @@ final class MapMarkerUi {
         if (yInput.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
         if (zInput.mouseClicked(mouseX, mouseY, GLFW.GLFW_MOUSE_BUTTON_LEFT)) return true;
 
-        int saveW = 62;
-        int cancelW = 58;
-        int saveX = l.x() + l.w() - 12 - saveW;
-        int cancelX = saveX - 7 - cancelW;
+        int saveW = 78;
+        int cancelW = 74;
+        int saveX = l.x() + l.w() - 16 - saveW;
+        int cancelX = saveX - 10 - cancelW;
         if (inside(mouseX, mouseY, cancelX, l.buttonY(), cancelW, l.buttonH())) {
             closeOverlay();
             return true;
@@ -626,7 +634,7 @@ final class MapMarkerUi {
             if (marker.isPresent()) {
                 boolean modifiedAuto = marker.get().origin == MapMarkerStore.Origin.AUTO
                         && marker.get().modifiedAuto;
-                int actionW = modifiedAuto ? 84 : 58;
+                int actionW = modifiedAuto ? 112 : 74;
                 if (inside(mouseX, mouseY, l.x() + 12, l.buttonY(), actionW, l.buttonH())) {
                     if (modifiedAuto) MapMarkerStore.resetAutomatic(editingId);
                     else MapMarkerStore.delete(editingId);
@@ -672,22 +680,24 @@ final class MapMarkerUi {
     }
 
     private static EditorLayout editorLayout(int width, int height) {
-        int w = Math.max(360, Math.min(520, width - 36));
-        int h = Math.max(300, Math.min(338, height - MapHifiUi.HEADER_H - 24));
+        int w = Math.max(420, Math.min(580, width - 40));
+        int availableH = Math.max(380, height - MapHifiUi.HEADER_H - 28);
+        int h = Math.min(480, availableH);
         int x = (width - w) / 2;
-        int y = MapHifiUi.HEADER_H + Math.max(10, (height - MapHifiUi.HEADER_H - h) / 2);
+        int y = MapHifiUi.HEADER_H
+                + Math.max(12, (height - MapHifiUi.HEADER_H - h) / 2);
 
-        int labelX = x + 18;
-        int controlX = x + 88;
-        int controlW = w - 106;
-        int nameY = y + 42;
-        int iconY = nameY + 31;
-        int colorY = iconY + 31;
-        int descriptionY = colorY + 31;
-        int coordsY = y + h - 67;
-        int descriptionH = Math.max(48, coordsY - descriptionY - 8);
-        int buttonH = 24;
-        int buttonY = y + h - 31;
+        int labelX = x + 24;
+        int controlX = x + 112;
+        int controlW = w - 136;
+        int nameY = y + MapHifiUi.MODAL_HEADER_H + 22;
+        int iconY = nameY + 48;
+        int colorY = iconY + 48;
+        int descriptionY = colorY + 48;
+        int buttonH = 36;
+        int buttonY = y + h - 52;
+        int coordsY = buttonY - 48;
+        int descriptionH = Math.max(70, coordsY - descriptionY - 12);
         return new EditorLayout(
                 x, y, w, h, labelX, controlX, controlW,
                 nameY, iconY, colorY, descriptionY, descriptionH,
@@ -701,7 +711,7 @@ final class MapMarkerUi {
     }
 
     private void clampManager(int width, int height) {
-        managerH = Math.min(420, Math.max(250, height - MapHifiUi.HEADER_H - 18));
+        managerH = Math.min(560, Math.max(360, height - MapHifiUi.HEADER_H - 28));
         managerX = clamp(managerX, 6, Math.max(6, width - managerW - 6));
         managerY = clamp(managerY, MapHifiUi.HEADER_H + 4,
                 Math.max(MapHifiUi.HEADER_H + 4, height - managerH - 6));
