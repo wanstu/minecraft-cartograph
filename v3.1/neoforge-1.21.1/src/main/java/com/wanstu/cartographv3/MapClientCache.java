@@ -328,8 +328,8 @@ public final class MapClientCache {
     private static RegionKey regionKey(ChunkKey key) {
         return new RegionKey(
                 key.dimension(),
-                Math.floorDiv(key.x(), 16),
-                Math.floorDiv(key.z(), 16));
+                Math.floorDiv(key.x(), CartographBackendApi.REGION_CHUNKS),
+                Math.floorDiv(key.z(), CartographBackendApi.REGION_CHUNKS));
     }
 
     static void addTileChangeListener(java.util.function.Consumer<ChunkKey> listener) {

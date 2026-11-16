@@ -18,11 +18,11 @@ enum CartographFrontendTarget {
     }
 
     static CartographFrontendTarget parse(String raw) {
-        if (raw == null) return WEB;
+        if (raw == null) return IN_GAME;
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         for (CartographFrontendTarget value : values()) {
             if (value.id.equals(normalized)) return value;
         }
-        return WEB;
+        return IN_GAME;
     }
 }

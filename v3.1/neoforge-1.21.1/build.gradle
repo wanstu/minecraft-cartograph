@@ -82,7 +82,7 @@ tasks.register('verifyV31WebUiBoundary') {
             def offenders = javaSources.findAll { it.text.contains(token) }
             if (!offenders.isEmpty()) {
                 throw new GradleException(
-                    'V3.1 must not contain in-game UI/Panes (' + token + '): ' + offenders)
+                    'V3.1 must not contain the removed Pane or legacy renderer (' + token + '): ' + offenders)
             }
         }
 
@@ -120,6 +120,21 @@ tasks.register('verifyV31WebUiBoundary') {
         if (index.size() != 1 || script.size() != 1) {
             throw new GradleException(
                 'V3.1 JAR must contain webui/index.html and webui/app.js')
+        }
+        def nativeEntries = zipTree(jarFile).matching {
+            include 'com/wanstu/cartographv3/InGameMapScreen.class'
+            include 'com/wanstu/cartographv3/InGameCartographFrontend.class'
+            include 'assets/cartograph_v3/textures/gui/map-icons.png'
+        }.files
+        if (nativeEntries.size() != 3) {
+            throw new GradleException('V3.1 JAR must ship the native screen, frontend, and icon atlas')
+        }
+        def nativeBindings = javaSources.findAll { it.name.startsWith('InGame') }
+        if (nativeBindings.any { source ->
+            ['MapClientCache', 'PacketDistributor', 'CartographWebUiServer',
+             'new MinecraftCartographBackend('].any { token -> source.text.contains(token) }
+        }) {
+            throw new GradleException('Native frontend must consume the shared backend API')
         }
 
         def paneEntries = zipTree(jarFile).matching {

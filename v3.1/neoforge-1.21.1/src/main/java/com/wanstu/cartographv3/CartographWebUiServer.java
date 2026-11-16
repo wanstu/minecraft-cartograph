@@ -885,7 +885,7 @@ final class CartographWebUiServer implements AutoCloseable {
                 double zoom = Math.max(0.03125, viewport.zoom());
                 int width = Math.max(1, viewport.width());
                 int height = Math.max(1, viewport.height());
-                backend.updateViewport(
+                backendRuntime.updateViewport(FRONTEND_SESSION,
                         new CartographBackendApi.Viewport(
                                 viewport.centerX(),
                                 viewport.centerZ(),

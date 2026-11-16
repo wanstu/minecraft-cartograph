@@ -1,0 +1,73 @@
+package com.wanstu.cartographv3;
+
+/** View coordinates are Minecraft GUI pixels. Zoom is measured in framebuffer pixels per block. */
+final class InGameMapCamera {
+    record Position(String dimension, double x, double z, double zoom) {}
+
+    private static final double MIN_ZOOM = 1.0 / 16;
+    private static final double MAX_ZOOM = 64;
+
+    private int width;
+    private int height;
+    private int top;
+    private double guiScale = 1;
+    private double centerX;
+    private double centerZ;
+    private double zoom = 1.0;
+
+    void resize(int width, int height, int top, double guiScale) {
+        this.width = Math.max(1, width);
+        this.height = Math.max(1, height - top);
+        this.top = top;
+        this.guiScale = Math.max(1, guiScale);
+    }
+
+    void restore(Position position) {
+        center(position.x(), position.z());
+        zoom = clampZoom(position.zoom());
+    }
+
+    Position position(String dimension) {
+        return new Position(dimension, centerX, centerZ, zoom);
+    }
+
+    void center(double x, double z) {
+        centerX = x;
+        centerZ = z;
+    }
+
+    void pan(double dx, double dy) {
+        centerX -= dx / scale();
+        centerZ -= dy / scale();
+    }
+
+    void zoom(double factor, double mouseX, double mouseY) {
+        double x = worldX(mouseX);
+        double z = worldZ(mouseY);
+        zoom = clampZoom(zoom * factor);
+        centerX += x - worldX(mouseX);
+        centerZ += z - worldZ(mouseY);
+    }
+
+    private static double clampZoom(double value) {
+        return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value));
+    }
+
+    double zoom() { return zoom; }
+    double scale() { return zoom / guiScale; }
+    double middleX() { return width / 2.0; }
+    double middleY() { return top + height / 2.0; }
+    int top() { return top; }
+    int width() { return width; }
+    int bottom() { return top + height; }
+
+    double screenX(double x) { return middleX() + (x - centerX) * scale(); }
+    double screenY(double z) { return middleY() + (z - centerZ) * scale(); }
+    double worldX(double x) { return centerX + (x - middleX()) / scale(); }
+    double worldZ(double y) { return centerZ + (y - middleY()) / scale(); }
+
+    CartographBackendApi.Viewport viewport(boolean dragging) {
+        return new CartographBackendApi.Viewport(
+                centerX, centerZ, scale(), width, height, dragging);
+    }
+}

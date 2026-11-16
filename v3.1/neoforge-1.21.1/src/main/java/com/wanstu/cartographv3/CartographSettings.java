@@ -22,7 +22,7 @@ final class CartographSettings {
     private static boolean loaded;
     private static int requestBatchSize = DEFAULT_REQUEST_BATCH;
     private static int liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
-    private static CartographFrontendTarget frontendTarget = CartographFrontendTarget.WEB;
+    private static CartographFrontendTarget frontendTarget = CartographFrontendTarget.IN_GAME;
     private static final Map<MapMarkerStore.StructurePreset, StructureAppearance> STRUCTURE_PRESETS =
             new EnumMap<>(MapMarkerStore.StructurePreset.class);
     private static long structurePresetRevision;
@@ -60,7 +60,7 @@ final class CartographSettings {
 
     static synchronized void setFrontendTarget(CartographFrontendTarget value) {
         ensureLoaded();
-        frontendTarget = value == null ? CartographFrontendTarget.WEB : value;
+        frontendTarget = value == null ? CartographFrontendTarget.IN_GAME : value;
         save();
     }
 
@@ -113,7 +113,7 @@ final class CartographSettings {
                     Integer.parseInt(p.getProperty(
                             "liveScanIntervalTicks", Integer.toString(DEFAULT_LIVE_SCAN_INTERVAL)))));
             frontendTarget = CartographFrontendTarget.parse(
-                    p.getProperty("frontendTarget", CartographFrontendTarget.WEB.id()));
+                    p.getProperty("mapFrontend", CartographFrontendTarget.IN_GAME.id()));
             for (var preset : MapMarkerStore.StructurePreset.values()) {
                 String key = "structurePreset." + preset.name();
                 String icon = p.getProperty(key + ".icon");
@@ -132,7 +132,7 @@ final class CartographSettings {
         } catch (IOException | RuntimeException ignored) {
             requestBatchSize = DEFAULT_REQUEST_BATCH;
             liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
-            frontendTarget = CartographFrontendTarget.WEB;
+            frontendTarget = CartographFrontendTarget.IN_GAME;
         }
     }
 
@@ -148,7 +148,7 @@ final class CartographSettings {
         p.setProperty("schema", Integer.toString(SCHEMA));
         p.setProperty("requestBatchSize", Integer.toString(requestBatchSize));
         p.setProperty("liveScanIntervalTicks", Integer.toString(liveScanIntervalTicks));
-        p.setProperty("frontendTarget", frontendTarget.id());
+        p.setProperty("mapFrontend", frontendTarget.id());
         presets.forEach((preset, appearance) -> {
             String key = "structurePreset." + preset.name();
             p.setProperty(key + ".icon", appearance.icon().name());

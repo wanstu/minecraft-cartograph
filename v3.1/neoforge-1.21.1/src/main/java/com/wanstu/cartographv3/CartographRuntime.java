@@ -8,8 +8,14 @@ import net.minecraft.client.Minecraft;
 final class CartographRuntime implements AutoCloseable {
     private final CartographBackendRuntime backend =
             new CartographBackendRuntime(new MinecraftCartographBackend());
-    private final CartographFrontendRouter frontends =
-            new CartographFrontendRouter(new WebCartographFrontend(backend));
+    private final CartographFrontendRouter frontends;
+
+    CartographRuntime() {
+        var web = new WebCartographFrontend(backend);
+        var inGame = new InGameCartographFrontend(backend,
+                () -> openFrontend(CartographFrontendTarget.WEB));
+        frontends = new CartographFrontendRouter(inGame, web);
+    }
 
     void tick() {
         Minecraft minecraft = Minecraft.getInstance();

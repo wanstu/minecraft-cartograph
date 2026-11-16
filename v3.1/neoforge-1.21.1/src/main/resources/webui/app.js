@@ -739,7 +739,8 @@
       row.querySelector('button').onclick=()=>openEditor(m);list.appendChild(row);});
   }
   function syncRuntimeSettings(){
-    const r=serverState&&serverState.runtime;if(!r)return;q('#requestRange').value=r.requestBatchSize;q('#requestValue').textContent=String(r.requestBatchSize);
+    const r=serverState&&serverState.runtime;if(!r)return;
+    if(r.frontendTarget)q('#frontendTarget').value=r.frontendTarget;q('#requestRange').value=r.requestBatchSize;q('#requestValue').textContent=String(r.requestBatchSize);
     q('#scanRange').value=r.liveScanIntervalTicks;q('#scanValue').textContent=r.liveScanIntervalTicks+' tick / '+(r.liveScanIntervalTicks/20).toFixed(2)+' s';
   }
 
@@ -872,6 +873,10 @@
     q('#markerScaleRange').oninput=e=>{settings.markerScale=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#markerDefaultColor').oninput=e=>{settings.markerDefaultColor=e.target.value.toUpperCase();saveSettings();renderSettings();};
     q('#markerDefaultSize').oninput=e=>{settings.markerDefaultSize=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#markerDefaultIconSelect').onclick=()=>openIconDropdown(q('#markerDefaultIconSelect'),settings.markerDefaultIcon,i=>{settings.markerDefaultIcon=i;saveSettings();renderSettings();});
     q('#markerIconSelect').onclick=()=>openIconDropdown(q('#markerIconSelect'),currentEditorIcon,i=>{currentEditorIcon=i;updateIconSelect(q('#markerIconSelect'),i);});q('#markerColor').oninput=e=>{q('#markerSwatch').style.background=e.target.value;q('#markerColorText').textContent=e.target.value.toUpperCase();};
+    q('#frontendTarget').onchange=async event=>{
+      try{await wsRequest('runtime_settings',{payload:{frontendTarget:event.target.value}});}
+      catch(_){syncRuntimeSettings();toast('打开位置保存失败');}
+    };
     let rt=0;const sendRuntime=()=>{clearTimeout(rt);rt=setTimeout(()=>{wsRequest('runtime_settings',{payload:{requestBatchSize:Number(q('#requestRange').value),liveScanIntervalTicks:Number(q('#scanRange').value)}}).catch(()=>{});},180);};
     q('#requestRange').oninput=e=>{q('#requestValue').textContent=e.target.value;sendRuntime();};q('#scanRange').oninput=e=>{const v=Number(e.target.value);q('#scanValue').textContent=v+' tick / '+(v/20).toFixed(2)+' s';sendRuntime();};
     q('#zoomIn').onclick=()=>setZoom(view.zoom*1.25);q('#zoomOut').onclick=()=>setZoom(view.zoom/1.25);q('#locateBtn').onclick=centerPlayer;

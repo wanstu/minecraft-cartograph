@@ -1,6 +1,7 @@
 package com.wanstu.cartographv3;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Set;
 
 /**
@@ -14,6 +15,7 @@ import java.util.Set;
 final class CartographBackendRuntime implements AutoCloseable {
     private final CartographBackendApi backend;
     private final Set<String> activeFrontends = new HashSet<>();
+    private final LinkedHashMap<String, CartographBackendApi.Viewport> viewports = new LinkedHashMap<>();
     private boolean worldActive;
     private boolean backendOpen;
 
@@ -38,7 +40,19 @@ final class CartographBackendRuntime implements AutoCloseable {
 
     synchronized void release(String frontendId) {
         if (!activeFrontends.remove(frontendId)) return;
+        var current = viewports.lastEntry();
+        viewports.remove(frontendId);
+        if (current != null && current.getKey().equals(frontendId)) {
+            var next = viewports.lastEntry();
+            backend.updateViewport(next == null ? null : next.getValue(), false);
+        }
         reconcile();
+    }
+
+    synchronized void updateViewport(String frontendId, CartographBackendApi.Viewport viewport, boolean force) {
+        if (!activeFrontends.contains(frontendId)) return;
+        viewports.putLast(frontendId, viewport);
+        backend.updateViewport(viewport, force);
     }
 
     synchronized boolean active(String frontendId) {
@@ -67,6 +81,7 @@ final class CartographBackendRuntime implements AutoCloseable {
     public synchronized void close() {
         worldActive = false;
         activeFrontends.clear();
+        viewports.clear();
         if (backendOpen) {
             backend.close();
             backendOpen = false;

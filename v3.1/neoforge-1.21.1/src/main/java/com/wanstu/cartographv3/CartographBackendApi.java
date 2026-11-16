@@ -10,6 +10,8 @@ import java.util.UUID;
  * world facts and invoke semantic actions through this interface.
  */
 interface CartographBackendApi extends AutoCloseable {
+    int REGION_CHUNKS = 16;
+
     record Viewport(
             double centerX, double centerZ, double zoom,
             int width, int height,
