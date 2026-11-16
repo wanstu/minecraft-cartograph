@@ -69,6 +69,9 @@
   const pendingSocketRequests = new Map();
   let markerUiSignature = null;
   let presetUiSignature = null;
+  const structurePresetChanges = new Map();
+  let resetStructurePresets = false;
+  let applyingStructurePresets = false;
 
   const tileCache = new Map();
   const regionCache = new Map();
@@ -82,13 +85,17 @@
       return v && typeof v === 'object' ? v : clone(fallback);
     }catch(_){ return clone(fallback); }
   }
-  function saveSettings(){ localStorage.setItem(LOCAL_KEY, JSON.stringify(settings)); }
+  function saveJson(key,value){
+    try{localStorage.setItem(key,JSON.stringify(value));}
+    catch(_){/* The current session still uses the in-memory state. */}
+  }
+  function saveSettings(){ saveJson(LOCAL_KEY,settings); }
   function worldKey(s){ return String(s && s.worldId || '') + '|' + String(s && s.dimension || ''); }
   function saveView(){
     if(!serverState)return;
-    localStorage.setItem(VIEW_KEY, JSON.stringify({
+    saveJson(VIEW_KEY,{
       worldKey:worldKey(serverState), centerX:view.centerX, centerZ:view.centerZ, zoom:view.zoom
-    }));
+    });
   }
 
   function connectSocket(){
@@ -220,7 +227,12 @@
     const m={pin:'定位点',home:'营地',camp:'营地',mine:'矿井',ship:'船 / 码头',
       mountain:'山峰',temple:'神殿',village:'村庄',mansion:'林地府邸',
       outpost:'前哨站',portal:'传送门',city:'城市',fortress:'要塞',
-      cave:'洞穴',water:'水域'};
+      cave:'洞穴',water:'水域',shipwreck:'沉船',desert_pyramid:'沙漠神殿',
+      jungle_temple:'丛林神庙',swamp_hut:'沼泽小屋',igloo:'雪屋',
+      ocean_monument:'海底神殿',ruined_portal:'废弃传送门',ocean_ruin:'海底废墟',
+      buried_treasure:'埋藏的宝藏',trail_ruins:'古迹废墟',trial_chambers:'试炼密室',
+      ancient_city:'远古城市',stronghold:'末影要塞',nether_fortress:'下界要塞',
+      bastion_remnant:'堡垒遗迹',nether_fossil:'下界化石',end_city:'末地城'};
     return m[i] || i.replaceAll('_',' ');
   }
 
@@ -393,7 +405,7 @@
       let allowed=true;
       if(marker.kind==='structure'){
         if(!settings.structures)allowed=false;
-        if(marker.preset&&settings.structureFilters[marker.preset]===false)allowed=false;
+        if(settings.structureFilters[structureGroupKey(marker)]===false)allowed=false;
       }else if(!settings.custom)allowed=false;
       const pos=worldToScreen(marker.x,marker.z);
       if(pos.x<-80||pos.x>s.width+80||pos.y<-80||pos.y>s.height+80)allowed=false;
@@ -464,33 +476,101 @@
     q('#mapDataStatus').textContent='结构 '+structures+' · 标点 '+custom+' · 缓存 '+(serverState&&serverState.runtime?serverState.runtime.cachedCount:0);
   }
   function syncLayerToggles(){
-    qa('.checkbox[data-toggle]').forEach(cb=>{
-      const key=cb.dataset.toggle;
-      if(Object.prototype.hasOwnProperty.call(settings,key))cb.classList.toggle('on',!!settings[key]);
+    qa('.checkbox',layersPanel).forEach(checkbox=>{
+      const filter=checkbox.dataset.structureFilter;
+      checkbox.checked=filter ? settings.structureFilters[filter]!==false
+        : !!settings[checkbox.dataset.toggle];
     });
+  }
+  function structureGroupKey(marker){
+    return marker.preset||marker.icon||'other';
   }
   function renderLayerList(){
-    syncLayerToggles();
-    const markers=serverState&&serverState.markers||[],structures=markers.filter(m=>m.kind==='structure'),custom=markers.filter(m=>m.kind!=='structure');
-    const cc=q('#layersPanel .layer-row .count');if(cc)cc.textContent=custom.length;q('#structureTotalCount').textContent=structures.length;
-    const groups=new Map();structures.forEach(m=>{const k=m.preset||m.icon||'other';if(!groups.has(k))groups.set(k,{key:k,count:0,label:m.name||k});groups.get(k).count++;});
-    const list=q('#structureLayerList');list.innerHTML='';
-    Array.from(groups.values()).sort((a,b)=>a.label.localeCompare(b.label,'zh-CN')).forEach(g=>{
-      const on=settings.structureFilters[g.key]!==false,row=document.createElement('div');row.className='layer-row indent';
-      row.innerHTML='<div class="checkbox '+(on?'on':'')+'"><svg class="icon"><use href="#i-check"/></svg></div><svg class="icon layer-icon"><use href="#'+iconSymbol(g.key)+'"/></svg><div class="name">'+escapeHtml(g.label)+'</div><div class="count">'+g.count+'</div>';
-      row.querySelector('.checkbox').onclick=()=>{settings.structureFilters[g.key]=!on;saveSettings();renderLayerList();scheduleRender();};list.appendChild(row);
+    const markers=serverState?.markers||[];
+    const structures=markers.filter(marker=>marker.kind==='structure');
+    q('#layersPanel .layer-row .count').textContent=markers.length-structures.length;
+    q('#structureTotalCount').textContent=structures.length;
+    const groups=new Map();
+    structures.forEach(marker=>{
+      const key=structureGroupKey(marker);
+      if(!groups.has(key))groups.set(key,{key:key,count:0,label:marker.name||key,icon:marker.icon});
+      groups.get(key).count++;
     });
-  }
-  function renderStructureSettings(){
-    const list=q('#structureList');if(!list)return;list.innerHTML='';
-    const presets=serverState&&serverState.structurePresets||[];
-    presets.forEach(p=>{
-      const row=document.createElement('div');row.className='structure-row';
-      row.innerHTML='<div>'+escapeHtml(p.label)+'</div>'+
-        '<div class="structure-select" style="cursor:default"><div class="left"><svg class="icon"><use href="#'+iconSymbol(p.icon)+'"/></svg><span>'+escapeHtml(iconLabel(p.icon))+'</span></div></div>'+
-        '<div class="structure-color"><span class="swatch" style="background:'+escapeHtml(p.accentColor)+'"></span></div>';
+    const list=q('#structureLayerList');
+    list.replaceChildren();
+    Array.from(groups.values()).sort((a,b)=>a.label.localeCompare(b.label,'zh-CN')).forEach(group=>{
+      const row=document.createElement('div');
+      row.className='layer-row indent';
+      row.innerHTML='<label class="layer-toggle"><span class="layer-check">'+
+        '<input type="checkbox" class="checkbox"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span>'+
+        '<svg class="icon layer-icon" aria-hidden="true"><use href="#'+iconSymbol(group.icon)+'"/></svg>'+
+        '<span class="name">'+escapeHtml(group.label)+'</span><span class="count">'+group.count+'</span></label>';
+      q('.checkbox',row).dataset.structureFilter=group.key;
       list.appendChild(row);
     });
+    syncLayerToggles();
+  }
+  function setStructurePresetChange(id,change){
+    structurePresetChanges.set(id,{...structurePresetChanges.get(id),...change});
+  }
+  function renderStructureSettings(){
+    const list=q('#structureList');
+    list.replaceChildren();
+    const presets=serverState?.structurePresets||[];
+    const presetIcons=presets.map(preset=>preset.defaultIcon);
+    q('#applyStructurePresets').disabled=!presets.length||applyingStructurePresets;
+    q('#resetStructurePresets').disabled=!presets.length||applyingStructurePresets;
+    for(const preset of presets){
+      const change=structurePresetChanges.get(preset.id);
+      const icon=change?.icon||(resetStructurePresets?preset.defaultIcon:preset.icon);
+      const color=change?.colorText||(resetStructurePresets?preset.defaultAccentColor:preset.accentColor);
+      const row=document.createElement('div');
+      row.className='structure-row';
+      row.innerHTML='<div>'+escapeHtml(preset.label)+'</div>'+
+        '<button type="button" class="structure-select" aria-label="'+escapeHtml(preset.label+'图标')+'">'+
+        '<span class="left"></span><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></button>'+
+        '<div class="structure-color"><label class="swatch">'+
+        '<input class="native-color" type="color" aria-label="'+escapeHtml(preset.label+'颜色')+'"></label></div>';
+      const select=q('.structure-select',row);
+      updateIconSelect(select,icon);
+      select.disabled=applyingStructurePresets;
+      select.onclick=()=>openIconDropdown(select,select.dataset.value,newIcon=>{
+        setStructurePresetChange(preset.id,{icon:newIcon});
+        updateIconSelect(select,newIcon);
+      },presetIcons);
+      const colorInput=q('input',row);
+      colorInput.value=color;
+      colorInput.disabled=applyingStructurePresets;
+      const swatch=q('.swatch',row);
+      swatch.style.background=colorInput.value;
+      colorInput.oninput=()=>{
+        swatch.style.background=colorInput.value;
+        setStructurePresetChange(preset.id,{colorText:colorInput.value});
+      };
+      list.appendChild(row);
+    }
+  }
+  async function applyStructurePresetChanges(){
+    if(applyingStructurePresets)return;
+    if(!resetStructurePresets&&!structurePresetChanges.size){closeModal();return;}
+    const changes=Object.fromEntries(Array.from(structurePresetChanges,([id,draft])=>{
+      const change={};
+      if(draft.icon)change.icon=draft.icon;
+      if(draft.colorText)change.color=colorInt(draft.colorText);
+      return [id,change];
+    }));
+    applyingStructurePresets=true;
+    renderStructureSettings();
+    try{
+      await wsRequest('structure_presets',{payload:{reset:resetStructurePresets,changes:changes}});
+      closeModal();
+      toast('结构预设已保存');
+    }catch(error){
+      toast('保存结构预设失败：'+error.message);
+    }finally{
+      applyingStructurePresets=false;
+      renderStructureSettings();
+    }
   }
   function renderMarkerList(){
     const all=(serverState&&serverState.markers||[]).filter(m=>m.kind!=='structure'||m.modifiedAuto);q('#markerCountBadge').textContent=all.length;
@@ -528,9 +608,16 @@
   function hidePanels(){layersPanel.style.display='none';markersPanel.style.display='none';qa('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.nav==='map'));}
   function openPanel(name){closeContexts();const panel=name==='layers'?layersPanel:markersPanel,other=name==='layers'?markersPanel:layersPanel;other.style.display='none';panel.style.display=panel.style.display==='block'?'none':'block';qa('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.nav===name&&panel.style.display==='block'));if(panel.style.display!=='block')q('[data-nav="map"]').classList.add('active');}
   function openModal(modal){hidePanels();closeContexts();overlay.style.display='block';modal.style.display='block';app.classList.add('modal-open');}
-  function closeModal(){overlay.style.display='none';[settingsModal,editorModal,aboutModal].forEach(m=>m.style.display='none');app.classList.remove('modal-open');dropdown.classList.remove('open');}
+  function closeModal(){
+    overlay.style.display='none';
+    [settingsModal,editorModal,aboutModal].forEach(modal=>modal.style.display='none');
+    app.classList.remove('modal-open');
+    dropdown.classList.remove('open');
+    structurePresetChanges.clear();
+    resetStructurePresets=false;
+  }
   function activateSettingsPage(page){qa('.settings-nav-item').forEach(el=>el.classList.toggle('active',el.dataset.page===page));qa('[data-setting-page]').forEach(el=>el.classList.toggle('active',el.dataset.settingPage===page));}
-  function openSettings(page){renderSettings();activateSettingsPage(page||'general');openModal(settingsModal);}
+  function openSettings(page){renderSettings();renderStructureSettings();activateSettingsPage(page||'general');openModal(settingsModal);}
   function syncSwitches(){qa('[data-switch][data-setting]').forEach(el=>{const k=el.dataset.setting;if(Object.prototype.hasOwnProperty.call(settings,k))el.classList.toggle('on',!!settings[k]);});syncLayerToggles();}
   function renderSettings(){
     syncSwitches();q('#playerSize').value=settings.playerSize;q('#playerSizeValue').textContent=settings.playerSize+' px';q('#playerColor').value=settings.playerColor;q('#playerSwatch').style.background=settings.playerColor;q('#playerColorText').textContent=settings.playerColor.toUpperCase();
@@ -539,9 +626,9 @@
     qa('[data-player-icon]').forEach(el=>el.classList.toggle('active',el.dataset.playerIcon===settings.playerIcon));
   }
   function updateIconSelect(el,icon){const left=q('.left',el);if(!left)return;left.innerHTML='<svg class="icon"><use href="#'+iconSymbol(icon)+'"/></svg><span>'+escapeHtml(iconLabel(icon))+'</span>';el.dataset.value=icon;}
-  function openIconDropdown(anchor,current,onSelect){
-    const icons=['pin','home','mine','ship','mountain','temple','village','mansion','outpost','portal','city','fortress','cave','water'];
-    dropdown.innerHTML=icons.map(i=>'<div class="dropdown-item '+(i===current?'active':'')+'" data-icon="'+i+'"><svg class="icon"><use href="#'+iconSymbol(i)+'"/></svg>'+escapeHtml(iconLabel(i))+'</div>').join('');
+  function openIconDropdown(anchor,current,onSelect,extraIcons=[]){
+    const icons=new Set(['pin','home','mine','ship','mountain','temple','village','mansion','outpost','portal','city','fortress','cave','water',...extraIcons]);
+    dropdown.innerHTML=Array.from(icons,i=>'<div class="dropdown-item '+(i===current?'active':'')+'" data-icon="'+i+'"><svg class="icon"><use href="#'+iconSymbol(i)+'"/></svg>'+escapeHtml(iconLabel(i))+'</div>').join('');
     const r=anchor.getBoundingClientRect();dropdown.style.left=Math.max(8,Math.min(innerWidth-220,r.left))+'px';dropdown.style.top=Math.min(innerHeight-290,r.bottom+4)+'px';dropdown.classList.add('open');
     qa('.dropdown-item',dropdown).forEach(it=>it.onclick=()=>{dropdown.classList.remove('open');onSelect(it.dataset.icon);});
   }
@@ -584,7 +671,7 @@
     qa('.nav-btn').forEach(b=>b.onclick=()=>{const n=b.dataset.nav;if(n==='map')hidePanels();else if(n==='layers'||n==='markers')openPanel(n);else if(n==='settings')openSettings();else if(n==='about')openModal(aboutModal);});
     qa('[data-panel-close]').forEach(b=>b.onclick=hidePanels);qa('[data-about-close]').forEach(b=>b.onclick=closeModal);qa('[data-editor-close]').forEach(b=>b.onclick=closeModal);qa('[data-modal-close]').forEach(b=>b.onclick=closeModal);
     qa('.settings-nav-item').forEach(el=>el.onclick=()=>activateSettingsPage(el.dataset.page));qa('.subtab').forEach(tab=>tab.onclick=()=>{qa('.subtab').forEach(x=>x.classList.remove('active'));tab.classList.add('active');qa('[data-subpage]').forEach(x=>x.classList.toggle('hidden',x.dataset.subpage!==tab.dataset.sub));});
-    qa('[data-switch][data-setting]').forEach(sw=>sw.onclick=()=>{const k=sw.dataset.setting;if(!Object.prototype.hasOwnProperty.call(settings,k))return;settings[k]=!settings[k];saveSettings();syncSwitches();scheduleRender();});
+    qa('[data-switch][data-setting]').forEach(sw=>sw.onclick=()=>{const k=sw.dataset.setting;if(!Object.prototype.hasOwnProperty.call(settings,k))return;settings[k]=!settings[k];syncSwitches();scheduleRender();saveSettings();});
     qa('[data-player-icon]').forEach(b=>b.onclick=()=>{settings.playerIcon=b.dataset.playerIcon;saveSettings();renderSettings();scheduleRender();});
     q('#playerSize').oninput=e=>{settings.playerSize=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#playerColor').oninput=e=>{settings.playerColor=e.target.value.toUpperCase();saveSettings();renderSettings();scheduleRender();};
     q('#markerScaleRange').oninput=e=>{settings.markerScale=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#markerDefaultColor').oninput=e=>{settings.markerDefaultColor=e.target.value.toUpperCase();saveSettings();renderSettings();};
@@ -602,7 +689,25 @@
     q('#markerTeleport').onclick=()=>{if(selectedMarker)teleport(selectedMarker.x,selectedMarker.z);closeContexts();};q('#ctxEdit').onclick=()=>{if(selectedMarker)openEditor(selectedMarker);};q('#ctxDelete').onclick=deleteOrReset;
     q('#addMarkerButton').onclick=async()=>{const x=Math.round(view.centerX),z=Math.round(view.centerZ);let p={x:x,y:serverState&&serverState.player?serverState.player.y:64,z:z};try{p=await queryPoint(x,z);}catch(_){}openEditor(null,p);};
     q('#saveMarkerButton').onclick=saveEditor;q('#deleteMarkerButton').onclick=deleteOrReset;q('#structureExpand').onclick=()=>q('#structureGroup').classList.toggle('expanded');
-    qa('.checkbox[data-toggle]').forEach(cb=>cb.onclick=()=>{const k=cb.dataset.toggle;settings[k]=!settings[k];saveSettings();renderLayerList();syncSwitches();scheduleRender();});
+    layersPanel.addEventListener('change',event=>{
+      const checkbox=event.target;
+      if(!checkbox.matches('input.checkbox'))return;
+      if(checkbox.dataset.structureFilter){
+        settings.structureFilters[checkbox.dataset.structureFilter]=checkbox.checked;
+      }else{
+        settings[checkbox.dataset.toggle]=checkbox.checked;
+      }
+      syncSwitches();
+      scheduleRender();
+      saveSettings();
+    });
+    q('#applyStructurePresets').onclick=applyStructurePresetChanges;
+    q('#resetStructurePresets').onclick=()=>{
+      structurePresetChanges.clear();
+      resetStructurePresets=true;
+      dropdown.classList.remove('open');
+      renderStructureSettings();
+    };
     q('#recolorCache').onclick=()=>{tileCache.clear();lastViewportSignature='';sendViewportSoon();scheduleRender();toast('浏览器成图缓存已清除，将从世界事实重新着色');};q('#clearGpuCache').onclick=()=>{tileCache.clear();lastViewportSignature='';sendViewportSoon();scheduleRender();toast('浏览器地图纹理缓存已清除');};q('#refreshAll').onclick=()=>{tileCache.clear();lastViewportSignature='';sendViewportSoon();scheduleRender();toast('当前视野将重新读取世界事实');};
     q('.window-close').onclick=()=>{window.close();setTimeout(()=>toast('可直接关闭此浏览器标签页'),80);};
     document.addEventListener('pointerdown',e=>{if(dropdown.classList.contains('open')&&!e.target.closest('#dropdown,.select,.structure-select'))dropdown.classList.remove('open');if(!e.target.closest('.context-menu,.map-marker'))closeContexts();});

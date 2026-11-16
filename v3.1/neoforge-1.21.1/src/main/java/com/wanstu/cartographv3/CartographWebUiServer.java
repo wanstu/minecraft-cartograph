@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -65,6 +66,9 @@ final class CartographWebUiServer implements AutoCloseable {
             Integer x,
             Integer y,
             Integer z) {}
+    private record StructurePresetChange(String icon, Integer color) {}
+    private record StructurePresetsPayload(
+            boolean reset, Map<String, StructurePresetChange> changes) {}
     private record ViewportPayload(
             double centerX,
             double centerZ,
@@ -389,14 +393,9 @@ final class CartographWebUiServer implements AutoCloseable {
         result.put(
                 "structurePresets",
                 java.util.Arrays.stream(MapMarkerStore.StructurePreset.values())
-                        .map(preset -> Map.of(
-                                "id", preset.name().toLowerCase(Locale.ROOT),
-                                "label", preset.label,
-                                "icon", preset.defaultIcon.name().toLowerCase(Locale.ROOT),
-                                "primaryColor", hex(preset.defaultPrimary),
-                                "accentColor", hex(preset.defaultAccent),
-                                "lineColor", hex(preset.defaultLine)))
+                        .map(CartographWebUiServer::structurePresetJson)
                         .toList());
+        result.put("structurePresetRevision", CartographSettings.structurePresetRevision());
         result.put("runtime", Map.of(
                 "cachedCount", backend.cachedCount(),
                 "pendingCount", backend.pendingCount(),
@@ -404,6 +403,45 @@ final class CartographWebUiServer implements AutoCloseable {
                 "liveScanIntervalTicks", CartographSettings.liveScanIntervalTicks(),
                 "frontendTarget", CartographSettings.frontendTarget().id()));
         return result;
+    }
+
+    private static Map<String, String> structurePresetJson(MapMarkerStore.StructurePreset preset) {
+        var appearance = CartographSettings.structureAppearance(preset);
+        String color = hex(appearance.color());
+        return Map.of(
+                "id", preset.name().toLowerCase(Locale.ROOT),
+                "label", preset.label,
+                "icon", appearance.icon().name().toLowerCase(Locale.ROOT),
+                "primaryColor", color,
+                "accentColor", color,
+                "lineColor", color,
+                "defaultIcon", preset.defaultIcon.name().toLowerCase(Locale.ROOT),
+                "defaultAccentColor", hex(preset.defaultAccent));
+    }
+
+    private static void updateStructurePresets(StructurePresetsPayload payload) throws IOException {
+        Map<MapMarkerStore.StructurePreset, CartographSettings.StructureAppearance> changes =
+                new EnumMap<>(MapMarkerStore.StructurePreset.class);
+        if (payload.changes() != null) {
+            for (var entry : payload.changes().entrySet()) {
+                var preset = MapMarkerStore.StructurePreset.valueOf(
+                        entry.getKey().toUpperCase(Locale.ROOT));
+                var change = entry.getValue();
+                if (change == null) throw new IllegalArgumentException("Missing structure preset change");
+
+                var current = payload.reset()
+                        ? new CartographSettings.StructureAppearance(preset.defaultIcon, preset.defaultAccent)
+                        : CartographSettings.structureAppearance(preset);
+                var icon = change.icon() == null ? current.icon()
+                        : MapMarkerStore.Icon.valueOf(change.icon().toUpperCase(Locale.ROOT));
+                int color = change.color() == null ? current.color() : change.color();
+                if (color < 0 || color > 0xffffff) {
+                    throw new IllegalArgumentException("Invalid structure preset color");
+                }
+                changes.put(preset, new CartographSettings.StructureAppearance(icon, color));
+            }
+        }
+        CartographSettings.updateStructurePresets(payload.reset(), changes);
     }
 
     private Map<String, Object> markerJson(MapMarkerStore.Marker marker) {
@@ -623,6 +661,7 @@ final class CartographWebUiServer implements AutoCloseable {
         private String lastLiveJson = "";
         private String lastWorldKey = "";
         private String lastMarkersSignature = "";
+        private long lastStructurePresetRevision;
         private long nextLiveAt;
         private long nextPingAt;
 
@@ -645,7 +684,7 @@ final class CartographWebUiServer implements AutoCloseable {
                 Map<String, Object> initial = onClient(CartographWebUiServer.this::stateSnapshot);
                 sendJson(Map.of("type", "state", "data", initial));
                 lastWorldKey = worldKey(initial);
-                lastMarkersSignature = markersSignature(initial);
+                rememberMarkerState(initial);
                 lastLiveJson = GSON.toJson(onClient(CartographWebUiServer.this::liveSnapshot));
                 nextLiveAt = now + 250L;
                 nextPingAt = now + 20_000L;
@@ -742,6 +781,19 @@ final class CartographWebUiServer implements AutoCloseable {
                         Map<String, Object> state =
                                 onClient(CartographWebUiServer.this::stateSnapshot);
                         sendJson(Map.of("type", "runtime", "data", state.get("runtime")));
+                        respond(id, true, Map.of("ok", true), null);
+                    }
+                    case "structure_presets" -> {
+                        var presets = payload(message, StructurePresetsPayload.class);
+                        onClient(() -> {
+                            try {
+                                updateStructurePresets(presets);
+                            } catch (IOException failure) {
+                                throw new java.io.UncheckedIOException(failure);
+                            }
+                            return null;
+                        });
+                        pushMarkersIfChanged();
                         respond(id, true, Map.of("ok", true), null);
                     }
                     case "marker_create" -> {
@@ -1004,6 +1056,9 @@ final class CartographWebUiServer implements AutoCloseable {
                 lastLiveJson = GSON.toJson(live);
                 return;
             }
+            if (lastStructurePresetRevision != CartographSettings.structurePresetRevision()) {
+                pushMarkersIfChanged();
+            }
             String serialized = GSON.toJson(live);
             if (!serialized.equals(lastLiveJson)) {
                 sendJson(Map.of("type", "live", "data", live));
@@ -1016,19 +1071,24 @@ final class CartographWebUiServer implements AutoCloseable {
                     onClient(CartographWebUiServer.this::stateSnapshot);
             sendJson(Map.of("type", "state", "data", state));
             lastWorldKey = worldKey(state);
+            rememberMarkerState(state);
+        }
+
+        private void rememberMarkerState(Map<String, Object> state) {
             lastMarkersSignature = markersSignature(state);
+            lastStructurePresetRevision = (long) state.get("structurePresetRevision");
         }
 
         private void pushMarkersIfChanged() {
             Map<String, Object> state =
                     onClient(CartographWebUiServer.this::stateSnapshot);
-            String signature = markersSignature(state);
-            if (signature.equals(lastMarkersSignature)) return;
+            String previous = lastMarkersSignature;
+            rememberMarkerState(state);
+            if (lastMarkersSignature.equals(previous)) return;
             Map<String, Object> data = new HashMap<>();
             data.put("markers", state.get("markers"));
             data.put("structurePresets", state.get("structurePresets"));
             sendJson(Map.of("type", "markers", "data", data));
-            lastMarkersSignature = signature;
         }
 
         private String markersSignature(Map<String, Object> state) {

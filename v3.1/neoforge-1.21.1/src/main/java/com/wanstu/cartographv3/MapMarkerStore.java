@@ -338,7 +338,9 @@ final class MapMarkerStore {
     static synchronized List<Marker> visible(String dimension) {
         List<Marker> out = new ArrayList<>();
         for (Marker marker : MARKERS.values()) {
-            if (!marker.deleted && Objects.equals(marker.dimension, dimension)) out.add(marker.copy());
+            if (!marker.deleted && Objects.equals(marker.dimension, dimension)) {
+                out.add(withStructureAppearance(marker));
+            }
         }
         return out;
     }
@@ -397,7 +399,22 @@ final class MapMarkerStore {
 
     static synchronized Optional<Marker> find(UUID id) {
         Marker marker = MARKERS.get(id);
-        return marker == null ? Optional.empty() : Optional.of(marker.copy());
+        return marker == null ? Optional.empty() : Optional.of(withStructureAppearance(marker));
+    }
+
+    private static Marker withStructureAppearance(Marker marker) {
+        Marker view = marker.copy();
+        if (!view.isAuto() || view.modifiedAuto) return view;
+
+        StructurePreset preset = structurePreset(view.structureId);
+        if (preset != null) {
+            var appearance = CartographSettings.structureAppearance(preset);
+            view.icon = appearance.icon();
+            view.primaryColor = appearance.color();
+            view.accentColor = appearance.color();
+            view.lineColor = appearance.color();
+        }
+        return view;
     }
 
     static synchronized void update(
