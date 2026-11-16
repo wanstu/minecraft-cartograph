@@ -29,6 +29,11 @@
   const MAX_REGION_CACHE = 48;
   const MIN_ZOOM = 0.0625;
   const MAX_ZOOM = 64;
+  const DRAW_TERRAIN = 1;
+  const DRAW_PLAYER = 2;
+  const DRAW_MARKERS = 4;
+  const DRAW_HUD = 8;
+  const DRAW_ALL = DRAW_TERRAIN | DRAW_PLAYER | DRAW_MARKERS | DRAW_HUD;
   const HIDDEN_BY_DEFAULT = new Set([
     'mineshaft','trial_chambers','ancient_city','stronghold','buried_treasure'
   ]);
@@ -57,11 +62,12 @@
   let selectedMarker = null;
   let editorMode = 'add';
   let currentEditorIcon = settings.markerDefaultIcon;
-  let renderQueued = false;
+  let queuedDraw = 0;
   let viewportTimer = 0;
   let cursorTimer = 0;
+  let cursorTarget = null;
+  let cursorRequestInFlight = false;
   let toastTimer = 0;
-  let lastPointKey = '';
   let socket = null;
   let socketRetryMs = 1000;
   let socketReconnectTimer = 0;
@@ -120,6 +126,7 @@
     current.onclose=()=>{
       if(socket!==current)return;
       socket=null;setConnection(false);
+      cancelCursorLookup();
       for(const [id,p] of pendingSocketRequests){clearTimeout(p.timer);p.reject(new Error('WebSocket disconnected'));pendingSocketRequests.delete(id);}
       socketReconnectTimer=setTimeout(connectSocket,socketRetryMs);
       socketRetryMs=Math.min(10000,socketRetryMs*2);
@@ -134,11 +141,13 @@
     if(message.type==='markers'&&serverState){
       serverState.markers=message.data&&message.data.markers||[];
       serverState.structurePresets=message.data&&message.data.structurePresets||[];
-      refreshStaticUi(false);renderStatus();scheduleRender();return;
+      refreshStaticUi(false);renderStatus();scheduleRender(DRAW_MARKERS);return;
     }
     if(message.type==='runtime'&&serverState){
       serverState.runtime=Object.assign({},serverState.runtime||{},message.data||{});
-      syncRuntimeSettings();renderStatus();return;
+      syncRuntimeSettings();renderStatus();
+      if(settings.debug)scheduleRender(DRAW_HUD);
+      return;
     }
     if(message.type==='response'){
       const id=String(message.id==null?'':message.id),pending=pendingSocketRequests.get(id);
@@ -157,6 +166,7 @@
     serverState=next;currentDimension=next.dimension||'';
     setConnection(!!next.connected);
     if(worldChanged){
+      cancelCursorLookup();
       lastWorldKey=nextWorldKey;tileCache.clear();regionCache.clear();
       markerUiSignature=null;presetUiSignature=null;lastViewportSignature='';
       viewInitialized=false;
@@ -173,14 +183,33 @@
       wsRequest('request_state').catch(()=>{});
       return;
     }
-    setConnection(!!live.connected);
-    currentDimension=live.dimension||currentDimension;
+    const wasConnected=!!serverState.connected;
+    const previousPlayer=serverState.player;
+    const previousRuntime=serverState.runtime;
     serverState.connected=!!live.connected;
     serverState.dimension=live.dimension||serverState.dimension;
     serverState.worldId=live.worldId||serverState.worldId;
+    currentDimension=live.dimension||currentDimension;
+    setConnection(serverState.connected);
     if(live.player)serverState.player=live.player;
-    if(live.runtime)serverState.runtime=Object.assign({},serverState.runtime||{},live.runtime);
-    renderStatus();scheduleRender();
+    if(live.runtime)serverState.runtime={...previousRuntime,...live.runtime};
+
+    if(previousRuntime?.cachedCount!==serverState.runtime?.cachedCount)renderStatus();
+    if(wasConnected!==serverState.connected){
+      cancelCursorLookup();
+      scheduleRender();
+      return;
+    }
+
+    const player=live.player;
+    if(player&&(player.present!==previousPlayer?.present||
+               player.x!==previousPlayer?.x||player.z!==previousPlayer?.z||
+               player.yaw!==previousPlayer?.yaw)){
+      scheduleRender(DRAW_PLAYER);
+    }
+    if(settings.debug&&previousRuntime?.pendingCount!==serverState.runtime?.pendingCount){
+      scheduleRender(DRAW_HUD);
+    }
   }
 
   function wsRequest(type,fields){
@@ -249,6 +278,7 @@
     canvas.height=Math.max(1,Math.round(s.height*dpr));
     canvas.style.width=s.width+'px'; canvas.style.height=s.height+'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    for(const marker of markerNodes.values())marker._labelLayout=null;
     scheduleRender();sendViewportSoon();
   }
   function resizeTransform(s){
@@ -281,12 +311,22 @@
     view.centerX=p.x;view.centerZ=p.z;lastViewportSignature='';saveView();scheduleRender();sendViewportSoon();toast('已回到玩家位置');
   }
 
-  function scheduleRender(){
-    if(renderQueued)return;renderQueued=true;
-    requestAnimationFrame(()=>{renderQueued=false;renderMap();});
+  function scheduleRender(flags=DRAW_ALL){
+    if(!queuedDraw)requestAnimationFrame(renderFrame);
+    queuedDraw|=flags;
   }
-  function renderMap(){
+  function renderFrame(){
+    const flags=queuedDraw;
+    queuedDraw=0;
+    if(flags&DRAW_HUD)renderHud();
+    if(!(flags&(DRAW_TERRAIN|DRAW_PLAYER|DRAW_MARKERS)))return;
+
     const s=stageSize();
+    if(flags&DRAW_TERRAIN)renderTerrain(s);
+    if(flags&DRAW_PLAYER)renderPlayer(s);
+    if(flags&DRAW_MARKERS)renderMarkers(s);
+  }
+  function renderTerrain(s){
     const dpr=resizeTransform(s);
     ctx.save();ctx.fillStyle='#17383c';ctx.fillRect(0,0,s.width,s.height);
     ctx.imageSmoothingEnabled=view.zoom<1;
@@ -311,9 +351,6 @@
     }
     if(settings.grid)drawChunkGrid(s.width,s.height);
     ctx.restore();
-    renderHud();
-    renderPlayer(s);
-    renderMarkers(s);
   }
 
   function atlasEdge(region,center,viewportSize,dpr){
@@ -375,9 +412,10 @@
     return region.key;
   }
   function clearTileFromRegion(tile,cx,cz){
-    if(!tile||!tile.regionKey)return;
-    const region=regionCache.get(tile.regionKey);if(!region)return;
+    if(!tile||!tile.regionKey)return false;
+    const region=regionCache.get(tile.regionKey);if(!region)return false;
     region.ctx.clearRect(floorMod(cx,REGION_CHUNKS)*TILE_SIZE,floorMod(cz,REGION_CHUNKS)*TILE_SIZE,TILE_SIZE,TILE_SIZE);
+    return true;
   }
   function applyTileBatch(buffer){
     if(!(buffer instanceof ArrayBuffer)||buffer.byteLength<8||!currentDimension)return;
@@ -386,6 +424,7 @@
     if(viewData.getUint32(offset)!==0x43544231)return;offset+=4;
     const count=viewData.getUint32(offset);offset+=4;if(count>512)return;
     const now=Date.now();
+    let terrainChanged=false;
     for(let n=0;n<count;n++){
       if(offset+15>viewData.byteLength)return;
       const cx=viewData.getInt32(offset);offset+=4;const cz=viewData.getInt32(offset);offset+=4;
@@ -396,7 +435,7 @@
       if(offset+bodyLen>viewData.byteLength)return;
       const key=tileKey(cx,cz),old=tileCache.get(key);
       if(status===0){
-        clearTileFromRegion(old,cx,cz);
+        if(clearTileFromRegion(old,cx,cz))terrainChanged=true;
         tileCache.set(key,{cx:cx,cz:cz,etag:'',checkedAt:now,missing:true});
       }else if(status===2){
         if(old){old.checkedAt=now;old.etag=etag;old.missing=false;}
@@ -405,9 +444,12 @@
         if(bodyLen!==TILE_SIZE*TILE_SIZE*3){offset+=bodyLen;continue;}
         const bytes=new Uint8Array(buffer,offset,bodyLen),rk=writeTileToRegion(cx,cz,bytes);offset+=bodyLen;
         tileCache.set(key,{cx:cx,cz:cz,regionKey:rk,etag:etag,checkedAt:now,missing:false});
+        terrainChanged=true;
       }else offset+=bodyLen;
     }
-    if(batchDimension===currentDimension)scheduleRender();
+    if(batchDimension!==currentDimension)return;
+    if(terrainChanged)scheduleRender(DRAW_TERRAIN);
+    if(settings.debug)scheduleRender(DRAW_HUD);
   }
 
   function renderPlayer(s){
@@ -466,12 +508,15 @@
       const label=el._label;
       label.style.display=showLabels?'':'none';
       const name=marker.name||iconLabel(marker.icon);
-      if(label.textContent!==name)label.textContent=name;
+      if(label.textContent!==name){
+        label.textContent=name;
+        el._labelLayout=null;
+      }
 
       if(avoidLabels){
         // Align the label order with the glyph stacking order.
         const priority=structure?(preset==='village'?1:2):0;
-        labelCandidates.push({id:marker.id,priority,label});
+        labelCandidates.push({id:marker.id,priority,el,pos,size});
       }else{
         label.classList.remove('occluded');
       }
@@ -486,8 +531,22 @@
     const occupied=new Map();
 
     candidates.sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
-    // Read all bounds together before writing visibility.
-    const placements=candidates.map(({label})=>({label,bounds:label.getBoundingClientRect()}));
+    // Measure only when the label or glyph size changes. Panning translates the measured box.
+    const placements=candidates.map(({el,pos,size})=>{
+      const label=el._label;
+      const x=viewport.left+pos.x;
+      const y=viewport.top+pos.y;
+      if(el._labelLayout?.size!==size){
+        const rect=label.getBoundingClientRect();
+        el._labelLayout={
+          size,offsetX:rect.left-x,offsetY:rect.top-y,width:rect.width,height:rect.height
+        };
+      }
+      const {offsetX,offsetY,width,height}=el._labelLayout;
+      const left=x+offsetX;
+      const top=y+offsetY;
+      return {label,bounds:{left,top,right:left+width,bottom:top+height}};
+    });
     for(const {label,bounds} of placements){
       if(bounds.right<=viewport.left||bounds.left>=viewport.right||
          bounds.bottom<=viewport.top||bounds.top>=viewport.bottom){
@@ -529,7 +588,7 @@
 
   function sendViewportSoon(){clearTimeout(viewportTimer);viewportTimer=setTimeout(sendViewport,80);}
   async function sendViewport(){
-    if(!serverState||!serverState.connected||!viewInitialized||!socket||socket.readyState!==WebSocket.OPEN)return;
+    if(dragging||!serverState?.connected||!viewInitialized||!socket||socket.readyState!==WebSocket.OPEN)return;
     if(viewportRequestInFlight){viewportRequestQueued=true;return;}
     const s=stageSize(),viewport={centerX:view.centerX,centerZ:view.centerZ,zoom:view.zoom,width:Math.round(s.width),height:Math.round(s.height)};
     const signature=[viewport.centerX,viewport.centerZ,viewport.zoom,viewport.width,viewport.height].join('|');
@@ -685,9 +744,45 @@
   }
 
   async function queryPoint(x,z){return wsRequest('point',{x:Math.round(x),z:Math.round(z)});}
+  function cancelCursorLookup(){
+    clearTimeout(cursorTimer);
+    cursorTimer=0;
+    cursorTarget=null;
+  }
   function updateCursor(clientX,clientY){
-    const p=screenToWorld(clientX,clientY),x=Math.round(p.x),z=Math.round(p.z),key=x+'|'+z;if(key===lastPointKey)return;lastPointKey=key;
-    q('#cursorCoords').textContent='X '+x+'　Z '+z;clearTimeout(cursorTimer);cursorTimer=setTimeout(async()=>{try{const info=await queryPoint(x,z);q('#cursorCoords').textContent='X '+info.x+'　Y '+info.y+'　Z '+info.z;q('#cursorBiome').textContent=String(info.biome||'群系：未加载').replace(/^群系：/,'');}catch(_){}},120);
+    const point=screenToWorld(clientX,clientY);
+    const x=Math.round(point.x);
+    const z=Math.round(point.z);
+    if(cursorTarget?.x===x&&cursorTarget.z===z)return;
+
+    clearTimeout(cursorTimer);
+    cursorTimer=0;
+    const target={x,z};
+    cursorTarget=target;
+    q('#cursorCoords').textContent='X '+x+'　Z '+z;
+    q('#cursorBiome').textContent='—';
+    if(dragging||!serverState?.connected)return;
+
+    cursorTimer=setTimeout(()=>{
+      cursorTimer=0;
+      lookupCursor(target);
+    },120);
+  }
+  async function lookupCursor(target){
+    if(cursorRequestInFlight||dragging||cursorTarget!==target||!serverState?.connected)return;
+    cursorRequestInFlight=true;
+    try{
+      const info=await queryPoint(target.x,target.z);
+      if(cursorTarget!==target)return;
+      q('#cursorCoords').textContent='X '+info.x+'　Y '+info.y+'　Z '+info.z;
+      q('#cursorBiome').textContent=String(info.biome||'群系：未加载').replace(/^群系：/,'');
+    }catch(_){
+      if(cursorTarget===target)q('#cursorBiome').textContent='未加载';
+    }finally{
+      cursorRequestInFlight=false;
+      // A newer hover may have finished its debounce while this request was in flight.
+      if(cursorTarget&&cursorTarget!==target&&!cursorTimer)lookupCursor(cursorTarget);
+    }
   }
   function positionMenu(menu,cx,cy){
     menu.style.display='block';const host=menu.offsetParent||app,hr=host.getBoundingClientRect(),r=menu.getBoundingClientRect();
@@ -781,9 +876,47 @@
     q('#requestRange').oninput=e=>{q('#requestValue').textContent=e.target.value;sendRuntime();};q('#scanRange').oninput=e=>{const v=Number(e.target.value);q('#scanValue').textContent=v+' tick / '+(v/20).toFixed(2)+' s';sendRuntime();};
     q('#zoomIn').onclick=()=>setZoom(view.zoom*1.25);q('#zoomOut').onclick=()=>setZoom(view.zoom/1.25);q('#locateBtn').onclick=centerPlayer;
     mapStage.addEventListener('wheel',e=>{if(e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box'))return;e.preventDefault();closeContexts();setZoom(e.deltaY<0?view.zoom*1.12:view.zoom/1.12,e.clientX,e.clientY);},{passive:false});
-    mapStage.addEventListener('pointerdown',e=>{if(e.button!==0||!settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker'))return;closeContexts();dragging=true;dragX=e.clientX;dragY=e.clientY;mapStage.classList.add('dragging');mapStage.setPointerCapture(e.pointerId);});
-    mapStage.addEventListener('pointermove',e=>{updateCursor(e.clientX,e.clientY);if(!dragging)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragX=e.clientX;dragY=e.clientY;view.centerX-=dx/view.zoom;view.centerZ-=dy/view.zoom;scheduleRender();});
-    mapStage.addEventListener('pointerup',()=>{if(dragging){dragging=false;mapStage.classList.remove('dragging');saveView();scheduleRender();sendViewportSoon();}});
+    mapStage.addEventListener('pointerdown',e=>{
+      if(e.button!==0||!settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker,.coord-box,.scale-box'))return;
+      closeContexts();
+      cancelCursorLookup();
+      dragging=true;
+      dragX=e.clientX;
+      dragY=e.clientY;
+      updateCursor(dragX,dragY);
+      mapStage.classList.add('dragging');
+      mapStage.setPointerCapture(e.pointerId);
+    });
+    mapStage.addEventListener('pointermove',e=>{
+      if(!dragging){
+        if(e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box')){
+          cancelCursorLookup();
+        }else{
+          updateCursor(e.clientX,e.clientY);
+        }
+        return;
+      }
+      const dx=e.clientX-dragX;
+      const dy=e.clientY-dragY;
+      dragX=e.clientX;
+      dragY=e.clientY;
+      view.centerX-=dx/view.zoom;
+      view.centerZ-=dy/view.zoom;
+      scheduleRender();
+    });
+    const finishDrag=e=>{
+      if(!dragging)return;
+      dragging=false;
+      mapStage.classList.remove('dragging');
+      saveView();
+      sendViewportSoon();
+      cancelCursorLookup();
+      if(e.type==='pointerup')updateCursor(e.clientX,e.clientY);
+    };
+    mapStage.addEventListener('pointerup',finishDrag);
+    mapStage.addEventListener('pointercancel',finishDrag);
+    mapStage.addEventListener('lostpointercapture',finishDrag);
+    mapStage.addEventListener('pointerleave',()=>{if(!dragging)cancelCursorLookup();});
     mapStage.addEventListener('contextmenu',e=>{if(e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker'))return;e.preventDefault();openMapContext(e.clientX,e.clientY);});
     q('#ctxAdd').onclick=()=>openEditor(null,contextPoint);q('#ctxTeleport').onclick=()=>{if(contextPoint)teleport(contextPoint.x,contextPoint.z);closeContexts();};q('#ctxCopy').onclick=async()=>{if(!contextPoint)return;const t=contextPoint.x+', '+(contextPoint.y==null?'':contextPoint.y)+', '+contextPoint.z;try{await navigator.clipboard.writeText(t);}catch(_){}toast('已复制坐标：'+t);closeContexts();};
     q('#markerTeleport').onclick=()=>{if(selectedMarker)teleport(selectedMarker.x,selectedMarker.z);closeContexts();};q('#ctxEdit').onclick=()=>{if(selectedMarker)openEditor(selectedMarker);};q('#ctxDelete').onclick=deleteOrReset;
