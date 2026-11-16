@@ -24,9 +24,15 @@
   const LOCAL_KEY = 'cartograph-v31-webui-settings-v1';
   const VIEW_KEY = 'cartograph-v31-webui-view-v1';
   const TILE_SIZE = 16;
+  const REGION_CHUNKS = 32;
+  const REGION_PIXELS = TILE_SIZE * REGION_CHUNKS;
+  const TILE_BATCH_SIZE = 96;
+  const MAX_REGION_CACHE = 48;
+  const MISSING_RETRY_MS = 2000;
+  const TILE_RECHECK_MS = 10000;
+  const ERROR_RETRY_MS = 3000;
   const MIN_ZOOM = 0.0625;
   const MAX_ZOOM = 64;
-  const MAX_TILE_REQUESTS = 24;
 
   const defaults = {
     showCoords:true, playerRing:true, labels:true, custom:true, structures:true,
@@ -58,11 +64,17 @@
   let stateTimer = 0;
   let toastTimer = 0;
   let lastPointKey = '';
+  let sessionEvents = null;
+  let markerUiSignature = null;
+  let presetUiSignature = null;
 
   const tileCache = new Map();
+  const regionCache = new Map();
   const tileQueue = [];
   const tileQueued = new Set();
-  let activeTileRequests = 0;
+  const markerNodes = new Map();
+  let tileBatchActive = false;
+  let regionClock = 0;
 
   function clone(v){ return JSON.parse(JSON.stringify(v)); }
   function loadJson(key, fallback){
@@ -78,6 +90,12 @@
     localStorage.setItem(VIEW_KEY, JSON.stringify({
       worldKey:worldKey(serverState), centerX:view.centerX, centerZ:view.centerZ, zoom:view.zoom
     }));
+  }
+
+  function openSessionChannel(){
+    if(!token || !window.EventSource)return;
+    if(sessionEvents)sessionEvents.close();
+    sessionEvents=new EventSource('/api/v1/session?token='+encodeURIComponent(token));
   }
 
   async function api(path, options){
@@ -143,7 +161,7 @@
     canvas.height=Math.max(1,Math.round(s.height*dpr));
     canvas.style.width=s.width+'px'; canvas.style.height=s.height+'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    scheduleRender(); sendViewportSoon();
+    resetTileQueue();scheduleRender();sendViewportSoon();
   }
   function resizeTransform(){
     const s=stageSize(), dpr=Math.max(1,window.devicePixelRatio||1);
@@ -168,11 +186,11 @@
     const wx=view.centerX+(sx-s.width*.5)/view.zoom;
     const wz=view.centerZ+(sy-s.height*.5)/view.zoom;
     view.centerX=wx-(sx-s.width*.5)/next; view.centerZ=wz-(sy-s.height*.5)/next; view.zoom=next;
-    saveView(); scheduleRender(); sendViewportSoon();
+    resetTileQueue();saveView();scheduleRender();sendViewportSoon();
   }
   function centerPlayer(){
     const p=serverState&&serverState.player;if(!p||!p.present)return;
-    view.centerX=p.x;view.centerZ=p.z;saveView();scheduleRender();sendViewportSoon();toast('已回到玩家位置');
+    view.centerX=p.x;view.centerZ=p.z;resetTileQueue();saveView();scheduleRender();sendViewportSoon();toast('已回到玩家位置');
   }
 
   function scheduleRender(){
@@ -188,44 +206,99 @@
       const hx=s.width/(2*view.zoom),hz=s.height/(2*view.zoom);
       const minX=Math.floor((view.centerX-hx)/16)-1,maxX=Math.floor((view.centerX+hx)/16)+1;
       const minZ=Math.floor((view.centerZ-hz)/16)-1,maxZ=Math.floor((view.centerZ+hz)/16)+1;
-      const now=Date.now();
-      for(let cz=minZ;cz<=maxZ;cz++)for(let cx=minX;cx<=maxX;cx++){
-        const key=tileKey(cx,cz),tile=tileCache.get(key);
-        const x=s.width*.5+(cx*16-view.centerX)*view.zoom;
-        const y=s.height*.5+(cz*16-view.centerZ)*view.zoom;
-        const size=16*view.zoom;
-        if(tile&&tile.canvas)ctx.drawImage(tile.canvas,x,y,size,size);
-        if(!tile || (now>=(tile.retryAt||0) && (!tile.checkedAt||now-tile.checkedAt>2500)))enqueueTile(cx,cz);
+      const minRx=Math.floor(minX/REGION_CHUNKS),maxRx=Math.floor(maxX/REGION_CHUNKS);
+      const minRz=Math.floor(minZ/REGION_CHUNKS),maxRz=Math.floor(maxZ/REGION_CHUNKS);
+      for(let rz=minRz;rz<=maxRz;rz++)for(let rx=minRx;rx<=maxRx;rx++){
+        const region=regionCache.get(regionKey(rx,rz));if(!region)continue;
+        region.lastUse=++regionClock;
+        const x=s.width*.5+(rx*REGION_CHUNKS*TILE_SIZE-view.centerX)*view.zoom;
+        const y=s.height*.5+(rz*REGION_CHUNKS*TILE_SIZE-view.centerZ)*view.zoom;
+        const size=REGION_PIXELS*view.zoom;
+        ctx.drawImage(region.canvas,x,y,size,size);
+      }
+      if(!dragging){
+        const now=Date.now();
+        for(let cz=minZ;cz<=maxZ;cz++)for(let cx=minX;cx<=maxX;cx++){
+          const tile=tileCache.get(tileKey(cx,cz));
+          if(!tile || now>=(tile.retryAt||0))enqueueTile(cx,cz);
+        }
       }
     }
     ctx.restore();renderPlayer();renderMarkers();renderHud();
   }
 
   function tileKey(x,z){return currentDimension+'|'+x+'|'+z;}
+  function regionKey(rx,rz){return currentDimension+'|r|'+rx+'|'+rz;}
+  function floorMod(value,mod){return ((value%mod)+mod)%mod;}
+  function ensureRegion(cx,cz){
+    const rx=Math.floor(cx/REGION_CHUNKS),rz=Math.floor(cz/REGION_CHUNKS),key=regionKey(rx,rz);
+    let region=regionCache.get(key);
+    if(!region){
+      const c=document.createElement('canvas');c.width=REGION_PIXELS;c.height=REGION_PIXELS;
+      const rc=c.getContext('2d',{alpha:true});rc.imageSmoothingEnabled=false;
+      region={key:key,rx:rx,rz:rz,canvas:c,ctx:rc,lastUse:++regionClock};
+      regionCache.set(key,region);evictRegions();
+    }else region.lastUse=++regionClock;
+    return region;
+  }
+  function evictRegions(){
+    while(regionCache.size>MAX_REGION_CACHE){
+      let oldest=null;
+      for(const region of regionCache.values())if(!oldest||region.lastUse<oldest.lastUse)oldest=region;
+      if(!oldest)return;
+      regionCache.delete(oldest.key);
+      for(const [key,tile] of tileCache)if(tile.regionKey===oldest.key)tileCache.delete(key);
+    }
+  }
+  function writeTileToRegion(cx,cz,bytes){
+    const region=ensureRegion(cx,cz),image=new ImageData(TILE_SIZE,TILE_SIZE);
+    for(let i=0;i<TILE_SIZE*TILE_SIZE;i++){
+      image.data[i*4]=bytes[i*3];image.data[i*4+1]=bytes[i*3+1];image.data[i*4+2]=bytes[i*3+2];image.data[i*4+3]=255;
+    }
+    region.ctx.putImageData(image,floorMod(cx,REGION_CHUNKS)*TILE_SIZE,floorMod(cz,REGION_CHUNKS)*TILE_SIZE);
+    return region.key;
+  }
+  function resetTileQueue(){tileQueue.length=0;tileQueued.clear();}
   function enqueueTile(cx,cz){
     const key=tileKey(cx,cz);if(tileQueued.has(key))return;
     tileQueued.add(key);tileQueue.push({cx:cx,cz:cz,key:key});pumpTiles();
   }
   function pumpTiles(){
-    while(activeTileRequests<MAX_TILE_REQUESTS&&tileQueue.length){
-      const job=tileQueue.shift();tileQueued.delete(job.key);activeTileRequests++;
-      fetchTile(job).finally(()=>{activeTileRequests--;pumpTiles();});
-    }
+    if(tileBatchActive||!tileQueue.length)return;
+    const jobs=tileQueue.splice(0,TILE_BATCH_SIZE);jobs.forEach(job=>tileQueued.delete(job.key));
+    tileBatchActive=true;
+    fetchTileBatch(jobs).finally(()=>{tileBatchActive=false;pumpTiles();});
   }
-  async function fetchTile(job){
-    const old=tileCache.get(job.key),headers={};if(old&&old.etag)headers['If-None-Match']=old.etag;
+  async function fetchTileBatch(jobs){
+    const batchDimension=currentDimension;
+    const payload={tiles:jobs.map(job=>{const old=tileCache.get(job.key);return{x:job.cx,z:job.cz,etag:old&&old.etag||''};})};
     try{
-      const r=await api('/api/v1/tile?x='+job.cx+'&z='+job.cz,{headers:headers});
-      const now=Date.now();
-      if(r.status===304&&old){old.checkedAt=now;return;}
-      if(r.status===204){tileCache.set(job.key,Object.assign({},old||{},{checkedAt:now,retryAt:now+800}));return;}
-      const bytes=new Uint8Array(await r.arrayBuffer());if(bytes.length!==768)return;
-      const image=new ImageData(16,16);
-      for(let i=0;i<256;i++){image.data[i*4]=bytes[i*3];image.data[i*4+1]=bytes[i*3+1];image.data[i*4+2]=bytes[i*3+2];image.data[i*4+3]=255;}
-      const c=document.createElement('canvas');c.width=16;c.height=16;c.getContext('2d').putImageData(image,0,0);
-      tileCache.set(job.key,{canvas:c,etag:r.headers.get('ETag')||'',checkedAt:now,retryAt:now+2500});scheduleRender();
+      const r=await api('/api/v1/tiles',{method:'POST',body:JSON.stringify(payload)});
+      const buffer=await r.arrayBuffer();if(batchDimension!==currentDimension)return;
+      const viewData=new DataView(buffer),decoder=new TextDecoder();
+      let offset=0;
+      if(viewData.byteLength<8||viewData.getUint32(offset)!==0x43544231)throw new Error('bad tile batch');offset+=4;
+      const count=viewData.getUint32(offset);offset+=4;const now=Date.now();
+      for(let n=0;n<count;n++){
+        const cx=viewData.getInt32(offset);offset+=4;const cz=viewData.getInt32(offset);offset+=4;
+        const status=viewData.getUint8(offset);offset+=1;const tagLen=viewData.getUint16(offset);offset+=2;
+        const etag=tagLen?decoder.decode(new Uint8Array(buffer,offset,tagLen)):'';offset+=tagLen;
+        const bodyLen=viewData.getUint32(offset);offset+=4;const key=tileKey(cx,cz),old=tileCache.get(key);
+        if(status===0){
+          tileCache.set(key,Object.assign({},old||{cx:cx,cz:cz},{checkedAt:now,retryAt:now+MISSING_RETRY_MS}));
+        }else if(status===2){
+          if(old){old.checkedAt=now;old.retryAt=now+TILE_RECHECK_MS;if(etag)old.etag=etag;}
+          offset+=bodyLen;
+        }else if(status===1){
+          if(bodyLen!==TILE_SIZE*TILE_SIZE*3){offset+=bodyLen;continue;}
+          const bytes=new Uint8Array(buffer,offset,bodyLen),rk=writeTileToRegion(cx,cz,bytes);offset+=bodyLen;
+          tileCache.set(key,{cx:cx,cz:cz,regionKey:rk,etag:etag,checkedAt:now,retryAt:now+TILE_RECHECK_MS});
+        }else offset+=bodyLen;
+      }
+      scheduleRender();
     }catch(_){
-      const now=Date.now();tileCache.set(job.key,Object.assign({},old||{},{checkedAt:now,retryAt:now+1500}));
+      const now=Date.now();
+      jobs.forEach(job=>{const old=tileCache.get(job.key);tileCache.set(job.key,Object.assign({},old||{cx:job.cx,cz:job.cz},{checkedAt:now,retryAt:now+ERROR_RETRY_MS}));});
     }
   }
 
@@ -244,25 +317,40 @@
     const ring=Math.max(64,size*3.2);playerRingEl.style.left=pos.x+'px';playerRingEl.style.top=pos.y+'px';playerRingEl.style.width=ring+'px';playerRingEl.style.height=ring+'px';
   }
   function renderMarkers(){
-    const markers=serverState&&serverState.markers||[],s=stageSize();markerLayer.innerHTML='';
+    const markers=serverState&&serverState.markers||[],s=stageSize(),activeIds=new Set();
     const showLabels=settings.labels&&!(settings.hideLabelsLowZoom&&view.zoom<.25);
     const factor=Math.pow(Math.max(.15,Math.min(4,view.zoom)),.2*(settings.markerScale/100));
     markers.forEach(marker=>{
+      activeIds.add(marker.id);
+      let el=markerNodes.get(marker.id);
+      if(!el){
+        el=document.createElement('div');el.dataset.markerId=marker.id;
+        el.innerHTML='<svg class="glyph icon"><use/></svg><div class="marker-label"></div>';
+        el._glyph=q('.glyph',el);el._use=q('use',el);el._label=q('.marker-label',el);
+        el.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();const m=el._marker;if(m){selectedMarker=m;openMarkerContext(m,e.clientX,e.clientY);}});
+        el.addEventListener('dblclick',e=>{e.preventDefault();const m=el._marker;if(m)openEditor(m);});
+        markerLayer.appendChild(el);markerNodes.set(marker.id,el);
+      }
+      el._marker=marker;
+      let allowed=true;
       if(marker.kind==='structure'){
-        if(!settings.structures)return;
-        if(marker.preset&&settings.structureFilters[marker.preset]===false)return;
-      }else if(!settings.custom)return;
-      const pos=worldToScreen(marker.x,marker.z);if(pos.x<-80||pos.x>s.width+80||pos.y<-80||pos.y>s.height+80)return;
-      const el=document.createElement('div');el.className='map-marker '+(marker.kind==='structure'?'structure':'custom');
-      el.dataset.markerId=marker.id;el.style.left=pos.x+'px';el.style.top=pos.y+'px';
+        if(!settings.structures)allowed=false;
+        if(marker.preset&&settings.structureFilters[marker.preset]===false)allowed=false;
+      }else if(!settings.custom)allowed=false;
+      const pos=worldToScreen(marker.x,marker.z);
+      if(pos.x<-80||pos.x>s.width+80||pos.y<-80||pos.y>s.height+80)allowed=false;
+      if(!allowed){el.style.display='none';return;}
+      el.style.display='';
+      const cls='map-marker '+(marker.kind==='structure'?'structure':'custom');if(el.className!==cls)el.className=cls;
+      el.style.transform='translate3d('+pos.x+'px,'+pos.y+'px,0) translate(-50%,-50%)';
       el.style.color=marker.accentColor||(marker.kind==='structure'?'#FFFFFF':settings.markerDefaultColor);
       const size=Math.max(15,Math.min(48,(marker.kind==='structure'?27:settings.markerDefaultSize)*factor));
-      el.innerHTML='<svg class="glyph icon" style="width:'+size+'px;height:'+size+'px"><use href="#'+iconSymbol(marker.icon)+'"/></svg>'+
-        '<div class="marker-label" style="'+(showLabels?'':'display:none')+'">'+escapeHtml(marker.name||iconLabel(marker.icon))+'</div>';
-      el.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();selectedMarker=marker;openMarkerContext(marker,e.clientX,e.clientY);});
-      el.addEventListener('dblclick',e=>{e.preventDefault();openEditor(marker);});
-      markerLayer.appendChild(el);
+      el._glyph.style.width=size+'px';el._glyph.style.height=size+'px';
+      const href='#'+iconSymbol(marker.icon);if(el._use.getAttribute('href')!==href)el._use.setAttribute('href',href);
+      el._label.style.display=showLabels?'':'none';
+      const label=marker.name||iconLabel(marker.icon);if(el._label.textContent!==label)el._label.textContent=label;
     });
+    for(const [id,el] of markerNodes)if(!activeIds.has(id)){el.remove();markerNodes.delete(id);}
   }
   function renderHud(){
     q('#zoomText').textContent=Math.round(view.zoom*100)+'%';
@@ -284,16 +372,42 @@
     else if(next.player&&next.player.present)view={centerX:next.player.x,centerZ:next.player.z,zoom:2};
     viewInitialized=true;
   }
+  function markerSignature(markers){
+    return (markers||[]).map(m=>[
+      m.id,m.kind,m.x,m.y,m.z,m.name,m.icon,m.accentColor,m.primaryColor,m.lineColor,
+      m.description,m.preset,m.modifiedAuto
+    ].join(':')).join('|');
+  }
+  function presetSignature(presets){
+    return (presets||[]).map(p=>[p.id,p.label,p.icon,p.primaryColor,p.accentColor,p.lineColor].join(':')).join('|');
+  }
+  function refreshStaticUi(force){
+    const ms=markerSignature(serverState&&serverState.markers);
+    if(force||ms!==markerUiSignature){
+      markerUiSignature=ms;renderLayerList();renderMarkerList();
+    }
+    const ps=presetSignature(serverState&&serverState.structurePresets);
+    if(force||ps!==presetUiSignature){
+      presetUiSignature=ps;renderStructureSettings();
+    }
+  }
   async function pollState(){
     try{
-      const r=await api('/api/v1/state');const next=await r.json();setConnection(!!next.connected);serverState=next;currentDimension=next.dimension||'';
-      const wk=worldKey(next);if(wk!==lastWorldKey){lastWorldKey=wk;tileCache.clear();tileQueue.length=0;tileQueued.clear();initView(next);}else if(!viewInitialized)initView(next);
-      renderStatus();renderLayerList();renderMarkerList();renderStructureSettings();syncRuntimeSettings();scheduleRender();sendViewportSoon();
+      const r=await api('/api/v1/state');const next=await r.json();setConnection(!!next.connected);
+      const wk=worldKey(next),worldChanged=wk!==lastWorldKey;serverState=next;currentDimension=next.dimension||'';
+      let viewportChanged=false;
+      if(worldChanged){
+        lastWorldKey=wk;tileCache.clear();regionCache.clear();resetTileQueue();markerUiSignature=null;presetUiSignature=null;
+        initView(next);viewportChanged=true;
+      }else if(!viewInitialized){initView(next);viewportChanged=true;}
+      renderStatus();refreshStaticUi(false);syncRuntimeSettings();scheduleRender();
+      if(viewportChanged)sendViewportSoon();
     }catch(_){setConnection(false);}
-    clearTimeout(stateTimer);stateTimer=setTimeout(pollState,500);
+    clearTimeout(stateTimer);stateTimer=setTimeout(pollState,750);
   }
   async function pollStateOnce(){
-    const r=await api('/api/v1/state');serverState=await r.json();currentDimension=serverState.dimension||'';renderStatus();renderLayerList();renderMarkerList();renderStructureSettings();scheduleRender();
+    const r=await api('/api/v1/state');serverState=await r.json();currentDimension=serverState.dimension||'';
+    renderStatus();refreshStaticUi(false);syncRuntimeSettings();scheduleRender();
   }
   function renderStatus(){
     const markers=serverState&&serverState.markers||[],structures=markers.filter(m=>m.kind==='structure').length,custom=markers.length-structures;
@@ -423,9 +537,9 @@
     q('#requestRange').oninput=e=>{q('#requestValue').textContent=e.target.value;sendRuntime();};q('#scanRange').oninput=e=>{const v=Number(e.target.value);q('#scanValue').textContent=v+' tick / '+(v/20).toFixed(2)+' s';sendRuntime();};
     q('#zoomIn').onclick=()=>setZoom(view.zoom*1.25);q('#zoomOut').onclick=()=>setZoom(view.zoom/1.25);q('#locateBtn').onclick=centerPlayer;
     mapStage.addEventListener('wheel',e=>{if(e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box'))return;e.preventDefault();closeContexts();setZoom(e.deltaY<0?view.zoom*1.12:view.zoom/1.12,e.clientX,e.clientY);},{passive:false});
-    mapStage.addEventListener('pointerdown',e=>{if(e.button!==0||!settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker'))return;closeContexts();dragging=true;dragX=e.clientX;dragY=e.clientY;mapStage.classList.add('dragging');mapStage.setPointerCapture(e.pointerId);});
-    mapStage.addEventListener('pointermove',e=>{updateCursor(e.clientX,e.clientY);if(!dragging)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragX=e.clientX;dragY=e.clientY;view.centerX-=dx/view.zoom;view.centerZ-=dy/view.zoom;scheduleRender();sendViewportSoon();});
-    mapStage.addEventListener('pointerup',()=>{if(dragging){dragging=false;mapStage.classList.remove('dragging');saveView();sendViewportSoon();}});
+    mapStage.addEventListener('pointerdown',e=>{if(e.button!==0||!settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker'))return;closeContexts();resetTileQueue();dragging=true;dragX=e.clientX;dragY=e.clientY;mapStage.classList.add('dragging');mapStage.setPointerCapture(e.pointerId);});
+    mapStage.addEventListener('pointermove',e=>{updateCursor(e.clientX,e.clientY);if(!dragging)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragX=e.clientX;dragY=e.clientY;view.centerX-=dx/view.zoom;view.centerZ-=dy/view.zoom;scheduleRender();});
+    mapStage.addEventListener('pointerup',()=>{if(dragging){dragging=false;mapStage.classList.remove('dragging');saveView();scheduleRender();sendViewportSoon();}});
     mapStage.addEventListener('contextmenu',e=>{if(e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker'))return;e.preventDefault();openMapContext(e.clientX,e.clientY);});
     q('#ctxAdd').onclick=()=>openEditor(null,contextPoint);q('#ctxTeleport').onclick=()=>{if(contextPoint)teleport(contextPoint.x,contextPoint.z);closeContexts();};q('#ctxCopy').onclick=async()=>{if(!contextPoint)return;const t=contextPoint.x+', '+(contextPoint.y==null?'':contextPoint.y)+', '+contextPoint.z;try{await navigator.clipboard.writeText(t);}catch(_){}toast('已复制坐标：'+t);closeContexts();};
     q('#markerTeleport').onclick=()=>{if(selectedMarker)teleport(selectedMarker.x,selectedMarker.z);closeContexts();};q('#ctxEdit').onclick=()=>{if(selectedMarker)openEditor(selectedMarker);};q('#ctxDelete').onclick=deleteOrReset;
@@ -440,5 +554,5 @@
   }
 
   new ResizeObserver(resizeCanvas).observe(mapStage);
-  patchCopy();bind();renderSettings();renderHud();resizeCanvas();setConnection(false);app.dataset.webui='loaded';pollState();
+  patchCopy();bind();renderSettings();renderHud();resizeCanvas();setConnection(false);app.dataset.webui='loaded';openSessionChannel();pollState();
 })();

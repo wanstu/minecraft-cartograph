@@ -88,9 +88,21 @@ tasks.register('verifyV31WebUiBoundary') {
 
         def client = file(
             'src/main/java/com/wanstu/cartographv3/CartographV3Client.java').text
-        if (client.contains('setScreen(')) {
+        if (client.contains('CartographWebUiServer')
+                || client.contains('openInBrowser(')) {
             throw new GradleException(
-                'V3.1 M shortcut must open WebUI, not a Minecraft Screen')
+                'M shortcut must not be coupled directly to the WebUI implementation')
+        }
+        if (!client.contains('openConfiguredFrontend()')) {
+            throw new GradleException(
+                'M shortcut must route through the backend-controlled frontend router')
+        }
+
+        def webBridge = file(
+            'src/main/java/com/wanstu/cartographv3/CartographWebUiServer.java').text
+        if (webBridge.contains('new MinecraftCartographBackend(')) {
+            throw new GradleException(
+                'WebUI transport must use the shared injected backend, not create its own')
         }
 
         def store = file(

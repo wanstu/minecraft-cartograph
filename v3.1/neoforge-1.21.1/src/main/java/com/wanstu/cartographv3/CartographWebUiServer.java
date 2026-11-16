@@ -10,6 +10,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -27,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
@@ -41,6 +43,8 @@ final class CartographWebUiServer implements AutoCloseable {
             org.slf4j.LoggerFactory.getLogger("cartograph.v3.webui");
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final int MAX_BODY = 1_048_576;
+    private static final long STARTUP_GRACE_MILLIS = 30_000L;
+    private static final long IDLE_RELEASE_MILLIS = 10_000L;
 
     private record CachedTile(long fingerprint, long styleSignature, byte[] rgb24) {}
     private record MarkerPayload(
@@ -59,12 +63,18 @@ final class CartographWebUiServer implements AutoCloseable {
             double zoom,
             int width,
             int height) {}
+    private record TileBatchItem(int x, int z, String etag) {}
+    private record TileBatchPayload(List<TileBatchItem> tiles) {}
     private record RuntimeSettingsPayload(
             Integer requestBatchSize,
-            Integer liveScanIntervalTicks) {}
+            Integer liveScanIntervalTicks,
+            String frontendTarget) {}
     private record PointPayload(int x, int z) {}
 
-    private final MinecraftCartographBackend backend = new MinecraftCartographBackend();
+    private static final String FRONTEND_SESSION = "web";
+
+    private final CartographBackendRuntime backendRuntime;
+    private final CartographBackendApi backend;
     private final Map<ChunkKey, CachedTile> renderedTiles = new java.util.concurrent.ConcurrentHashMap<>();
     private final ExecutorService clients = Executors.newCachedThreadPool(task -> {
         Thread thread = new Thread(task, "cartograph-webui-http");
@@ -76,15 +86,24 @@ final class CartographWebUiServer implements AutoCloseable {
     private Thread acceptThread;
     private volatile boolean running;
     private volatile long lastClientActivityMillis;
+    private volatile long startupGraceUntilMillis;
+    private final AtomicInteger activeWebSessions = new AtomicInteger();
     private String token;
     private ClientLevel backendWorld;
     private boolean backendOpen;
     private boolean pauseOverrideActive;
     private boolean previousPauseOnLostFocus;
 
+    CartographWebUiServer(CartographBackendRuntime backendRuntime) {
+        this.backendRuntime = backendRuntime;
+        this.backend = backendRuntime.api();
+    }
+
     synchronized String openInBrowser() {
         start();
-        lastClientActivityMillis = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        lastClientActivityMillis = now;
+        startupGraceUntilMillis = now + STARTUP_GRACE_MILLIS;
         ensureBackendWorld();
         keepSingleplayerRunningWhileWebUiActive();
         String url = baseUrl() + "/?token=" + token;
@@ -114,17 +133,25 @@ final class CartographWebUiServer implements AutoCloseable {
 
     void tick() {
         if (!running) return;
-        long idleMillis = System.currentTimeMillis() - lastClientActivityMillis;
-        if (lastClientActivityMillis > 0L && idleMillis > 10_000L) {
+        if (activeWebSessions.get() > 0) {
+            ensureBackendWorld();
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now < startupGraceUntilMillis) {
+            ensureBackendWorld();
+            return;
+        }
+        long idleMillis = now - lastClientActivityMillis;
+        if (lastClientActivityMillis > 0L && idleMillis > IDLE_RELEASE_MILLIS) {
             if (backendOpen) {
-                backend.close();
+                backendRuntime.release(FRONTEND_SESSION);
                 backendOpen = false;
             }
             restorePauseOnLostFocus();
             return;
         }
         ensureBackendWorld();
-        if (backendOpen) backend.tick();
     }
 
     boolean running() {
@@ -136,7 +163,7 @@ final class CartographWebUiServer implements AutoCloseable {
         ClientLevel next = minecraft.level;
         if (backendWorld != next) {
             if (backendOpen) {
-                backend.close();
+                backendRuntime.release(FRONTEND_SESSION);
                 backendOpen = false;
             }
             restorePauseOnLostFocus();
@@ -146,7 +173,7 @@ final class CartographWebUiServer implements AutoCloseable {
 
         if (next != null && !backendOpen) {
             SatelliteSurfaceRenderer.beginMapSession();
-            backend.open();
+            backendRuntime.acquire(FRONTEND_SESSION);
             backendOpen = true;
         }
         if (next != null && backendOpen) {
@@ -278,6 +305,7 @@ final class CartographWebUiServer implements AutoCloseable {
             }
 
             lastClientActivityMillis = System.currentTimeMillis();
+            startupGraceUntilMillis = 0L;
             route(output, method, uri, headers, body);
         } catch (Exception failure) {
             LOG.debug("Cartograph WebUI request failed", failure);
@@ -292,6 +320,11 @@ final class CartographWebUiServer implements AutoCloseable {
             byte[] body) throws Exception {
         String path = uri.getPath();
         Map<String, String> query = query(uri);
+
+        if ("GET".equals(method) && "/api/v1/session".equals(path)) {
+            streamSession(output);
+            return;
+        }
 
         if ("GET".equals(method) && "/api/v1/health".equals(path)) {
             json(output, 200, Map.of("ok", true, "version", "v3.1-webui"));
@@ -319,6 +352,20 @@ final class CartographWebUiServer implements AutoCloseable {
                 return null;
             });
             json(output, 200, Map.of("ok", true));
+            return;
+        }
+
+        if ("POST".equals(method) && "/api/v1/tiles".equals(path)) {
+            TileBatchPayload payload = GSON.fromJson(
+                    new String(body, StandardCharsets.UTF_8), TileBatchPayload.class);
+            byte[] packed = onClient(() -> tileBatch(payload));
+            writeResponse(
+                    output, 200, "OK",
+                    "application/vnd.cartograph.tilepack-v1",
+                    packed,
+                    Map.of(
+                            "Cache-Control", "no-store",
+                            "X-Cartograph-Tile-Size", Integer.toString(SurfaceTile.SIZE)));
             return;
         }
 
@@ -381,6 +428,10 @@ final class CartographWebUiServer implements AutoCloseable {
                 }
                 if (payload.liveScanIntervalTicks() != null) {
                     backend.setLiveScanInterval(payload.liveScanIntervalTicks());
+                }
+                if (payload.frontendTarget() != null) {
+                    CartographSettings.setFrontendTarget(
+                            CartographFrontendTarget.parse(payload.frontendTarget()));
                 }
                 return null;
             });
@@ -490,7 +541,8 @@ final class CartographWebUiServer implements AutoCloseable {
                 "cachedCount", backend.cachedCount(),
                 "pendingCount", backend.pendingCount(),
                 "requestBatchSize", CartographSettings.requestBatchSize(),
-                "liveScanIntervalTicks", CartographSettings.liveScanIntervalTicks()));
+                "liveScanIntervalTicks", CartographSettings.liveScanIntervalTicks(),
+                "frontendTarget", CartographSettings.frontendTarget().id()));
         return result;
     }
 
@@ -552,6 +604,55 @@ final class CartographWebUiServer implements AutoCloseable {
         return new TileReply(etag, cached.rgb24());
     }
 
+    private byte[] tileBatch(TileBatchPayload payload) {
+        List<TileBatchItem> items =
+                payload == null || payload.tiles() == null ? List.of() : payload.tiles();
+        if (items.size() > 512) {
+            throw new IllegalArgumentException("Too many tiles in one batch: " + items.size());
+        }
+
+        ByteArrayOutputStream bytes =
+                new ByteArrayOutputStream(8 + items.size() * (32 + SurfaceTile.PIXELS * 3));
+        try (DataOutputStream output = new DataOutputStream(bytes)) {
+            output.writeInt(0x43544231); // CTB1
+            output.writeInt(items.size());
+            for (TileBatchItem item : items) {
+                output.writeInt(item.x());
+                output.writeInt(item.z());
+
+                TileReply reply = tileReply(item.x(), item.z());
+                if (reply == null) {
+                    output.writeByte(0); // unavailable
+                    output.writeShort(0);
+                    output.writeInt(0);
+                    continue;
+                }
+
+                byte[] etag = reply.etag().getBytes(StandardCharsets.UTF_8);
+                if (etag.length > 65535) {
+                    throw new IllegalStateException("Tile ETag is unexpectedly large");
+                }
+
+                boolean unchanged =
+                        item.etag() != null && !item.etag().isBlank()
+                                && item.etag().equals(reply.etag());
+                output.writeByte(unchanged ? 2 : 1); // 1=data, 2=unchanged
+                output.writeShort(etag.length);
+                output.write(etag);
+                if (unchanged) {
+                    output.writeInt(0);
+                } else {
+                    output.writeInt(reply.body().length);
+                    output.write(reply.body());
+                }
+            }
+            output.flush();
+            return bytes.toByteArray();
+        } catch (IOException failure) {
+            throw new IllegalStateException("Unable to build Cartograph tile batch", failure);
+        }
+    }
+
     private MarkerPayload markerPayload(byte[] body) {
         return GSON.fromJson(
                 new String(body, StandardCharsets.UTF_8), MarkerPayload.class);
@@ -601,6 +702,35 @@ final class CartographWebUiServer implements AutoCloseable {
             return future.get(5, TimeUnit.SECONDS);
         } catch (Exception failure) {
             throw new IllegalStateException("Minecraft client thread request timed out", failure);
+        }
+    }
+
+    private void streamSession(BufferedOutputStream output) throws IOException {
+        activeWebSessions.incrementAndGet();
+        try {
+            output.write((
+                    "HTTP/1.1 200 OK\r\n"
+                            + "Content-Type: text/event-stream; charset=utf-8\r\n"
+                            + "Cache-Control: no-store\r\n"
+                            + "Connection: keep-alive\r\n"
+                            + "X-Content-Type-Options: nosniff\r\n"
+                            + "\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            output.flush();
+
+            while (running) {
+                lastClientActivityMillis = System.currentTimeMillis();
+                output.write(": cartograph-session\n\n".getBytes(StandardCharsets.UTF_8));
+                output.flush();
+                try {
+                    Thread.sleep(2_000L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        } finally {
+            activeWebSessions.decrementAndGet();
+            lastClientActivityMillis = System.currentTimeMillis();
         }
     }
 
@@ -718,7 +848,7 @@ final class CartographWebUiServer implements AutoCloseable {
         backendWorld = null;
         renderedTiles.clear();
         if (backendOpen) {
-            backend.close();
+            backendRuntime.release(FRONTEND_SESSION);
             backendOpen = false;
         }
         restorePauseOnLostFocus();

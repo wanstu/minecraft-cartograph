@@ -12,13 +12,14 @@ import java.util.Properties;
 
 /** Runtime settings shared by all frontends. No UI presentation state lives here. */
 final class CartographSettings {
-    private static final int SCHEMA = 1;
+    private static final int SCHEMA = 2;
     private static final int DEFAULT_REQUEST_BATCH = 64;
     private static final int DEFAULT_LIVE_SCAN_INTERVAL = 10;
 
     private static boolean loaded;
     private static int requestBatchSize = DEFAULT_REQUEST_BATCH;
     private static int liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
+    private static CartographFrontendTarget frontendTarget = CartographFrontendTarget.WEB;
 
     private CartographSettings() {}
 
@@ -32,6 +33,11 @@ final class CartographSettings {
         return liveScanIntervalTicks;
     }
 
+    static synchronized CartographFrontendTarget frontendTarget() {
+        ensureLoaded();
+        return frontendTarget;
+    }
+
     static synchronized void setRequestBatchSize(int value) {
         ensureLoaded();
         requestBatchSize = Math.max(8, Math.min(256, value));
@@ -41,6 +47,12 @@ final class CartographSettings {
     static synchronized void setLiveScanIntervalTicks(int value) {
         ensureLoaded();
         liveScanIntervalTicks = Math.max(5, Math.min(100, value));
+        save();
+    }
+
+    static synchronized void setFrontendTarget(CartographFrontendTarget value) {
+        ensureLoaded();
+        frontendTarget = value == null ? CartographFrontendTarget.WEB : value;
         save();
     }
 
@@ -59,9 +71,12 @@ final class CartographSettings {
             liveScanIntervalTicks = Math.max(5, Math.min(100,
                     Integer.parseInt(p.getProperty(
                             "liveScanIntervalTicks", Integer.toString(DEFAULT_LIVE_SCAN_INTERVAL)))));
+            frontendTarget = CartographFrontendTarget.parse(
+                    p.getProperty("frontendTarget", CartographFrontendTarget.WEB.id()));
         } catch (IOException | RuntimeException ignored) {
             requestBatchSize = DEFAULT_REQUEST_BATCH;
             liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
+            frontendTarget = CartographFrontendTarget.WEB;
         }
     }
 
@@ -70,6 +85,7 @@ final class CartographSettings {
         p.setProperty("schema", Integer.toString(SCHEMA));
         p.setProperty("requestBatchSize", Integer.toString(requestBatchSize));
         p.setProperty("liveScanIntervalTicks", Integer.toString(liveScanIntervalTicks));
+        p.setProperty("frontendTarget", frontendTarget.id());
         Path path = path();
         try {
             Files.createDirectories(path.getParent());

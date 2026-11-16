@@ -39,7 +39,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .map-shade{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 58%,#0610153f 100%)}
 
 .marker-layer{position:absolute;inset:0;pointer-events:none}
-.map-marker{position:absolute;z-index:12;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;pointer-events:auto;cursor:pointer;color:white}
+.map-marker{position:absolute;left:0;top:0;z-index:12;display:flex;flex-direction:column;align-items:center;gap:3px;pointer-events:auto;cursor:pointer;color:white;will-change:transform;contain:layout paint style}
 .map-marker .glyph{width:31px;height:31px;filter:drop-shadow(0 2px 2px #0009)}
 .map-marker.structure{color:#fff}.map-marker.custom{color:#ffd34e}
 .map-marker .marker-label{font-size:12px;background:#12191dcc;border:1px solid #536068;padding:3px 6px;border-radius:4px;white-space:nowrap;box-shadow:0 3px 10px #0006;color:#f4f6f7}

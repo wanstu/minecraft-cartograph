@@ -11,14 +11,14 @@ import net.neoforged.neoforge.common.NeoForge;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Client entry. There is deliberately no in-game map Screen in V3.1 WebUI.
- * M starts/opens the loopback WebUI in the user's normal browser.
+ * Client entry. The shortcut emits a generic "open map frontend" intent.
+ * Which frontend handles it is resolved by the backend-controlled router.
  */
 @Mod(value = CartographV3Mod.MOD_ID, dist = Dist.CLIENT)
 public final class CartographV3Client {
     private static final org.slf4j.Logger LOG =
             org.slf4j.LoggerFactory.getLogger("cartograph.v3.client");
-    private static final CartographWebUiServer WEB_UI = new CartographWebUiServer();
+    private static final CartographRuntime RUNTIME = new CartographRuntime();
     private static boolean qaOpened;
 
     private static final KeyMapping OPEN = new KeyMapping(
@@ -37,10 +37,7 @@ public final class CartographV3Client {
 
     private static void tick(ClientTickEvent.Post event) {
         Minecraft mc = Minecraft.getInstance();
-
-        MapClientCache.ensureWorld(mc.level);
-        MapClientCache.tick();
-        WEB_UI.tick();
+        RUNTIME.tick();
 
         if (mc.level == null) {
             qaOpened = false;
@@ -49,13 +46,20 @@ public final class CartographV3Client {
 
         if (Boolean.getBoolean("cartograph.v3.qaAutoOpen") && !qaOpened) {
             qaOpened = true;
-            String url = WEB_UI.openInBrowser();
-            LOG.info("V3_WEBUI_QA_AUTO_OPEN url={}", url);
+            CartographFrontend.OpenResult opened =
+                    RUNTIME.openFrontend(CartographFrontendTarget.WEB);
+            LOG.info(
+                    "V3_WEBUI_QA_AUTO_OPEN target={} detail={}",
+                    opened.target().id(),
+                    opened.detail());
         }
 
         while (OPEN.consumeClick()) {
-            String url = WEB_UI.openInBrowser();
-            LOG.info("V3_WEBUI_OPEN url={}", url);
+            CartographFrontend.OpenResult opened = RUNTIME.openConfiguredFrontend();
+            LOG.info(
+                    "V3_FRONTEND_OPEN target={} detail={}",
+                    opened.target().id(),
+                    opened.detail());
         }
     }
 }
