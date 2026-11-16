@@ -108,6 +108,51 @@ final class SurfaceService {
         return future;
     }
 
+    static CompletableFuture<Optional<SurfaceTile>> requestSaved(
+            ServerLevel level, int chunkX, int chunkZ) {
+        if (!level.getServer().isSameThread())
+            throw new IllegalStateException("Saved surface request must start on server thread");
+
+        String dimension = level.dimension().location().toString();
+        Key key = key(level, chunkX, chunkZ);
+        SurfaceTile cached = CACHE.get(key);
+        if (cached != null && !DISK_STALE.contains(key))
+            return CompletableFuture.completedFuture(Optional.of(cached));
+
+        CompletableFuture<Optional<SurfaceTile>> existing = PENDING.get(key);
+        if (existing != null) return existing;
+
+        Path region = regionDirectory(level);
+        int minY = level.getMinBuildHeight();
+        int height = level.getHeight();
+        var biomeRegistry = level.registryAccess().registryOrThrow(Registries.BIOME);
+
+        CompletableFuture<Optional<SurfaceTile>> future = new CompletableFuture<>();
+        CompletableFuture<Optional<SurfaceTile>> raced = PENDING.putIfAbsent(key, future);
+        if (raced != null) return raced;
+
+        DISK.execute(() -> {
+            try {
+                Optional<SurfaceTile> result = SavedSurfaceReader.read(
+                        region, dimension, chunkX, chunkZ, minY, height, biomeRegistry);
+                result.ifPresent(tile -> {
+                    CACHE.put(key, tile);
+                    int count = DISK_HITS.incrementAndGet();
+                    if (count == 1 || count % 64 == 0)
+                        LOG.info("V3_FULL_DIRECT_READ count={} dim={} example={},{}",
+                                count, dimension, chunkX, chunkZ);
+                });
+                DISK_STALE.remove(key);
+                future.complete(result);
+            } catch (Throwable failure) {
+                future.completeExceptionally(failure);
+            } finally {
+                PENDING.remove(key, future);
+            }
+        });
+        return future;
+    }
+
     static Optional<SurfaceTile> refreshLoaded(
             ServerLevel level, int chunkX, int chunkZ) {
         if (!level.getServer().isSameThread())

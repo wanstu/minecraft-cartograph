@@ -84,6 +84,17 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     }
 
     @Override
+    public List<ChunkKey> cachedKeysInBounds(
+            String dimension,
+            int minChunkX, int maxChunkX,
+            int minChunkZ, int maxChunkZ) {
+        return MapClientCache.keysInBounds(
+                dimension,
+                minChunkX, maxChunkX,
+                minChunkZ, maxChunkZ);
+    }
+
+    @Override
     public void updateViewport(Viewport viewport, boolean force) {
         this.viewport = viewport;
         if (!opened || viewport == null) return;

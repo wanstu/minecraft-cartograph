@@ -15,8 +15,12 @@ final class CartographRuntime implements AutoCloseable {
         Minecraft minecraft = Minecraft.getInstance();
         MapClientCache.ensureWorld(minecraft.level);
         MapClientCache.tick();
-        frontends.tick();
+
+        // Map fact collection belongs to the world lifecycle, not to whichever
+        // frontend happens to be open.
+        backend.setWorldActive(minecraft.level != null);
         backend.tick();
+        frontends.tick();
     }
 
     CartographFrontend.OpenResult openConfiguredFrontend() {

@@ -6,12 +6,16 @@ import java.util.Set;
 /**
  * Owns the one Minecraft backend instance shared by every frontend adapter.
  *
- * Frontends acquire/release named sessions. The backend map session is opened
- * by the first active frontend and closed only after the last frontend leaves.
+ * Map collection is world-scoped, not frontend-scoped: while a Minecraft world
+ * is active, the backend stays open and continues collecting/caching map facts
+ * even if no map frontend is currently visible. Frontend sessions only express
+ * presentation lifetime.
  */
 final class CartographBackendRuntime implements AutoCloseable {
     private final CartographBackendApi backend;
     private final Set<String> activeFrontends = new HashSet<>();
+    private boolean worldActive;
+    private boolean backendOpen;
 
     CartographBackendRuntime(CartographBackendApi backend) {
         this.backend = backend;
@@ -21,14 +25,20 @@ final class CartographBackendRuntime implements AutoCloseable {
         return backend;
     }
 
+    synchronized void setWorldActive(boolean active) {
+        if (worldActive == active) return;
+        worldActive = active;
+        reconcile();
+    }
+
     synchronized void acquire(String frontendId) {
         if (!activeFrontends.add(frontendId)) return;
-        if (activeFrontends.size() == 1) backend.open();
+        reconcile();
     }
 
     synchronized void release(String frontendId) {
         if (!activeFrontends.remove(frontendId)) return;
-        if (activeFrontends.isEmpty()) backend.close();
+        reconcile();
     }
 
     synchronized boolean active(String frontendId) {
@@ -37,14 +47,29 @@ final class CartographBackendRuntime implements AutoCloseable {
 
     void tick() {
         synchronized (this) {
-            if (activeFrontends.isEmpty()) return;
+            if (!backendOpen) return;
         }
         backend.tick();
     }
 
+    private void reconcile() {
+        boolean shouldOpen = worldActive || !activeFrontends.isEmpty();
+        if (shouldOpen && !backendOpen) {
+            backend.open();
+            backendOpen = true;
+        } else if (!shouldOpen && backendOpen) {
+            backend.close();
+            backendOpen = false;
+        }
+    }
+
     @Override
     public synchronized void close() {
+        worldActive = false;
         activeFrontends.clear();
-        backend.close();
+        if (backendOpen) {
+            backend.close();
+            backendOpen = false;
+        }
     }
 }

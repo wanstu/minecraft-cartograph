@@ -41,6 +41,11 @@ interface CartographBackendApi extends AutoCloseable {
 
     int pendingCount();
 
+    List<ChunkKey> cachedKeysInBounds(
+            String dimension,
+            int minChunkX, int maxChunkX,
+            int minChunkZ, int maxChunkZ);
+
     void updateViewport(Viewport viewport, boolean force);
 
     PlayerState player();

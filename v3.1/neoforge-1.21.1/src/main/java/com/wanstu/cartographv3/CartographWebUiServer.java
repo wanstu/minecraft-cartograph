@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -73,6 +74,12 @@ final class CartographWebUiServer implements AutoCloseable {
     private record TileBatchItem(int x, int z, String etag) {}
     private record TileBatchPayload(List<TileBatchItem> tiles) {}
     private record TileBatchResult(byte[] bytes, Map<ChunkKey, String> etags) {}
+    private record ViewportSelection(
+            String dimension,
+            int minChunkX, int maxChunkX,
+            int minChunkZ, int maxChunkZ,
+            int centerChunkX, int centerChunkZ,
+            List<ChunkKey> cachedKeys) {}
     private record WebSocketFrame(int opcode, byte[] payload) {}
     private record RuntimeSettingsPayload(
             Integer requestBatchSize,
@@ -600,9 +607,17 @@ final class CartographWebUiServer implements AutoCloseable {
         private final Socket socket;
         private final BufferedInputStream input;
         private final BufferedOutputStream output;
-        private final Map<ChunkKey, String> desiredTiles = new ConcurrentHashMap<>();
+        private final Map<ChunkKey, String> browserEtags = new ConcurrentHashMap<>();
+        private final ConcurrentLinkedQueue<ChunkKey> viewportTiles =
+                new ConcurrentLinkedQueue<>();
         private final Set<ChunkKey> dirtyQueued = ConcurrentHashMap.newKeySet();
-        private final ConcurrentLinkedQueue<ChunkKey> dirtyTiles = new ConcurrentLinkedQueue<>();
+        private final ConcurrentLinkedQueue<ChunkKey> dirtyTiles =
+                new ConcurrentLinkedQueue<>();
+        private volatile String desiredDimension = "";
+        private volatile int desiredMinChunkX;
+        private volatile int desiredMaxChunkX;
+        private volatile int desiredMinChunkZ;
+        private volatile int desiredMaxChunkZ;
         private final java.util.function.Consumer<ChunkKey> tileListener = this::queueTile;
         private volatile boolean open = true;
         private String lastLiveJson = "";
@@ -651,6 +666,7 @@ final class CartographWebUiServer implements AutoCloseable {
                         break;
                     }
 
+                    drainViewportTiles();
                     drainDirtyTiles();
                     publishLiveIfChanged();
                     long current = System.currentTimeMillis();
@@ -664,9 +680,11 @@ final class CartographWebUiServer implements AutoCloseable {
                 MapClientCache.removeTileChangeListener(tileListener);
                 activeWebSessions.decrementAndGet();
                 lastClientActivityMillis = System.currentTimeMillis();
-                desiredTiles.clear();
+                browserEtags.clear();
+                viewportTiles.clear();
                 dirtyTiles.clear();
                 dirtyQueued.clear();
+                desiredDimension = "";
             }
         }
 
@@ -811,49 +829,121 @@ final class CartographWebUiServer implements AutoCloseable {
 
         private void handleViewport(JsonObject message) {
             ViewportPayload viewport = payload(message, ViewportPayload.class);
-            List<TileBatchItem> items = new ArrayList<>();
-            if (message.has("tiles") && message.get("tiles").isJsonArray()) {
-                var tiles = message.getAsJsonArray("tiles");
-                if (tiles.size() > 512) {
-                    throw new IllegalArgumentException("Too many visible tiles");
-                }
-                for (var element : tiles) {
-                    JsonObject tile = element.getAsJsonObject();
-                    items.add(new TileBatchItem(
-                            integer(tile, "x"),
-                            integer(tile, "z"),
-                            string(tile, "etag", "")));
-                }
-            }
-
-            TileBatchResult result = onClient(() -> {
+            ViewportSelection selection = onClient(() -> {
+                double zoom = Math.max(0.03125, viewport.zoom());
+                int width = Math.max(1, viewport.width());
+                int height = Math.max(1, viewport.height());
                 backend.updateViewport(
                         new CartographBackendApi.Viewport(
                                 viewport.centerX(),
                                 viewport.centerZ(),
-                                Math.max(0.03125, viewport.zoom()),
-                                Math.max(1, viewport.width()),
-                                Math.max(1, viewport.height()),
+                                zoom,
+                                width,
+                                height,
                                 false),
                         false);
+
                 String dimension = backend.dimension();
-                desiredTiles.clear();
-                if (dimension != null && !dimension.isBlank()) {
-                    for (TileBatchItem item : items) {
-                        desiredTiles.put(
-                                new ChunkKey(dimension, item.x(), item.z()),
-                                item.etag() == null ? "" : item.etag());
-                    }
+                if (dimension == null || dimension.isBlank()) {
+                    return new ViewportSelection(
+                            "", 0, -1, 0, -1, 0, 0, List.of());
                 }
-                return tileBatchForSocket(new TileBatchPayload(items));
+
+                double halfBlocksX = width / (2.0 * zoom);
+                double halfBlocksZ = height / (2.0 * zoom);
+                int minChunkX = Math.floorDiv(
+                        (int) Math.floor(viewport.centerX() - halfBlocksX), 16) - 1;
+                int maxChunkX = Math.floorDiv(
+                        (int) Math.floor(viewport.centerX() + halfBlocksX), 16) + 1;
+                int minChunkZ = Math.floorDiv(
+                        (int) Math.floor(viewport.centerZ() - halfBlocksZ), 16) - 1;
+                int maxChunkZ = Math.floorDiv(
+                        (int) Math.floor(viewport.centerZ() + halfBlocksZ), 16) + 1;
+                int centerChunkX = Math.floorDiv(
+                        (int) Math.floor(viewport.centerX()), 16);
+                int centerChunkZ = Math.floorDiv(
+                        (int) Math.floor(viewport.centerZ()), 16);
+
+                List<ChunkKey> cached = new ArrayList<>(
+                        backend.cachedKeysInBounds(
+                                dimension,
+                                minChunkX, maxChunkX,
+                                minChunkZ, maxChunkZ));
+                cached.sort(Comparator.comparingLong(key -> {
+                    long dx = Math.abs((long) key.x() - centerChunkX);
+                    long dz = Math.abs((long) key.z() - centerChunkZ);
+                    return Math.max(dx, dz);
+                }));
+                return new ViewportSelection(
+                        dimension,
+                        minChunkX, maxChunkX,
+                        minChunkZ, maxChunkZ,
+                        centerChunkX, centerChunkZ,
+                        cached);
             });
-            updateDesiredEtags(result.etags());
-            sendBinary(result.bytes());
-            respond(message.get("id"), true, Map.of("tileCount", items.size()), null);
+
+            desiredDimension = selection.dimension();
+            desiredMinChunkX = selection.minChunkX();
+            desiredMaxChunkX = selection.maxChunkX();
+            desiredMinChunkZ = selection.minChunkZ();
+            desiredMaxChunkZ = selection.maxChunkZ();
+            viewportTiles.clear();
+            dirtyTiles.clear();
+            dirtyQueued.clear();
+            viewportTiles.addAll(selection.cachedKeys());
+
+            drainViewportTiles();
+            respond(
+                    message.get("id"),
+                    true,
+                    Map.of(
+                            "cachedVisible", selection.cachedKeys().size(),
+                            "minChunkX", selection.minChunkX(),
+                            "maxChunkX", selection.maxChunkX(),
+                            "minChunkZ", selection.minChunkZ(),
+                            "maxChunkZ", selection.maxChunkZ()),
+                    null);
+        }
+
+        private boolean isDesired(ChunkKey key) {
+            return key != null
+                    && desiredDimension.equals(key.dimension())
+                    && key.x() >= desiredMinChunkX
+                    && key.x() <= desiredMaxChunkX
+                    && key.z() >= desiredMinChunkZ
+                    && key.z() <= desiredMaxChunkZ;
+        }
+
+        private void drainViewportTiles() {
+            if (viewportTiles.isEmpty()) return;
+            List<TileBatchItem> items = new ArrayList<>(512);
+            while (items.size() < 512) {
+                ChunkKey key = viewportTiles.poll();
+                if (key == null) break;
+                if (!isDesired(key)) continue;
+                items.add(new TileBatchItem(
+                        key.x(), key.z(),
+                        browserEtags.getOrDefault(key, "")));
+            }
+            if (items.isEmpty()) return;
+
+            try {
+                TileBatchResult result =
+                        onClient(() -> tileBatchForSocket(new TileBatchPayload(items)));
+                updateBrowserEtags(result.etags());
+                sendBinary(result.bytes());
+            } catch (RuntimeException failure) {
+                LOG.debug("Unable to publish Cartograph viewport tiles", failure);
+                for (TileBatchItem item : items) {
+                    ChunkKey key = new ChunkKey(
+                            desiredDimension, item.x(), item.z());
+                    if (isDesired(key)) viewportTiles.add(key);
+                }
+            }
         }
 
         private void queueTile(ChunkKey key) {
-            if (open && desiredTiles.containsKey(key) && dirtyQueued.add(key)) {
+            if (open && isDesired(key) && dirtyQueued.add(key)) {
                 dirtyTiles.add(key);
             }
         }
@@ -866,31 +956,29 @@ final class CartographWebUiServer implements AutoCloseable {
                 ChunkKey key = dirtyTiles.poll();
                 if (key == null) break;
                 dirtyQueued.remove(key);
-                String etag = desiredTiles.get(key);
-                if (etag != null) {
-                    keys.add(key);
-                    items.add(new TileBatchItem(key.x(), key.z(), etag));
-                }
+                if (!isDesired(key)) continue;
+                keys.add(key);
+                items.add(new TileBatchItem(
+                        key.x(), key.z(),
+                        browserEtags.getOrDefault(key, "")));
             }
             if (items.isEmpty()) return;
             try {
                 TileBatchResult result =
                         onClient(() -> tileBatchForSocket(new TileBatchPayload(items)));
-                updateDesiredEtags(result.etags());
+                updateBrowserEtags(result.etags());
                 sendBinary(result.bytes());
                 pushMarkersIfChanged();
             } catch (RuntimeException failure) {
                 LOG.debug("Unable to publish changed Cartograph tiles", failure);
                 for (ChunkKey key : keys) {
-                    if (desiredTiles.containsKey(key) && dirtyQueued.add(key)) dirtyTiles.add(key);
+                    if (isDesired(key) && dirtyQueued.add(key)) dirtyTiles.add(key);
                 }
             }
         }
 
-        private void updateDesiredEtags(Map<ChunkKey, String> etags) {
-            etags.forEach((key, etag) -> {
-                if (desiredTiles.containsKey(key)) desiredTiles.put(key, etag);
-            });
+        private void updateBrowserEtags(Map<ChunkKey, String> etags) {
+            etags.forEach(browserEtags::put);
         }
 
         private void publishLiveIfChanged() {
@@ -906,9 +994,11 @@ final class CartographWebUiServer implements AutoCloseable {
             }
             String nextWorldKey = worldKey(live);
             if (!nextWorldKey.equals(lastWorldKey)) {
-                desiredTiles.clear();
+                browserEtags.clear();
+                viewportTiles.clear();
                 dirtyTiles.clear();
                 dirtyQueued.clear();
+                desiredDimension = "";
                 sendState();
                 lastWorldKey = nextWorldKey;
                 lastLiveJson = GSON.toJson(live);

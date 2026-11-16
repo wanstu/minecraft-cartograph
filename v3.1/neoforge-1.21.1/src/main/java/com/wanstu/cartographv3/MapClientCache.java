@@ -290,6 +290,24 @@ public final class MapClientCache {
 
     public static int cachedCount() { return TILES.size(); }
     public static int pendingCount() { return PENDING.size(); }
+
+    static List<ChunkKey> keysInBounds(
+            String dimension,
+            int minChunkX, int maxChunkX,
+            int minChunkZ, int maxChunkZ) {
+        if (dimension == null || dimension.isBlank()) return List.of();
+        List<ChunkKey> result = new ArrayList<>();
+        for (ChunkKey key : TILES.keySet()) {
+            if (!dimension.equals(key.dimension())) continue;
+            if (key.x() < minChunkX || key.x() > maxChunkX
+                    || key.z() < minChunkZ || key.z() > maxChunkZ) {
+                continue;
+            }
+            result.add(key);
+        }
+        return result;
+    }
+
     static java.util.UUID worldId() { return worldId; }
 
     static boolean hasTilesInRegion(String dimension, int regionX, int regionZ) {

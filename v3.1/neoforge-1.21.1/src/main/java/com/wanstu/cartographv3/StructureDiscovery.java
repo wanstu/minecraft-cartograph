@@ -85,6 +85,44 @@ final class StructureDiscovery {
         return future;
     }
 
+    static CompletableFuture<List<MapProtocol.StructureHit>> requestSaved(
+            ServerLevel level, int chunkX, int chunkZ) {
+        if (!level.getServer().isSameThread())
+            throw new IllegalStateException("Saved structure request must start on server thread");
+
+        Key key = key(level, chunkX, chunkZ);
+        List<MapProtocol.StructureHit> cached = CACHE.get(key);
+        if (cached != null && !STALE.contains(key)) {
+            return CompletableFuture.completedFuture(cached);
+        }
+
+        CompletableFuture<List<MapProtocol.StructureHit>> existing = PENDING.get(key);
+        if (existing != null) return existing;
+
+        Path region = regionDirectory(level);
+        CompletableFuture<List<MapProtocol.StructureHit>> future = new CompletableFuture<>();
+        CompletableFuture<List<MapProtocol.StructureHit>> raced =
+                PENDING.putIfAbsent(key, future);
+        if (raced != null) return raced;
+
+        DISK.execute(() -> {
+            try {
+                List<MapProtocol.StructureHit> result =
+                        fromSaved(region, chunkX, chunkZ);
+                CACHE.put(key, result);
+                STALE.remove(key);
+                future.complete(result);
+            } catch (IOException failure) {
+                future.complete(List.of());
+            } catch (Throwable failure) {
+                future.completeExceptionally(failure);
+            } finally {
+                PENDING.remove(key, future);
+            }
+        });
+        return future;
+    }
+
     static void invalidate(ChunkDataEvent.Save event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         var pos = event.getChunk().getPos();

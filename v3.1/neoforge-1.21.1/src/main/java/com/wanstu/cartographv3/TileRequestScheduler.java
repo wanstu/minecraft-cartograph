@@ -30,6 +30,7 @@ final class TileRequestScheduler {
     private static final class PlayerQueue {
         final LinkedHashMap<RequestKey, MapProtocol.RequestTile> pending =
                 new LinkedHashMap<>();
+        final java.util.Set<RequestKey> inFlight = new java.util.HashSet<>();
     }
 
     private static final Map<UUID, PlayerQueue> QUEUES = new LinkedHashMap<>();
@@ -39,7 +40,10 @@ final class TileRequestScheduler {
     private TileRequestScheduler() {}
 
     static void open(ServerPlayer player) {
-        if (player != null) OPEN_PLAYERS.add(player.getUUID());
+        if (player == null) return;
+        OPEN_PLAYERS.add(player.getUUID());
+        QUEUES.computeIfAbsent(player.getUUID(), ignored -> new PlayerQueue());
+        GeneratedChunkBackfill.open(player);
     }
 
     static void enqueue(ServerPlayer player, MapProtocol.RequestTile request) {
@@ -60,7 +64,9 @@ final class TileRequestScheduler {
         RequestKey key = new RequestKey(
                 request.dimension(), request.chunkX(), request.chunkZ());
 
-        // Refresh duplicate requests in place without growing the queue.
+        // Refresh duplicate queued requests in place. If the same tile is
+        // already executing, that in-flight result will satisfy this request.
+        if (queue.inFlight.contains(key)) return;
         if (queue.pending.containsKey(key)) {
             queue.pending.put(key, request);
             return;
@@ -76,6 +82,7 @@ final class TileRequestScheduler {
     static void close(ServerPlayer player) {
         if (player == null) return;
         OPEN_PLAYERS.remove(player.getUUID());
+        GeneratedChunkBackfill.close(player);
         PlayerQueue queue = QUEUES.remove(player.getUUID());
         if (queue == null) return;
 
@@ -86,11 +93,13 @@ final class TileRequestScheduler {
             sendRetry(player, request);
         }
         queue.pending.clear();
+        queue.inFlight.clear();
     }
 
     static void clear() {
         QUEUES.clear();
         OPEN_PLAYERS.clear();
+        GeneratedChunkBackfill.clear();
         playerCursor = 0;
     }
 
@@ -100,20 +109,22 @@ final class TileRequestScheduler {
                 server.getPlayerList().getPlayer(uuid) == null);
         OPEN_PLAYERS.removeIf(uuid ->
                 server.getPlayerList().getPlayer(uuid) == null);
+        GeneratedChunkBackfill.prune(server);
 
-        if (QUEUES.isEmpty()) {
+        if (OPEN_PLAYERS.isEmpty()) {
             playerCursor = 0;
             return;
         }
 
-        List<UUID> players = new ArrayList<>(QUEUES.keySet());
+        List<UUID> players = new ArrayList<>(OPEN_PLAYERS);
         if (playerCursor >= players.size()) playerCursor = 0;
 
         int started = 0;
         int heavy = 0;
         int visitedPlayers = 0;
 
-        // Round-robin players so one open map cannot monopolize the budget.
+        // Explicit viewport requests always win. Background generated-chunk
+        // backfill only consumes otherwise-unused request budget.
         while (started < MAX_STARTED_PER_TICK
                 && visitedPlayers < players.size()) {
             UUID uuid = players.get(playerCursor);
@@ -121,10 +132,11 @@ final class TileRequestScheduler {
             visitedPlayers++;
 
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
-            PlayerQueue queue = QUEUES.get(uuid);
-            if (player == null || queue == null || queue.pending.isEmpty()) {
-                continue;
-            }
+            if (player == null || !player.isAlive()) continue;
+
+            GeneratedChunkBackfill.ensureCurrent(player);
+            PlayerQueue queue = QUEUES.computeIfAbsent(
+                    uuid, ignored -> new PlayerQueue());
 
             int playerStarts = 0;
             int scanned = 0;
@@ -137,9 +149,8 @@ final class TileRequestScheduler {
                 scanned++;
                 MapProtocol.RequestTile request = entry.getValue();
 
-                if (!player.isAlive()
-                        || !player.serverLevel().dimension().location().toString()
-                                .equals(request.dimension())) {
+                if (!player.serverLevel().dimension().location().toString()
+                        .equals(request.dimension())) {
                     iterator.remove();
                     sendRetry(player, request);
                     continue;
@@ -151,31 +162,73 @@ final class TileRequestScheduler {
                                 request.chunkX(), request.chunkZ());
                 if (requiresLoadedCapture
                         && heavy >= MAX_LOADED_CAPTURES_PER_TICK) {
-                    // Leave this heavy item queued, but allow cheap cached /
-                    // async-disk requests behind it to use the remaining
-                    // network budget in this tick.
                     continue;
                 }
 
+                RequestKey requestKey = new RequestKey(
+                        request.dimension(), request.chunkX(), request.chunkZ());
                 iterator.remove();
+                if (!queue.inFlight.add(requestKey)) continue;
                 if (requiresLoadedCapture) heavy++;
                 started++;
                 playerStarts++;
-                start(player, request);
+                start(player, request, true);
+            }
+
+            int backgroundAttempts = 0;
+            while (started < MAX_STARTED_PER_TICK
+                    && playerStarts < MAX_STARTED_PER_PLAYER_PER_TICK
+                    && backgroundAttempts < MAX_QUEUE_SCAN_PER_PLAYER_PER_TICK) {
+                ChunkKey key = GeneratedChunkBackfill.poll(player);
+                if (key == null) break;
+                backgroundAttempts++;
+
+                if (!player.serverLevel().dimension().location().toString()
+                        .equals(key.dimension())) {
+                    continue;
+                }
+
+                RequestKey requestKey = new RequestKey(
+                        key.dimension(), key.x(), key.z());
+                if (queue.pending.containsKey(requestKey)
+                        || queue.inFlight.contains(requestKey)) {
+                    continue;
+                }
+
+                Long knownFingerprint =
+                        GeneratedChunkBackfill.knownFingerprint(player, key);
+                MapProtocol.RequestTile background = new MapProtocol.RequestTile(
+                        key.dimension(), key.x(), key.z(),
+                        knownFingerprint != null,
+                        knownFingerprint == null ? 0L : knownFingerprint);
+                if (!queue.inFlight.add(requestKey)) continue;
+                started++;
+                playerStarts++;
+                start(player, background, false);
             }
         }
     }
 
     private static void start(
-            ServerPlayer player, MapProtocol.RequestTile request) {
-        ChunkKey watchedKey = new ChunkKey(
-                request.dimension(), request.chunkX(), request.chunkZ());
-        LiveSurfaceUpdates.watch(player, watchedKey);
+            ServerPlayer player,
+            MapProtocol.RequestTile request,
+            boolean watchLive) {
+        if (watchLive) {
+            ChunkKey watchedKey = new ChunkKey(
+                    request.dimension(), request.chunkX(), request.chunkZ());
+            LiveSurfaceUpdates.watch(player, watchedKey);
+        }
 
-        var surfaceFuture = SurfaceService.request(
-                player.serverLevel(), request.chunkX(), request.chunkZ());
-        var structureFuture = StructureDiscovery.request(
-                player.serverLevel(), request.chunkX(), request.chunkZ());
+        var surfaceFuture = watchLive
+                ? SurfaceService.request(
+                        player.serverLevel(), request.chunkX(), request.chunkZ())
+                : SurfaceService.requestSaved(
+                        player.serverLevel(), request.chunkX(), request.chunkZ());
+        var structureFuture = watchLive
+                ? StructureDiscovery.request(
+                        player.serverLevel(), request.chunkX(), request.chunkZ())
+                : StructureDiscovery.requestSaved(
+                        player.serverLevel(), request.chunkX(), request.chunkZ());
 
         surfaceFuture.thenCombine(
                         structureFuture,
@@ -184,7 +237,7 @@ final class TileRequestScheduler {
                                         surface, structures))
                 .whenComplete((combined, error) ->
                         player.server.execute(() ->
-                                finish(player, request, combined, error)));
+                                finish(player, request, combined, error, watchLive)));
     }
 
     private static void finish(
@@ -193,7 +246,13 @@ final class TileRequestScheduler {
             java.util.AbstractMap.SimpleImmutableEntry<
                     java.util.Optional<SurfaceTile>,
                     List<MapProtocol.StructureHit>> combined,
-            Throwable error) {
+            Throwable error,
+            boolean watchLive) {
+        RequestKey requestKey = new RequestKey(
+                request.dimension(), request.chunkX(), request.chunkZ());
+        PlayerQueue queue = QUEUES.get(player.getUUID());
+        if (queue != null) queue.inFlight.remove(requestKey);
+
         if (!player.isAlive() || player.serverLevel() == null) return;
         if (!player.serverLevel().dimension().location().toString()
                 .equals(request.dimension())) {
@@ -208,10 +267,25 @@ final class TileRequestScheduler {
                 : combined.getValue();
 
         if (error != null) {
-            sendRetry(player, request);
+            if (watchLive) {
+                sendRetry(player, request);
+            } else {
+                GeneratedChunkBackfill.requeue(
+                        player,
+                        new ChunkKey(
+                                request.dimension(),
+                                request.chunkX(),
+                                request.chunkZ()));
+            }
             return;
         }
         if (surface == null || surface.isEmpty()) {
+            GeneratedChunkBackfill.markEmpty(
+                    player,
+                    new ChunkKey(
+                            request.dimension(),
+                            request.chunkX(),
+                            request.chunkZ()));
             PacketDistributor.sendToPlayer(player,
                     MapProtocol.Tile.status(
                             request.dimension(),
@@ -221,6 +295,7 @@ final class TileRequestScheduler {
         }
 
         SurfaceTile tile = surface.get();
+        GeneratedChunkBackfill.markDelivered(player, tile);
         boolean unchanged = request.hasKnownFingerprint()
                 && request.knownFingerprint() == tile.fingerprint64();
         PacketDistributor.sendToPlayer(player,

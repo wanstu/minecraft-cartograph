@@ -21,6 +21,7 @@ public final class CartographV3Mod {
     private static void chunkSaved(ChunkDataEvent.Save event) {
         SurfaceService.invalidate(event);
         StructureDiscovery.invalidate(event);
+        GeneratedChunkBackfill.chunkSaved(event);
     }
 
     private static void serverStopped(ServerStoppedEvent event) {
