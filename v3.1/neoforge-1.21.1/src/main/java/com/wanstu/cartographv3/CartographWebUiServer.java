@@ -79,11 +79,14 @@ final class CartographWebUiServer implements AutoCloseable {
     private String token;
     private ClientLevel backendWorld;
     private boolean backendOpen;
+    private boolean pauseOverrideActive;
+    private boolean previousPauseOnLostFocus;
 
     synchronized String openInBrowser() {
         start();
         lastClientActivityMillis = System.currentTimeMillis();
         ensureBackendWorld();
+        keepSingleplayerRunningWhileWebUiActive();
         String url = baseUrl() + "/?token=" + token;
         try {
             Util.getPlatform().openUri(URI.create(url));
@@ -117,6 +120,7 @@ final class CartographWebUiServer implements AutoCloseable {
                 backend.close();
                 backendOpen = false;
             }
+            restorePauseOnLostFocus();
             return;
         }
         ensureBackendWorld();
@@ -135,6 +139,7 @@ final class CartographWebUiServer implements AutoCloseable {
                 backend.close();
                 backendOpen = false;
             }
+            restorePauseOnLostFocus();
             backendWorld = next;
             renderedTiles.clear();
         }
@@ -144,6 +149,30 @@ final class CartographWebUiServer implements AutoCloseable {
             backend.open();
             backendOpen = true;
         }
+        if (next != null && backendOpen) {
+            keepSingleplayerRunningWhileWebUiActive();
+        }
+    }
+
+    private void keepSingleplayerRunningWhileWebUiActive() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (!minecraft.hasSingleplayerServer() || pauseOverrideActive) return;
+        previousPauseOnLostFocus = minecraft.options.pauseOnLostFocus;
+        minecraft.options.pauseOnLostFocus = false;
+        pauseOverrideActive = true;
+        LOG.debug(
+                "WebUI active: temporarily disabling pauseOnLostFocus (previous={})",
+                previousPauseOnLostFocus);
+    }
+
+    private void restorePauseOnLostFocus() {
+        if (!pauseOverrideActive) return;
+        Minecraft minecraft = Minecraft.getInstance();
+        minecraft.options.pauseOnLostFocus = previousPauseOnLostFocus;
+        pauseOverrideActive = false;
+        LOG.debug(
+                "WebUI idle/closed: restored pauseOnLostFocus={}",
+                previousPauseOnLostFocus);
     }
 
     private String baseUrl() {
@@ -692,6 +721,7 @@ final class CartographWebUiServer implements AutoCloseable {
             backend.close();
             backendOpen = false;
         }
+        restorePauseOnLostFocus();
         if (server != null) {
             try {
                 server.close();
