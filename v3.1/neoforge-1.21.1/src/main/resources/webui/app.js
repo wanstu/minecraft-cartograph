@@ -302,7 +302,29 @@
         ctx.drawImage(region.canvas,x,y,size,size);
       }
     }
+    if(settings.grid)drawChunkGrid(s.width,s.height);
     ctx.restore();renderPlayer();renderMarkers();renderHud();
+  }
+
+  function drawChunkGrid(width,height){
+    const chunkPixels=TILE_SIZE*view.zoom;
+    // At low zoom use a power-of-two chunk interval to keep terrain readable.
+    const spacing=chunkPixels*2**Math.max(0,Math.ceil(Math.log2(6/chunkPixels)));
+    const originX=width/2-view.centerX*view.zoom;
+    const originY=height/2-view.centerZ*view.zoom;
+
+    ctx.beginPath();
+    for(let x=floorMod(originX,spacing);x<width;x+=spacing){
+      ctx.moveTo(x,0);
+      ctx.lineTo(x,height);
+    }
+    for(let y=floorMod(originY,spacing);y<height;y+=spacing){
+      ctx.moveTo(0,y);
+      ctx.lineTo(width,y);
+    }
+    ctx.lineWidth=1;
+    ctx.strokeStyle='rgba(11,22,27,.38)';
+    ctx.stroke();
   }
 
   function tileKey(x,z){return currentDimension+'|'+x+'|'+z;}
@@ -425,7 +447,7 @@
   function renderHud(){
     q('#zoomText').textContent=Math.round(view.zoom*100)+'%';
     const blocks=145/Math.max(view.zoom,.0001);q('#scaleText').textContent=blocks>=1000?(blocks/1000).toFixed(1)+' km':Math.round(blocks)+' m';
-    app.dataset.grid=settings.grid?'on':'off';app.dataset.labels=settings.labels?'on':'off';
+    app.dataset.labels=settings.labels?'on':'off';
     app.dataset.structures=settings.structures?'on':'off';app.dataset.custom=settings.custom?'on':'off';app.dataset.playerRing=settings.playerRing?'on':'off';
     q('.coord-box').style.display=settings.showCoords?'':'none';q('#debugHud').style.display=settings.debug?'block':'none';
     if(settings.debug)q('#debugHud').innerHTML='zoom='+view.zoom.toFixed(3)+'<br>center='+Math.round(view.centerX)+','+Math.round(view.centerZ)+'<br>tiles='+tileCache.size+'<br>pending='+(serverState&&serverState.runtime?serverState.runtime.pendingCount:0);
