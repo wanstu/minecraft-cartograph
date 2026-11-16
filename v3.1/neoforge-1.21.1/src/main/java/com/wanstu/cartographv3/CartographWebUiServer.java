@@ -16,23 +16,30 @@ import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.security.MessageDigest;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Supplier;
 
 /**
- * Loopback-only HTTP bridge for the standalone Cartograph WebUI.
+ * Loopback-only static HTTP host and authenticated WebSocket runtime for Cartograph WebUI.
  *
  * The browser is a frontend. It never reads Minecraft memory directly.
  * All game data/actions are exposed through CartographBackendApi on the
@@ -65,11 +72,12 @@ final class CartographWebUiServer implements AutoCloseable {
             int height) {}
     private record TileBatchItem(int x, int z, String etag) {}
     private record TileBatchPayload(List<TileBatchItem> tiles) {}
+    private record TileBatchResult(byte[] bytes, Map<ChunkKey, String> etags) {}
+    private record WebSocketFrame(int opcode, byte[] payload) {}
     private record RuntimeSettingsPayload(
             Integer requestBatchSize,
             Integer liveScanIntervalTicks,
             String frontendTarget) {}
-    private record PointPayload(int x, int z) {}
 
     private static final String FRONTEND_SESSION = "web";
 
@@ -263,6 +271,14 @@ final class CartographWebUiServer implements AutoCloseable {
             }
 
             String path = uri.getPath();
+            if ("GET".equals(method) && "/api/v1/ws".equals(path)) {
+                if (!authorized(headers, uri)) {
+                    writeText(output, 403, "Forbidden", "text/plain; charset=utf-8");
+                    return;
+                }
+                serveWebSocket(socket, input, output, uri, headers);
+                return;
+            }
             if ("OPTIONS".equals(method)) {
                 writeResponse(output, 204, "No Content", "text/plain", new byte[0], Map.of());
                 return;
@@ -317,195 +333,32 @@ final class CartographWebUiServer implements AutoCloseable {
             String method,
             URI uri,
             Map<String, String> headers,
-            byte[] body) throws Exception {
-        String path = uri.getPath();
-        Map<String, String> query = query(uri);
-
-        if ("GET".equals(method) && "/api/v1/session".equals(path)) {
-            streamSession(output);
+            byte[] body) throws IOException {
+        if ("GET".equals(method) && "/api/v1/health".equals(uri.getPath())) {
+            json(output, 200, Map.of("ok", true, "transport", "websocket"));
             return;
         }
-
-        if ("GET".equals(method) && "/api/v1/health".equals(path)) {
-            json(output, 200, Map.of("ok", true, "version", "v3.1-webui"));
-            return;
-        }
-
-        if ("GET".equals(method) && "/api/v1/state".equals(path)) {
-            json(output, 200, onClient(this::stateSnapshot));
-            return;
-        }
-
-        if ("POST".equals(method) && "/api/v1/viewport".equals(path)) {
-            ViewportPayload payload = GSON.fromJson(
-                    new String(body, StandardCharsets.UTF_8), ViewportPayload.class);
-            onClient(() -> {
-                backend.updateViewport(
-                        new CartographBackendApi.Viewport(
-                                payload.centerX(),
-                                payload.centerZ(),
-                                Math.max(0.03125, payload.zoom()),
-                                Math.max(1, payload.width()),
-                                Math.max(1, payload.height()),
-                                false),
-                        false);
-                return null;
-            });
-            json(output, 200, Map.of("ok", true));
-            return;
-        }
-
-        if ("POST".equals(method) && "/api/v1/tiles".equals(path)) {
-            TileBatchPayload payload = GSON.fromJson(
-                    new String(body, StandardCharsets.UTF_8), TileBatchPayload.class);
-            byte[] packed = onClient(() -> tileBatch(payload));
-            writeResponse(
-                    output, 200, "OK",
-                    "application/vnd.cartograph.tilepack-v1",
-                    packed,
-                    Map.of(
-                            "Cache-Control", "no-store",
-                            "X-Cartograph-Tile-Size", Integer.toString(SurfaceTile.SIZE)));
-            return;
-        }
-
-        if ("GET".equals(method) && "/api/v1/tile".equals(path)) {
-            int x = parseRequiredInt(query, "x");
-            int z = parseRequiredInt(query, "z");
-            TileReply reply = onClient(() -> tileReply(x, z));
-            if (reply == null) {
-                writeResponse(output, 204, "No Content", "application/octet-stream", new byte[0], Map.of());
-                return;
-            }
-            String ifNoneMatch = headers.get("if-none-match");
-            if (reply.etag.equals(ifNoneMatch)) {
-                writeResponse(
-                        output, 304, "Not Modified",
-                        "application/vnd.cartograph.rgb24",
-                        new byte[0],
-                        Map.of("ETag", reply.etag, "Cache-Control", "no-cache"));
-                return;
-            }
-            writeResponse(
-                    output, 200, "OK",
-                    "application/vnd.cartograph.rgb24",
-                    reply.body,
-                    Map.of(
-                            "ETag", reply.etag,
-                            "Cache-Control", "no-cache",
-                            "X-Cartograph-Tile-Size", Integer.toString(SurfaceTile.SIZE)));
-            return;
-        }
-
-        if ("GET".equals(method) && "/api/v1/point".equals(path)) {
-            int x = parseRequiredInt(query, "x");
-            int z = parseRequiredInt(query, "z");
-            json(output, 200, onClient(() -> Map.of(
-                    "x", x,
-                    "y", backend.surfaceYAt(x, z),
-                    "z", z,
-                    "biome", backend.biomeLabelAt(x, z))));
-            return;
-        }
-
-        if ("POST".equals(method) && "/api/v1/teleport".equals(path)) {
-            PointPayload payload = GSON.fromJson(
-                    new String(body, StandardCharsets.UTF_8), PointPayload.class);
-            onClient(() -> {
-                backend.teleport(payload.x(), payload.z());
-                return null;
-            });
-            json(output, 200, Map.of("ok", true));
-            return;
-        }
-
-        if ("POST".equals(method) && "/api/v1/runtime-settings".equals(path)) {
-            RuntimeSettingsPayload payload = GSON.fromJson(
-                    new String(body, StandardCharsets.UTF_8), RuntimeSettingsPayload.class);
-            onClient(() -> {
-                if (payload.requestBatchSize() != null) {
-                    CartographSettings.setRequestBatchSize(payload.requestBatchSize());
-                }
-                if (payload.liveScanIntervalTicks() != null) {
-                    backend.setLiveScanInterval(payload.liveScanIntervalTicks());
-                }
-                if (payload.frontendTarget() != null) {
-                    CartographSettings.setFrontendTarget(
-                            CartographFrontendTarget.parse(payload.frontendTarget()));
-                }
-                return null;
-            });
-            json(output, 200, Map.of("ok", true));
-            return;
-        }
-
-        if ("POST".equals(method) && "/api/v1/markers".equals(path)) {
-            MarkerPayload payload = markerPayload(body);
-            Map<String, Object> result = onClient(() -> {
-                MapMarkerStore.Marker marker = backend.createMarker(
-                        required(payload.x(), "x"),
-                        required(payload.y(), "y"),
-                        required(payload.z(), "z"),
-                        payload.name(),
-                        icon(payload.icon()),
-                        color(payload.primaryColor(), MapMarkerStore.DEFAULT_PRIMARY_COLOR),
-                        color(payload.accentColor(), 0xffd34e),
-                        color(payload.lineColor(), MapMarkerStore.DEFAULT_LINE_COLOR),
-                        payload.description());
-                return markerJson(marker);
-            });
-            json(output, 200, result);
-            return;
-        }
-
-        if (path.startsWith("/api/v1/markers/")) {
-            String tail = path.substring("/api/v1/markers/".length());
-            boolean reset = tail.endsWith("/reset");
-            String idText = reset ? tail.substring(0, tail.length() - "/reset".length()) : tail;
-            UUID id = UUID.fromString(idText);
-
-            if ("POST".equals(method) && reset) {
-                onClient(() -> {
-                    backend.resetAutomaticMarker(id);
-                    return null;
-                });
-                json(output, 200, Map.of("ok", true));
-                return;
-            }
-
-            if ("DELETE".equals(method) && !reset) {
-                onClient(() -> {
-                    backend.deleteMarker(id);
-                    return null;
-                });
-                json(output, 200, Map.of("ok", true));
-                return;
-            }
-
-            if ("PUT".equals(method) && !reset) {
-                MarkerPayload payload = markerPayload(body);
-                onClient(() -> {
-                    MapMarkerStore.Marker existing = MapMarkerStore.find(id).orElse(null);
-                    if (existing == null) return null;
-                    backend.updateMarker(
-                            id,
-                            payload.x() == null ? existing.x : payload.x(),
-                            payload.y() == null ? existing.y : payload.y(),
-                            payload.z() == null ? existing.z : payload.z(),
-                            payload.name() == null ? existing.name : payload.name(),
-                            payload.icon() == null ? existing.icon : icon(payload.icon()),
-                            payload.primaryColor() == null ? existing.primary() : payload.primaryColor(),
-                            payload.accentColor() == null ? existing.accent() : payload.accentColor(),
-                            payload.lineColor() == null ? existing.line() : payload.lineColor(),
-                            payload.description() == null ? existing.description : payload.description());
-                    return null;
-                });
-                json(output, 200, Map.of("ok", true));
-                return;
-            }
-        }
-
         writeText(output, 404, "Not Found", "text/plain; charset=utf-8");
+    }
+
+    private Map<String, Object> liveSnapshot() {
+        CartographBackendApi.PlayerState player = backend.player();
+        Map<String, Object> playerJson = new HashMap<>();
+        playerJson.put("present", player.present());
+        playerJson.put("x", player.x());
+        playerJson.put("y", player.y());
+        playerJson.put("z", player.z());
+        playerJson.put("yaw", player.yaw());
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("connected", Minecraft.getInstance().level != null);
+        result.put("dimension", backend.dimension());
+        result.put("worldId", String.valueOf(MapClientCache.worldId()));
+        result.put("player", playerJson);
+        result.put("runtime", Map.of(
+                "cachedCount", backend.cachedCount(),
+                "pendingCount", backend.pendingCount()));
+        return result;
     }
 
     private Map<String, Object> stateSnapshot() {
@@ -604,39 +457,38 @@ final class CartographWebUiServer implements AutoCloseable {
         return new TileReply(etag, cached.rgb24());
     }
 
-    private byte[] tileBatch(TileBatchPayload payload) {
+    private TileBatchResult tileBatchForSocket(TileBatchPayload payload) {
         List<TileBatchItem> items =
                 payload == null || payload.tiles() == null ? List.of() : payload.tiles();
         if (items.size() > 512) {
             throw new IllegalArgumentException("Too many tiles in one batch: " + items.size());
         }
 
+        String dimension = backend.dimension();
+        Map<ChunkKey, String> etags = new HashMap<>();
         ByteArrayOutputStream bytes =
                 new ByteArrayOutputStream(8 + items.size() * (32 + SurfaceTile.PIXELS * 3));
         try (DataOutputStream output = new DataOutputStream(bytes)) {
-            output.writeInt(0x43544231); // CTB1
+            output.writeInt(0x43544231);
             output.writeInt(items.size());
             for (TileBatchItem item : items) {
                 output.writeInt(item.x());
                 output.writeInt(item.z());
-
                 TileReply reply = tileReply(item.x(), item.z());
+                ChunkKey key = dimension == null || dimension.isBlank()
+                        ? null : new ChunkKey(dimension, item.x(), item.z());
                 if (reply == null) {
-                    output.writeByte(0); // unavailable
+                    if (key != null) etags.put(key, "");
+                    output.writeByte(0);
                     output.writeShort(0);
                     output.writeInt(0);
                     continue;
                 }
-
+                if (key != null) etags.put(key, reply.etag());
                 byte[] etag = reply.etag().getBytes(StandardCharsets.UTF_8);
-                if (etag.length > 65535) {
-                    throw new IllegalStateException("Tile ETag is unexpectedly large");
-                }
-
-                boolean unchanged =
-                        item.etag() != null && !item.etag().isBlank()
-                                && item.etag().equals(reply.etag());
-                output.writeByte(unchanged ? 2 : 1); // 1=data, 2=unchanged
+                boolean unchanged = item.etag() != null && !item.etag().isBlank()
+                        && item.etag().equals(reply.etag());
+                output.writeByte(unchanged ? 2 : 1);
                 output.writeShort(etag.length);
                 output.write(etag);
                 if (unchanged) {
@@ -647,15 +499,10 @@ final class CartographWebUiServer implements AutoCloseable {
                 }
             }
             output.flush();
-            return bytes.toByteArray();
+            return new TileBatchResult(bytes.toByteArray(), etags);
         } catch (IOException failure) {
-            throw new IllegalStateException("Unable to build Cartograph tile batch", failure);
+            throw new IllegalStateException("Unable to build Cartograph WebSocket tile batch", failure);
         }
-    }
-
-    private MarkerPayload markerPayload(byte[] body) {
-        return GSON.fromJson(
-                new String(body, StandardCharsets.UTF_8), MarkerPayload.class);
     }
 
     private static MapMarkerStore.Icon icon(String raw) {
@@ -705,33 +552,521 @@ final class CartographWebUiServer implements AutoCloseable {
         }
     }
 
-    private void streamSession(BufferedOutputStream output) throws IOException {
-        activeWebSessions.incrementAndGet();
+    private void serveWebSocket(
+            Socket socket,
+            BufferedInputStream input,
+            BufferedOutputStream output,
+            URI uri,
+            Map<String, String> headers) throws Exception {
+        String key = headers.get("sec-websocket-key");
+        String version = headers.get("sec-websocket-version");
+        String upgrade = headers.get("upgrade");
+        String connection = headers.get("connection");
+        if (key == null || !"13".equals(version)
+                || upgrade == null || !"websocket".equalsIgnoreCase(upgrade)
+                || connection == null
+                || !connection.toLowerCase(Locale.ROOT).contains("upgrade")) {
+            writeText(output, 400, "Invalid WebSocket handshake", "text/plain; charset=utf-8");
+            return;
+        }
+        byte[] decodedKey;
         try {
-            output.write((
-                    "HTTP/1.1 200 OK\r\n"
-                            + "Content-Type: text/event-stream; charset=utf-8\r\n"
-                            + "Cache-Control: no-store\r\n"
-                            + "Connection: keep-alive\r\n"
-                            + "X-Content-Type-Options: nosniff\r\n"
-                            + "\r\n").getBytes(StandardCharsets.ISO_8859_1));
-            output.flush();
+            decodedKey = Base64.getDecoder().decode(key);
+        } catch (IllegalArgumentException invalidKey) {
+            writeText(output, 400, "Invalid WebSocket key", "text/plain; charset=utf-8");
+            return;
+        }
+        if (decodedKey.length != 16) {
+            writeText(output, 400, "Invalid WebSocket key", "text/plain; charset=utf-8");
+            return;
+        }
+        String accept = Base64.getEncoder().encodeToString(
+                MessageDigest.getInstance("SHA-1").digest(
+                        (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+                                .getBytes(StandardCharsets.ISO_8859_1)));
+        output.write((
+                "HTTP/1.1 101 Switching Protocols\r\n"
+                        + "Upgrade: websocket\r\n"
+                        + "Connection: Upgrade\r\n"
+                        + "Sec-WebSocket-Accept: " + accept + "\r\n"
+                        + "Cache-Control: no-store\r\n\r\n")
+                .getBytes(StandardCharsets.ISO_8859_1));
+        output.flush();
+        socket.setTcpNoDelay(true);
+        new WebSocketSession(socket, input, output).run();
+    }
 
-            while (running) {
+    private final class WebSocketSession {
+        private final Socket socket;
+        private final BufferedInputStream input;
+        private final BufferedOutputStream output;
+        private final Map<ChunkKey, String> desiredTiles = new ConcurrentHashMap<>();
+        private final Set<ChunkKey> dirtyQueued = ConcurrentHashMap.newKeySet();
+        private final ConcurrentLinkedQueue<ChunkKey> dirtyTiles = new ConcurrentLinkedQueue<>();
+        private final java.util.function.Consumer<ChunkKey> tileListener = this::queueTile;
+        private volatile boolean open = true;
+        private String lastLiveJson = "";
+        private String lastWorldKey = "";
+        private String lastMarkersSignature = "";
+        private long nextLiveAt;
+        private long nextPingAt;
+
+        private WebSocketSession(
+                Socket socket,
+                BufferedInputStream input,
+                BufferedOutputStream output) {
+            this.socket = socket;
+            this.input = input;
+            this.output = output;
+        }
+
+        private void run() throws Exception {
+            activeWebSessions.incrementAndGet();
+            long now = System.currentTimeMillis();
+            lastClientActivityMillis = now;
+            startupGraceUntilMillis = 0L;
+            MapClientCache.addTileChangeListener(tileListener);
+            try {
+                Map<String, Object> initial = onClient(CartographWebUiServer.this::stateSnapshot);
+                sendJson(Map.of("type", "state", "data", initial));
+                lastWorldKey = worldKey(initial);
+                lastMarkersSignature = markersSignature(initial);
+                lastLiveJson = GSON.toJson(onClient(CartographWebUiServer.this::liveSnapshot));
+                nextLiveAt = now + 250L;
+                nextPingAt = now + 20_000L;
+
+                while (running && open && !socket.isClosed()) {
+                    WebSocketFrame frame = readWebSocketFrame(socket, input);
+                    if (frame == null) break;
+                    if (frame.opcode() == 1) {
+                        lastClientActivityMillis = System.currentTimeMillis();
+                        handleMessage(frame.payload());
+                    } else if (frame.opcode() == 8) {
+                        sendCloseFrame();
+                        break;
+                    } else if (frame.opcode() == 9) {
+                        sendFrame(10, frame.payload());
+                    } else if (frame.opcode() != 10 && frame.opcode() != -1) {
+                        sendCloseFrame();
+                        break;
+                    }
+
+                    drainDirtyTiles();
+                    publishLiveIfChanged();
+                    long current = System.currentTimeMillis();
+                    if (current >= nextPingAt) {
+                        sendFrame(9, new byte[0]);
+                        nextPingAt = current + 20_000L;
+                    }
+                }
+            } finally {
+                open = false;
+                MapClientCache.removeTileChangeListener(tileListener);
+                activeWebSessions.decrementAndGet();
                 lastClientActivityMillis = System.currentTimeMillis();
-                output.write(": cartograph-session\n\n".getBytes(StandardCharsets.UTF_8));
-                output.flush();
-                try {
-                    Thread.sleep(2_000L);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    return;
+                desiredTiles.clear();
+                dirtyTiles.clear();
+                dirtyQueued.clear();
+            }
+        }
+
+        private void handleMessage(byte[] payloadBytes) {
+            JsonObject message;
+            try {
+                message = GSON.fromJson(
+                        new String(payloadBytes, StandardCharsets.UTF_8), JsonObject.class);
+                if (message == null) throw new IllegalArgumentException("Empty message");
+            } catch (RuntimeException invalid) {
+                sendJson(Map.of("type", "error", "error", "Invalid JSON message"));
+                return;
+            }
+
+            String type = string(message, "type", "");
+            var id = message.get("id");
+            try {
+                switch (type) {
+                    case "viewport" -> handleViewport(message);
+                    case "point" -> {
+                        int x = integer(message, "x");
+                        int z = integer(message, "z");
+                        Map<String, Object> point = onClient(() -> Map.of(
+                                "x", x,
+                                "y", backend.surfaceYAt(x, z),
+                                "z", z,
+                                "biome", backend.biomeLabelAt(x, z)));
+                        respond(id, true, point, null);
+                    }
+                    case "teleport" -> {
+                        int x = integer(message, "x");
+                        int z = integer(message, "z");
+                        onClient(() -> {
+                            backend.teleport(x, z);
+                            return null;
+                        });
+                        respond(id, true, Map.of("ok", true), null);
+                    }
+                    case "runtime_settings" -> {
+                        RuntimeSettingsPayload settings =
+                                payload(message, RuntimeSettingsPayload.class);
+                        onClient(() -> {
+                            if (settings.requestBatchSize() != null) {
+                                CartographSettings.setRequestBatchSize(settings.requestBatchSize());
+                            }
+                            if (settings.liveScanIntervalTicks() != null) {
+                                backend.setLiveScanInterval(settings.liveScanIntervalTicks());
+                            }
+                            if (settings.frontendTarget() != null) {
+                                CartographSettings.setFrontendTarget(
+                                        CartographFrontendTarget.parse(settings.frontendTarget()));
+                            }
+                            return null;
+                        });
+                        Map<String, Object> state =
+                                onClient(CartographWebUiServer.this::stateSnapshot);
+                        sendJson(Map.of("type", "runtime", "data", state.get("runtime")));
+                        respond(id, true, Map.of("ok", true), null);
+                    }
+                    case "marker_create" -> {
+                        MarkerPayload marker = payload(message, MarkerPayload.class);
+                        onClient(() -> backend.createMarker(
+                                required(marker.x(), "x"),
+                                required(marker.y(), "y"),
+                                required(marker.z(), "z"),
+                                marker.name(),
+                                icon(marker.icon()),
+                                color(marker.primaryColor(), MapMarkerStore.DEFAULT_PRIMARY_COLOR),
+                                color(marker.accentColor(), 0xffd34e),
+                                color(marker.lineColor(), MapMarkerStore.DEFAULT_LINE_COLOR),
+                                marker.description()));
+                        pushMarkersIfChanged();
+                        respond(id, true, Map.of("ok", true), null);
+                    }
+                    case "marker_update" -> {
+                        UUID markerId = UUID.fromString(string(message, "markerId", ""));
+                        MarkerPayload marker = payload(message, MarkerPayload.class);
+                        onClient(() -> {
+                            MapMarkerStore.Marker existing =
+                                    MapMarkerStore.find(markerId).orElse(null);
+                            if (existing == null) {
+                                throw new IllegalArgumentException("Marker not found");
+                            }
+                            backend.updateMarker(
+                                    markerId,
+                                    marker.x() == null ? existing.x : marker.x(),
+                                    marker.y() == null ? existing.y : marker.y(),
+                                    marker.z() == null ? existing.z : marker.z(),
+                                    marker.name() == null ? existing.name : marker.name(),
+                                    marker.icon() == null ? existing.icon : icon(marker.icon()),
+                                    marker.primaryColor() == null
+                                            ? existing.primary() : marker.primaryColor(),
+                                    marker.accentColor() == null
+                                            ? existing.accent() : marker.accentColor(),
+                                    marker.lineColor() == null
+                                            ? existing.line() : marker.lineColor(),
+                                    marker.description() == null
+                                            ? existing.description : marker.description());
+                            return null;
+                        });
+                        pushMarkersIfChanged();
+                        respond(id, true, Map.of("ok", true), null);
+                    }
+                    case "marker_delete" -> {
+                        UUID markerId = UUID.fromString(string(message, "markerId", ""));
+                        onClient(() -> {
+                            backend.deleteMarker(markerId);
+                            return null;
+                        });
+                        pushMarkersIfChanged();
+                        respond(id, true, Map.of("ok", true), null);
+                    }
+                    case "marker_reset" -> {
+                        UUID markerId = UUID.fromString(string(message, "markerId", ""));
+                        onClient(() -> {
+                            backend.resetAutomaticMarker(markerId);
+                            return null;
+                        });
+                        pushMarkersIfChanged();
+                        respond(id, true, Map.of("ok", true), null);
+                    }
+                    case "request_state" -> {
+                        sendState();
+                        respond(id, true, Map.of("ok", true), null);
+                    }
+                    case "ping" -> sendJson(Map.of("type", "pong"));
+                    default -> respond(id, false, null, "Unknown message type: " + type);
+                }
+            } catch (Exception failure) {
+                String error = failure.getMessage() == null
+                        ? failure.getClass().getSimpleName() : failure.getMessage();
+                respond(id, false, null, error);
+            }
+        }
+
+        private <T> T payload(JsonObject message, Class<T> type) {
+            if (!message.has("payload") || message.get("payload").isJsonNull()) {
+                throw new IllegalArgumentException("Missing payload");
+            }
+            return GSON.fromJson(message.get("payload"), type);
+        }
+
+        private void handleViewport(JsonObject message) {
+            ViewportPayload viewport = payload(message, ViewportPayload.class);
+            List<TileBatchItem> items = new ArrayList<>();
+            if (message.has("tiles") && message.get("tiles").isJsonArray()) {
+                var tiles = message.getAsJsonArray("tiles");
+                if (tiles.size() > 512) {
+                    throw new IllegalArgumentException("Too many visible tiles");
+                }
+                for (var element : tiles) {
+                    JsonObject tile = element.getAsJsonObject();
+                    items.add(new TileBatchItem(
+                            integer(tile, "x"),
+                            integer(tile, "z"),
+                            string(tile, "etag", "")));
                 }
             }
-        } finally {
-            activeWebSessions.decrementAndGet();
-            lastClientActivityMillis = System.currentTimeMillis();
+
+            TileBatchResult result = onClient(() -> {
+                backend.updateViewport(
+                        new CartographBackendApi.Viewport(
+                                viewport.centerX(),
+                                viewport.centerZ(),
+                                Math.max(0.03125, viewport.zoom()),
+                                Math.max(1, viewport.width()),
+                                Math.max(1, viewport.height()),
+                                false),
+                        false);
+                String dimension = backend.dimension();
+                desiredTiles.clear();
+                if (dimension != null && !dimension.isBlank()) {
+                    for (TileBatchItem item : items) {
+                        desiredTiles.put(
+                                new ChunkKey(dimension, item.x(), item.z()),
+                                item.etag() == null ? "" : item.etag());
+                    }
+                }
+                return tileBatchForSocket(new TileBatchPayload(items));
+            });
+            updateDesiredEtags(result.etags());
+            sendBinary(result.bytes());
+            respond(message.get("id"), true, Map.of("tileCount", items.size()), null);
         }
+
+        private void queueTile(ChunkKey key) {
+            if (open && desiredTiles.containsKey(key) && dirtyQueued.add(key)) {
+                dirtyTiles.add(key);
+            }
+        }
+
+        private void drainDirtyTiles() {
+            if (dirtyTiles.isEmpty()) return;
+            List<TileBatchItem> items = new ArrayList<>(96);
+            List<ChunkKey> keys = new ArrayList<>(96);
+            while (items.size() < 96) {
+                ChunkKey key = dirtyTiles.poll();
+                if (key == null) break;
+                dirtyQueued.remove(key);
+                String etag = desiredTiles.get(key);
+                if (etag != null) {
+                    keys.add(key);
+                    items.add(new TileBatchItem(key.x(), key.z(), etag));
+                }
+            }
+            if (items.isEmpty()) return;
+            try {
+                TileBatchResult result =
+                        onClient(() -> tileBatchForSocket(new TileBatchPayload(items)));
+                updateDesiredEtags(result.etags());
+                sendBinary(result.bytes());
+                pushMarkersIfChanged();
+            } catch (RuntimeException failure) {
+                LOG.debug("Unable to publish changed Cartograph tiles", failure);
+                for (ChunkKey key : keys) {
+                    if (desiredTiles.containsKey(key) && dirtyQueued.add(key)) dirtyTiles.add(key);
+                }
+            }
+        }
+
+        private void updateDesiredEtags(Map<ChunkKey, String> etags) {
+            etags.forEach((key, etag) -> {
+                if (desiredTiles.containsKey(key)) desiredTiles.put(key, etag);
+            });
+        }
+
+        private void publishLiveIfChanged() {
+            long now = System.currentTimeMillis();
+            if (now < nextLiveAt) return;
+            nextLiveAt = now + 250L;
+            Map<String, Object> live;
+            try {
+                live = onClient(CartographWebUiServer.this::liveSnapshot);
+            } catch (RuntimeException failure) {
+                LOG.debug("Unable to publish Cartograph live state", failure);
+                return;
+            }
+            String nextWorldKey = worldKey(live);
+            if (!nextWorldKey.equals(lastWorldKey)) {
+                desiredTiles.clear();
+                dirtyTiles.clear();
+                dirtyQueued.clear();
+                sendState();
+                lastWorldKey = nextWorldKey;
+                lastLiveJson = GSON.toJson(live);
+                return;
+            }
+            String serialized = GSON.toJson(live);
+            if (!serialized.equals(lastLiveJson)) {
+                sendJson(Map.of("type", "live", "data", live));
+                lastLiveJson = serialized;
+            }
+        }
+
+        private void sendState() {
+            Map<String, Object> state =
+                    onClient(CartographWebUiServer.this::stateSnapshot);
+            sendJson(Map.of("type", "state", "data", state));
+            lastWorldKey = worldKey(state);
+            lastMarkersSignature = markersSignature(state);
+        }
+
+        private void pushMarkersIfChanged() {
+            Map<String, Object> state =
+                    onClient(CartographWebUiServer.this::stateSnapshot);
+            String signature = markersSignature(state);
+            if (signature.equals(lastMarkersSignature)) return;
+            Map<String, Object> data = new HashMap<>();
+            data.put("markers", state.get("markers"));
+            data.put("structurePresets", state.get("structurePresets"));
+            sendJson(Map.of("type", "markers", "data", data));
+            lastMarkersSignature = signature;
+        }
+
+        private String markersSignature(Map<String, Object> state) {
+            return GSON.toJson(state.get("markers"))
+                    + GSON.toJson(state.get("structurePresets"));
+        }
+
+        private String worldKey(Map<String, Object> state) {
+            return String.valueOf(state.get("worldId")) + "|"
+                    + String.valueOf(state.get("dimension"));
+        }
+
+        private void respond(
+                com.google.gson.JsonElement id,
+                boolean ok,
+                Object data,
+                String error) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("type", "response");
+            if (id != null && !id.isJsonNull()) response.put("id", id);
+            response.put("ok", ok);
+            if (data != null) response.put("data", data);
+            if (error != null) response.put("error", error);
+            sendJson(response);
+        }
+
+        private void sendJson(Object value) {
+            sendFrame(1, GSON.toJson(value).getBytes(StandardCharsets.UTF_8));
+        }
+
+        private void sendBinary(byte[] value) {
+            sendFrame(2, value);
+        }
+
+        private void sendCloseFrame() {
+            if (!open) return;
+            open = false;
+            sendFrame(8, new byte[]{(byte) 0x03, (byte) 0xe8});
+        }
+
+        private void sendFrame(int opcode, byte[] payload) {
+            if (socket.isClosed()) return;
+            try {
+                int length = payload.length;
+                output.write(0x80 | (opcode & 0x0f));
+                if (length <= 125) {
+                    output.write(length);
+                } else if (length <= 65535) {
+                    output.write(126);
+                    output.write((length >>> 8) & 0xff);
+                    output.write(length & 0xff);
+                } else {
+                    output.write(127);
+                    long longLength = length;
+                    for (int shift = 56; shift >= 0; shift -= 8) {
+                        output.write((int) ((longLength >>> shift) & 0xff));
+                    }
+                }
+                output.write(payload);
+                output.flush();
+            } catch (IOException failure) {
+                open = false;
+            }
+        }
+    }
+
+    private static WebSocketFrame readWebSocketFrame(
+            Socket socket,
+            BufferedInputStream input) throws IOException {
+        socket.setSoTimeout(250);
+        int first;
+        try {
+            first = input.read();
+        } catch (SocketTimeoutException timeout) {
+            return new WebSocketFrame(-1, new byte[0]);
+        }
+        if (first < 0) return null;
+
+        socket.setSoTimeout(10_000);
+        int second = input.read();
+        if (second < 0) throw new IOException("Unexpected EOF in WebSocket frame");
+        if ((second & 0x80) == 0) {
+            throw new IOException("Client WebSocket frames must be masked");
+        }
+        long length = second & 0x7f;
+        if (length == 126) {
+            int a = input.read();
+            int b = input.read();
+            if (a < 0 || b < 0) throw new IOException("Truncated WebSocket frame length");
+            length = ((a & 0xff) << 8) | (b & 0xff);
+        } else if (length == 127) {
+            length = 0;
+            for (int i = 0; i < 8; i++) {
+                int value = input.read();
+                if (value < 0) throw new IOException("Truncated WebSocket frame length");
+                length = (length << 8) | (value & 0xff);
+            }
+        }
+        if (length < 0 || length > MAX_BODY) {
+            throw new IOException("WebSocket message exceeds limit");
+        }
+        byte[] mask = input.readNBytes(4);
+        if (mask.length != 4) throw new IOException("Truncated WebSocket mask");
+        byte[] payload = input.readNBytes((int) length);
+        if (payload.length != (int) length) {
+            throw new IOException("Truncated WebSocket payload");
+        }
+        for (int i = 0; i < payload.length; i++) {
+            payload[i] ^= mask[i & 3];
+        }
+        socket.setSoTimeout(250);
+        int opcode = first & 0x0f;
+        if ((first & 0x80) == 0) {
+            throw new IOException("Fragmented WebSocket messages are not supported");
+        }
+        return new WebSocketFrame(opcode, payload);
+    }
+
+    private static String string(JsonObject object, String key, String fallback) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) return fallback;
+        return object.get(key).getAsString();
+    }
+
+    private static int integer(JsonObject object, String key) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
+            throw new IllegalArgumentException("Missing " + key);
+        }
+        return object.get(key).getAsInt();
     }
 
     private static byte[] resource(String path) throws IOException {
@@ -755,12 +1090,6 @@ final class CartographWebUiServer implements AutoCloseable {
 
     private static String decode(String value) {
         return URLDecoder.decode(value, StandardCharsets.UTF_8);
-    }
-
-    private static int parseRequiredInt(Map<String, String> query, String key) {
-        String value = query.get(key);
-        if (value == null) throw new IllegalArgumentException("Missing query: " + key);
-        return Integer.parseInt(value);
     }
 
     private static int parseInt(String value, int fallback) {

@@ -17,6 +17,9 @@ public final class MapClientCache {
     private record RegionKey(String dimension, int x, int z) {}
     private static final Map<RegionKey, Integer> REGION_TILE_COUNTS = new HashMap<>();
     private static final Map<RegionKey, Long> REGION_REVISIONS = new HashMap<>();
+    private static final java.util.concurrent.CopyOnWriteArrayList<
+            java.util.function.Consumer<ChunkKey>> TILE_CHANGE_LISTENERS =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
     private record DiskRestore(
             java.util.UUID worldId, long generation, SurfaceTile tile) {}
     private static Set<ChunkKey> DISK_RESTORE_SCHEDULED = ConcurrentHashMap.newKeySet();
@@ -311,8 +314,23 @@ public final class MapClientCache {
                 Math.floorDiv(key.z(), 16));
     }
 
+    static void addTileChangeListener(java.util.function.Consumer<ChunkKey> listener) {
+        if (listener != null) TILE_CHANGE_LISTENERS.addIfAbsent(listener);
+    }
+
+    static void removeTileChangeListener(java.util.function.Consumer<ChunkKey> listener) {
+        TILE_CHANGE_LISTENERS.remove(listener);
+    }
+
     private static void markRegionChanged(ChunkKey key) {
         REGION_REVISIONS.put(regionKey(key), ++regionRevisionCounter);
+        for (var listener : TILE_CHANGE_LISTENERS) {
+            try {
+                listener.accept(key);
+            } catch (RuntimeException failure) {
+                LOG.debug("Cartograph tile listener failed", failure);
+            }
+        }
     }
 
     static long regionRevision(String dimension, int regionX, int regionZ) {

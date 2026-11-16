@@ -75,41 +75,43 @@ can become idle without changing shortcut routing.
 
 `WebCartographFrontend` is only a presentation adapter.
 
-It owns a `CartographWebUiServer`, which is a loopback-only HTTP transport bridge:
+It owns a `CartographWebUiServer` with two distinct responsibilities:
 
-- binds only to `127.0.0.1`
-- uses a random per-session token
-- serves `webui/index.html` and `webui/app.js` from the JAR
-- marshals Minecraft access back onto the Minecraft client thread
-- exposes state, viewport, tile, point, marker, teleport and runtime-setting APIs
-- acquires/releases the shared backend through `CartographBackendRuntime`
+- loopback HTTP serves only `webui/index.html` and `webui/app.js` from the JAR
+- one authenticated WebSocket at `/api/v1/ws` carries all runtime traffic
 
-The HTTP bridge receives an injected `CartographBackendApi`; it never creates a
-`MinecraftCartographBackend` itself.
+The server binds only to `127.0.0.1`, uses a random per-session token, and
+receives an injected `CartographBackendApi`. It never creates a
+`MinecraftCartographBackend` itself. Minecraft access is marshalled onto the
+Minecraft client thread, and the shared backend is acquired/released through
+`CartographBackendRuntime`.
 
-Map transport is deliberately separated from normal state/action traffic:
+The WebSocket protocol is the Web frontend transport adapter:
 
-- normal state, viewport, point, marker, teleport and settings operations use HTTP
-- WebUI liveness uses one SSE session connection; SSE does not carry map pixels
-- map pixels use `POST /api/v1/tiles`, a compact CTB1 binary batch response
-- the browser currently requests up to 96 chunks per batch instead of one HTTP
-  request per 16x16 chunk
-- ETags are carried inside the batch so unchanged chunks return metadata only
-- the browser composes chunks into 32x32-chunk region atlases and draws those
-  atlases, rather than maintaining one canvas and draw call per chunk
-- while the user drags the map, only already-cached atlases are rendered; viewport
-  submission and new map requests resume after the drag ends
-- state polling does not resubmit an unchanged viewport or rebuild static DOM lists
+- the initial `state` message contains markers, structure presets, player and runtime settings
+- `viewport` replaces the previous visible tile subscription and updates the backend viewport
+- map pixels use binary WebSocket frames carrying the existing CTB1 tile-batch format
+- each viewport requests at most 512 visible chunks, ordered outward from the viewport centre
+- unchanged chunks use ETags; unavailable chunks are not periodically polled
+- `MapClientCache` publishes tile-change events; only changed tiles in the active viewport are pushed
+- player/cache state is pushed only when it changes
+- marker, teleport, point-query and runtime-setting actions use request/ack messages on the same socket
+- viewport updates are latest-wins: only one request may be in flight, with at most one latest update queued
 
-This keeps the transport replaceable. WebSocket can be added later as another
-transport adapter if bidirectional streaming is useful, without changing
-`CartographBackendApi` or frontend routing.
+There is no runtime `/state` polling, `/tiles` HTTP traffic, or SSE connection.
+The browser composes incoming tiles into 32x32-chunk region atlases. While the
+user drags the map, it renders cached atlases only; after release it sends one
+debounced viewport update. Missing tiles wait for a backend cache-change event
+instead of repeatedly asking the server.
+
+This transport remains Web-frontend-specific. The in-game frontend can call
+`CartographBackendApi` directly; neither the shared backend nor frontend routing
+depends on WebSocket.
 
 When WebUI is active in singleplayer, Cartograph temporarily disables
 `pauseOnLostFocus` so opening the system browser does not freeze the integrated
-server. A startup grace period covers slow browser launch, then the SSE session
-explicitly represents frontend liveness. The previous setting is restored after
-the WebUI session becomes idle or closes.
+server. The active WebSocket session owns frontend liveness. The previous pause
+setting is restored after the WebUI session becomes idle or closes.
 
 ## Facts-only persistence
 

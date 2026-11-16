@@ -146,7 +146,53 @@ tasks.register('verifyV31WebUiBoundary') {
     }
 }
 
+tasks.register('verifyV31WebSocketTransport') {
+    doLast {
+        def app = file('src/main/resources/webui/app.js').text
+        def server = file(
+            'src/main/java/com/wanstu/cartographv3/CartographWebUiServer.java').text
+        def cache = file(
+            'src/main/java/com/wanstu/cartographv3/MapClientCache.java').text
+
+        ['fetch(', 'XMLHttpRequest', 'EventSource',
+         '/api/v1/state', '/api/v1/tiles', '/api/v1/session',
+         '/api/v1/viewport', '/api/v1/point', '/api/v1/teleport',
+         '/api/v1/markers', '/api/v1/runtime-settings'].each { token ->
+            if (app.contains(token)) {
+                throw new GradleException(
+                    'WebUI runtime must use one WebSocket, found legacy transport: ' + token)
+            }
+        }
+        ['text/event-stream', '/api/v1/state', '/api/v1/tiles',
+         '/api/v1/session', '/api/v1/viewport', '/api/v1/point',
+         '/api/v1/teleport', '/api/v1/markers', '/api/v1/runtime-settings'].each { token ->
+            if (server.contains(token)) {
+                throw new GradleException(
+                    'Legacy runtime HTTP endpoint remains in the WebUI server: ' + token)
+            }
+        }
+        ['Sec-WebSocket-Accept', 'WebSocketSession', 'sendBinary',
+         'readWebSocketFrame'].each { token ->
+            if (!server.contains(token)) {
+                throw new GradleException(
+                    'WebSocket server implementation is incomplete: ' + token)
+            }
+        }
+        if (!app.contains('new WebSocket(')
+                || !app.contains('binaryType=\'arraybuffer\'')) {
+            throw new GradleException(
+                'WebUI must use one binary-capable WebSocket connection')
+        }
+        if (!cache.contains('addTileChangeListener')
+                || !server.contains('MapClientCache.addTileChangeListener')) {
+            throw new GradleException(
+                'Map tile updates must be pushed from backend cache-change events')
+        }
+    }
+}
+
 tasks.named('check').configure {
     dependsOn tasks.named('verifyV3Isolation')
     dependsOn tasks.named('verifyV31WebUiBoundary')
+    dependsOn tasks.named('verifyV31WebSocketTransport')
 }

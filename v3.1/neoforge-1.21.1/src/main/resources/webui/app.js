@@ -26,11 +26,8 @@
   const TILE_SIZE = 16;
   const REGION_CHUNKS = 32;
   const REGION_PIXELS = TILE_SIZE * REGION_CHUNKS;
-  const TILE_BATCH_SIZE = 96;
   const MAX_REGION_CACHE = 48;
-  const MISSING_RETRY_MS = 2000;
-  const TILE_RECHECK_MS = 10000;
-  const ERROR_RETRY_MS = 3000;
+  const MAX_VIEWPORT_TILES = 512;
   const MIN_ZOOM = 0.0625;
   const MAX_ZOOM = 64;
 
@@ -61,19 +58,22 @@
   let renderQueued = false;
   let viewportTimer = 0;
   let cursorTimer = 0;
-  let stateTimer = 0;
   let toastTimer = 0;
   let lastPointKey = '';
-  let sessionEvents = null;
+  let socket = null;
+  let socketRetryMs = 1000;
+  let socketReconnectTimer = 0;
+  let socketRequestId = 0;
+  let lastViewportSignature = '';
+  let viewportRequestInFlight = false;
+  let viewportRequestQueued = false;
+  const pendingSocketRequests = new Map();
   let markerUiSignature = null;
   let presetUiSignature = null;
 
   const tileCache = new Map();
   const regionCache = new Map();
-  const tileQueue = [];
-  const tileQueued = new Set();
   const markerNodes = new Map();
-  let tileBatchActive = false;
   let regionClock = 0;
 
   function clone(v){ return JSON.parse(JSON.stringify(v)); }
@@ -92,23 +92,97 @@
     }));
   }
 
-  function openSessionChannel(){
-    if(!token || !window.EventSource)return;
-    if(sessionEvents)sessionEvents.close();
-    sessionEvents=new EventSource('/api/v1/session?token='+encodeURIComponent(token));
+  function connectSocket(){
+    if(!token||!window.WebSocket)return;
+    clearTimeout(socketReconnectTimer);
+    const url=new URL('/api/v1/ws',location.href);
+    url.protocol=location.protocol==='https:'?'wss:':'ws:';
+    url.searchParams.set('token',token);
+    const current=new WebSocket(url);
+    current.binaryType='arraybuffer';
+    socket=current;
+    current.onopen=()=>{if(socket!==current)return;socketRetryMs=1000;lastViewportSignature='';setConnection(true);};
+    current.onmessage=event=>{
+      if(socket!==current)return;
+      if(event.data instanceof ArrayBuffer){applyTileBatch(event.data);return;}
+      if(typeof event.data!=='string')return;
+      try{handleSocketMessage(JSON.parse(event.data));}catch(_){}
+    };
+    current.onclose=()=>{
+      if(socket!==current)return;
+      socket=null;setConnection(false);
+      for(const [id,p] of pendingSocketRequests){clearTimeout(p.timer);p.reject(new Error('WebSocket disconnected'));pendingSocketRequests.delete(id);}
+      socketReconnectTimer=setTimeout(connectSocket,socketRetryMs);
+      socketRetryMs=Math.min(10000,socketRetryMs*2);
+    };
+    current.onerror=()=>{setConnection(false);};
   }
 
-  async function api(path, options){
-    options = options || {};
-    const headers = new Headers(options.headers || {});
-    if(token)headers.set('X-Cartograph-Token', token);
-    if(options.body && !headers.has('Content-Type'))headers.set('Content-Type','application/json');
-    const response = await fetch(path, Object.assign({}, options, {headers:headers, cache:'no-store'}));
-    if(!response.ok && response.status !== 204 && response.status !== 304){
-      const message = await response.text().catch(()=>'');
-      throw new Error(String(response.status) + ' ' + (message || response.statusText));
+  function handleSocketMessage(message){
+    if(!message||typeof message!=='object')return;
+    if(message.type==='state'){applyServerState(message.data);return;}
+    if(message.type==='live'){applyLiveState(message.data);return;}
+    if(message.type==='markers'&&serverState){
+      serverState.markers=message.data&&message.data.markers||[];
+      serverState.structurePresets=message.data&&message.data.structurePresets||[];
+      refreshStaticUi(false);renderStatus();scheduleRender();return;
     }
-    return response;
+    if(message.type==='runtime'&&serverState){
+      serverState.runtime=Object.assign({},serverState.runtime||{},message.data||{});
+      syncRuntimeSettings();renderStatus();return;
+    }
+    if(message.type==='response'){
+      const id=String(message.id==null?'':message.id),pending=pendingSocketRequests.get(id);
+      if(!pending)return;
+      pendingSocketRequests.delete(id);clearTimeout(pending.timer);
+      if(message.ok)pending.resolve(message.data||{});
+      else pending.reject(new Error(message.error||'WebSocket request failed'));
+      return;
+    }
+    if(message.type==='error')toast(message.error||'WebSocket error');
+  }
+
+  function applyServerState(next){
+    if(!next)return;
+    const nextWorldKey=worldKey(next),worldChanged=nextWorldKey!==lastWorldKey;
+    serverState=next;currentDimension=next.dimension||'';
+    setConnection(!!next.connected);
+    if(worldChanged){
+      lastWorldKey=nextWorldKey;tileCache.clear();regionCache.clear();
+      markerUiSignature=null;presetUiSignature=null;lastViewportSignature='';
+      viewInitialized=false;
+    }
+    if(!viewInitialized)initView(next);
+    renderStatus();refreshStaticUi(worldChanged);syncRuntimeSettings();scheduleRender();
+    sendViewportSoon();
+  }
+
+  function applyLiveState(live){
+    if(!live||!serverState)return;
+    const nextWorldKey=worldKey(live);
+    if(lastWorldKey&&nextWorldKey!==lastWorldKey){
+      wsRequest('request_state').catch(()=>{});
+      return;
+    }
+    setConnection(!!live.connected);
+    currentDimension=live.dimension||currentDimension;
+    serverState.connected=!!live.connected;
+    serverState.dimension=live.dimension||serverState.dimension;
+    serverState.worldId=live.worldId||serverState.worldId;
+    if(live.player)serverState.player=live.player;
+    if(live.runtime)serverState.runtime=Object.assign({},serverState.runtime||{},live.runtime);
+    renderStatus();scheduleRender();
+  }
+
+  function wsRequest(type,fields){
+    if(!socket||socket.readyState!==WebSocket.OPEN)return Promise.reject(new Error('WebSocket 尚未连接'));
+    const id=String(++socketRequestId),message=Object.assign({type:type,id:id},fields||{});
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{pendingSocketRequests.delete(id);reject(new Error('WebSocket 请求超时'));},10000);
+      pendingSocketRequests.set(id,{resolve:resolve,reject:reject,timer:timer});
+      try{socket.send(JSON.stringify(message));}
+      catch(error){clearTimeout(timer);pendingSocketRequests.delete(id);reject(error);}
+    });
   }
 
   function escapeHtml(v){
@@ -161,7 +235,7 @@
     canvas.height=Math.max(1,Math.round(s.height*dpr));
     canvas.style.width=s.width+'px'; canvas.style.height=s.height+'px';
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    resetTileQueue();scheduleRender();sendViewportSoon();
+    scheduleRender();sendViewportSoon();
   }
   function resizeTransform(){
     const s=stageSize(), dpr=Math.max(1,window.devicePixelRatio||1);
@@ -186,11 +260,11 @@
     const wx=view.centerX+(sx-s.width*.5)/view.zoom;
     const wz=view.centerZ+(sy-s.height*.5)/view.zoom;
     view.centerX=wx-(sx-s.width*.5)/next; view.centerZ=wz-(sy-s.height*.5)/next; view.zoom=next;
-    resetTileQueue();saveView();scheduleRender();sendViewportSoon();
+    lastViewportSignature='';saveView();scheduleRender();sendViewportSoon();
   }
   function centerPlayer(){
     const p=serverState&&serverState.player;if(!p||!p.present)return;
-    view.centerX=p.x;view.centerZ=p.z;resetTileQueue();saveView();scheduleRender();sendViewportSoon();toast('已回到玩家位置');
+    view.centerX=p.x;view.centerZ=p.z;lastViewportSignature='';saveView();scheduleRender();sendViewportSoon();toast('已回到玩家位置');
   }
 
   function scheduleRender(){
@@ -215,13 +289,6 @@
         const y=s.height*.5+(rz*REGION_CHUNKS*TILE_SIZE-view.centerZ)*view.zoom;
         const size=REGION_PIXELS*view.zoom;
         ctx.drawImage(region.canvas,x,y,size,size);
-      }
-      if(!dragging){
-        const now=Date.now();
-        for(let cz=minZ;cz<=maxZ;cz++)for(let cx=minX;cx<=maxX;cx++){
-          const tile=tileCache.get(tileKey(cx,cz));
-          if(!tile || now>=(tile.retryAt||0))enqueueTile(cx,cz);
-        }
       }
     }
     ctx.restore();renderPlayer();renderMarkers();renderHud();
@@ -258,48 +325,59 @@
     region.ctx.putImageData(image,floorMod(cx,REGION_CHUNKS)*TILE_SIZE,floorMod(cz,REGION_CHUNKS)*TILE_SIZE);
     return region.key;
   }
-  function resetTileQueue(){tileQueue.length=0;tileQueued.clear();}
-  function enqueueTile(cx,cz){
-    const key=tileKey(cx,cz);if(tileQueued.has(key))return;
-    tileQueued.add(key);tileQueue.push({cx:cx,cz:cz,key:key});pumpTiles();
+  function clearTileFromRegion(tile,cx,cz){
+    if(!tile||!tile.regionKey)return;
+    const region=regionCache.get(tile.regionKey);if(!region)return;
+    region.ctx.clearRect(floorMod(cx,REGION_CHUNKS)*TILE_SIZE,floorMod(cz,REGION_CHUNKS)*TILE_SIZE,TILE_SIZE,TILE_SIZE);
   }
-  function pumpTiles(){
-    if(tileBatchActive||!tileQueue.length)return;
-    const jobs=tileQueue.splice(0,TILE_BATCH_SIZE);jobs.forEach(job=>tileQueued.delete(job.key));
-    tileBatchActive=true;
-    fetchTileBatch(jobs).finally(()=>{tileBatchActive=false;pumpTiles();});
-  }
-  async function fetchTileBatch(jobs){
-    const batchDimension=currentDimension;
-    const payload={tiles:jobs.map(job=>{const old=tileCache.get(job.key);return{x:job.cx,z:job.cz,etag:old&&old.etag||''};})};
-    try{
-      const r=await api('/api/v1/tiles',{method:'POST',body:JSON.stringify(payload)});
-      const buffer=await r.arrayBuffer();if(batchDimension!==currentDimension)return;
-      const viewData=new DataView(buffer),decoder=new TextDecoder();
-      let offset=0;
-      if(viewData.byteLength<8||viewData.getUint32(offset)!==0x43544231)throw new Error('bad tile batch');offset+=4;
-      const count=viewData.getUint32(offset);offset+=4;const now=Date.now();
-      for(let n=0;n<count;n++){
-        const cx=viewData.getInt32(offset);offset+=4;const cz=viewData.getInt32(offset);offset+=4;
-        const status=viewData.getUint8(offset);offset+=1;const tagLen=viewData.getUint16(offset);offset+=2;
-        const etag=tagLen?decoder.decode(new Uint8Array(buffer,offset,tagLen)):'';offset+=tagLen;
-        const bodyLen=viewData.getUint32(offset);offset+=4;const key=tileKey(cx,cz),old=tileCache.get(key);
-        if(status===0){
-          tileCache.set(key,Object.assign({},old||{cx:cx,cz:cz},{checkedAt:now,retryAt:now+MISSING_RETRY_MS}));
-        }else if(status===2){
-          if(old){old.checkedAt=now;old.retryAt=now+TILE_RECHECK_MS;if(etag)old.etag=etag;}
-          offset+=bodyLen;
-        }else if(status===1){
-          if(bodyLen!==TILE_SIZE*TILE_SIZE*3){offset+=bodyLen;continue;}
-          const bytes=new Uint8Array(buffer,offset,bodyLen),rk=writeTileToRegion(cx,cz,bytes);offset+=bodyLen;
-          tileCache.set(key,{cx:cx,cz:cz,regionKey:rk,etag:etag,checkedAt:now,retryAt:now+TILE_RECHECK_MS});
-        }else offset+=bodyLen;
-      }
-      scheduleRender();
-    }catch(_){
-      const now=Date.now();
-      jobs.forEach(job=>{const old=tileCache.get(job.key);tileCache.set(job.key,Object.assign({},old||{cx:job.cx,cz:job.cz},{checkedAt:now,retryAt:now+ERROR_RETRY_MS}));});
+  function applyTileBatch(buffer){
+    if(!(buffer instanceof ArrayBuffer)||buffer.byteLength<8||!currentDimension)return;
+    const batchDimension=currentDimension,viewData=new DataView(buffer),decoder=new TextDecoder();
+    let offset=0;
+    if(viewData.getUint32(offset)!==0x43544231)return;offset+=4;
+    const count=viewData.getUint32(offset);offset+=4;if(count>512)return;
+    const now=Date.now();
+    for(let n=0;n<count;n++){
+      if(offset+15>viewData.byteLength)return;
+      const cx=viewData.getInt32(offset);offset+=4;const cz=viewData.getInt32(offset);offset+=4;
+      const status=viewData.getUint8(offset);offset+=1;const tagLen=viewData.getUint16(offset);offset+=2;
+      if(offset+tagLen+4>viewData.byteLength)return;
+      const etag=tagLen?decoder.decode(new Uint8Array(buffer,offset,tagLen)):'';offset+=tagLen;
+      const bodyLen=viewData.getUint32(offset);offset+=4;
+      if(offset+bodyLen>viewData.byteLength)return;
+      const key=tileKey(cx,cz),old=tileCache.get(key);
+      if(status===0){
+        clearTileFromRegion(old,cx,cz);
+        tileCache.set(key,{cx:cx,cz:cz,etag:'',checkedAt:now,missing:true});
+      }else if(status===2){
+        if(old){old.checkedAt=now;old.etag=etag;old.missing=false;}
+        offset+=bodyLen;
+      }else if(status===1){
+        if(bodyLen!==TILE_SIZE*TILE_SIZE*3){offset+=bodyLen;continue;}
+        const bytes=new Uint8Array(buffer,offset,bodyLen),rk=writeTileToRegion(cx,cz,bytes);offset+=bodyLen;
+        tileCache.set(key,{cx:cx,cz:cz,regionKey:rk,etag:etag,checkedAt:now,missing:false});
+      }else offset+=bodyLen;
     }
+    if(batchDimension===currentDimension)scheduleRender();
+  }
+  function visibleTileJobs(){
+    const s=stageSize(),hx=s.width/(2*view.zoom),hz=s.height/(2*view.zoom);
+    const minX=Math.floor((view.centerX-hx)/16)-1,maxX=Math.floor((view.centerX+hx)/16)+1;
+    const minZ=Math.floor((view.centerZ-hz)/16)-1,maxZ=Math.floor((view.centerZ+hz)/16)+1;
+    const centerX=Math.floor(view.centerX/16),centerZ=Math.floor(view.centerZ/16);
+    const jobs=[],seen=new Set();
+    const add=(x,z)=>{
+      if(x<minX||x>maxX||z<minZ||z>maxZ||jobs.length>=MAX_VIEWPORT_TILES)return;
+      const key=x+'|'+z;if(seen.has(key))return;seen.add(key);
+      const old=tileCache.get(tileKey(x,z));jobs.push({x:x,z:z,etag:old&&old.etag||''});
+    };
+    const maxRadius=Math.max(centerX-minX,maxX-centerX,centerZ-minZ,maxZ-centerZ);
+    for(let radius=0;radius<=maxRadius&&jobs.length<MAX_VIEWPORT_TILES;radius++){
+      if(radius===0){add(centerX,centerZ);continue;}
+      for(let dx=-radius;dx<=radius&&jobs.length<MAX_VIEWPORT_TILES;dx++){add(centerX+dx,centerZ-radius);add(centerX+dx,centerZ+radius);}
+      for(let dz=-radius+1;dz<radius&&jobs.length<MAX_VIEWPORT_TILES;dz++){add(centerX-radius,centerZ+dz);add(centerX+radius,centerZ+dz);}
+    }
+    return jobs;
   }
 
   function renderPlayer(){
@@ -363,8 +441,19 @@
 
   function sendViewportSoon(){clearTimeout(viewportTimer);viewportTimer=setTimeout(sendViewport,80);}
   async function sendViewport(){
-    if(!serverState||!serverState.connected||!viewInitialized)return;const s=stageSize();
-    try{await api('/api/v1/viewport',{method:'POST',body:JSON.stringify({centerX:view.centerX,centerZ:view.centerZ,zoom:view.zoom,width:Math.round(s.width),height:Math.round(s.height)})});}catch(_){}
+    if(!serverState||!serverState.connected||!viewInitialized||!socket||socket.readyState!==WebSocket.OPEN)return;
+    if(viewportRequestInFlight){viewportRequestQueued=true;return;}
+    const s=stageSize(),viewport={centerX:view.centerX,centerZ:view.centerZ,zoom:view.zoom,width:Math.round(s.width),height:Math.round(s.height)};
+    const tiles=visibleTileJobs();
+    const signature=[viewport.centerX,viewport.centerZ,viewport.zoom,viewport.width,viewport.height,tiles.map(t=>t.x+','+t.z).join(';')].join('|');
+    if(signature===lastViewportSignature)return;
+    lastViewportSignature=signature;viewportRequestInFlight=true;
+    try{await wsRequest('viewport',{payload:viewport,tiles:tiles});}
+    catch(_){if(lastViewportSignature===signature)lastViewportSignature='';}
+    finally{
+      viewportRequestInFlight=false;
+      if(viewportRequestQueued){viewportRequestQueued=false;lastViewportSignature='';sendViewportSoon();}
+    }
   }
   function initView(next){
     const saved=loadJson(VIEW_KEY,{}),same=saved.worldKey&&saved.worldKey===worldKey(next);
@@ -390,24 +479,6 @@
     if(force||ps!==presetUiSignature){
       presetUiSignature=ps;renderStructureSettings();
     }
-  }
-  async function pollState(){
-    try{
-      const r=await api('/api/v1/state');const next=await r.json();setConnection(!!next.connected);
-      const wk=worldKey(next),worldChanged=wk!==lastWorldKey;serverState=next;currentDimension=next.dimension||'';
-      let viewportChanged=false;
-      if(worldChanged){
-        lastWorldKey=wk;tileCache.clear();regionCache.clear();resetTileQueue();markerUiSignature=null;presetUiSignature=null;
-        initView(next);viewportChanged=true;
-      }else if(!viewInitialized){initView(next);viewportChanged=true;}
-      renderStatus();refreshStaticUi(false);syncRuntimeSettings();scheduleRender();
-      if(viewportChanged)sendViewportSoon();
-    }catch(_){setConnection(false);}
-    clearTimeout(stateTimer);stateTimer=setTimeout(pollState,750);
-  }
-  async function pollStateOnce(){
-    const r=await api('/api/v1/state');serverState=await r.json();currentDimension=serverState.dimension||'';
-    renderStatus();refreshStaticUi(false);syncRuntimeSettings();scheduleRender();
   }
   function renderStatus(){
     const markers=serverState&&serverState.markers||[],structures=markers.filter(m=>m.kind==='structure').length,custom=markers.length-structures;
@@ -447,7 +518,7 @@
     q('#scanRange').value=r.liveScanIntervalTicks;q('#scanValue').textContent=r.liveScanIntervalTicks+' tick / '+(r.liveScanIntervalTicks/20).toFixed(2)+' s';
   }
 
-  async function queryPoint(x,z){const r=await api('/api/v1/point?x='+Math.round(x)+'&z='+Math.round(z));return r.json();}
+  async function queryPoint(x,z){return wsRequest('point',{x:Math.round(x),z:Math.round(z)});}
   function updateCursor(clientX,clientY){
     const p=screenToWorld(clientX,clientY),x=Math.round(p.x),z=Math.round(p.z),key=x+'|'+z;if(key===lastPointKey)return;lastPointKey=key;
     q('#cursorCoords').textContent='X '+x+'　Z '+z;clearTimeout(cursorTimer);cursorTimer=setTimeout(async()=>{try{const info=await queryPoint(x,z);q('#cursorCoords').textContent='X '+info.x+'　Y '+info.y+'　Z '+info.z;q('#cursorBiome').textContent=String(info.biome||'群系：未加载').replace(/^群系：/,'');}catch(_){}},120);
@@ -499,12 +570,12 @@
   async function saveEditor(){
     const name=q('#markerName').value.trim(),x=Number(q('#markerX').value),y=Number(q('#markerY').value),z=Number(q('#markerZ').value);if(!name){toast('请输入标点名称');return;}if(![x,y,z].every(Number.isFinite)){toast('请输入有效坐标');return;}
     const payload={name:name,icon:currentEditorIcon,primaryColor:0xffffff,accentColor:colorInt(q('#markerColor').value),lineColor:0x202020,description:q('#markerDescription').value.trim(),x:Math.round(x),y:Math.round(y),z:Math.round(z)};
-    try{if(editorMode==='edit'&&selectedMarker)await api('/api/v1/markers/'+selectedMarker.id,{method:'PUT',body:JSON.stringify(payload)});else await api('/api/v1/markers',{method:'POST',body:JSON.stringify(payload)});closeModal();toast(editorMode==='edit'?'标点已保存':'标点已添加');await pollStateOnce();}catch(e){toast('保存失败：'+e.message);}
+    try{if(editorMode==='edit'&&selectedMarker)await wsRequest('marker_update',{markerId:selectedMarker.id,payload:payload});else await wsRequest('marker_create',{payload:payload});closeModal();toast(editorMode==='edit'?'标点已保存':'标点已添加');}catch(e){toast('保存失败：'+e.message);}
   }
   async function deleteOrReset(){
-    if(!selectedMarker)return;try{if(selectedMarker.modifiedAuto){await api('/api/v1/markers/'+selectedMarker.id+'/reset',{method:'POST'});toast('已重置为自动结构');}else{await api('/api/v1/markers/'+selectedMarker.id,{method:'DELETE'});toast('已删除');}closeModal();closeContexts();await pollStateOnce();}catch(e){toast('操作失败：'+e.message);}
+    if(!selectedMarker)return;try{if(selectedMarker.modifiedAuto){await wsRequest('marker_reset',{markerId:selectedMarker.id});toast('已重置为自动结构');}else{await wsRequest('marker_delete',{markerId:selectedMarker.id});toast('已删除');}closeModal();closeContexts();}catch(e){toast('操作失败：'+e.message);}
   }
-  async function teleport(x,z){try{await api('/api/v1/teleport',{method:'POST',body:JSON.stringify({x:Math.round(x),z:Math.round(z)})});toast('已请求传送至 '+Math.round(x)+', '+Math.round(z));}catch(e){toast('传送失败：'+e.message);}}
+  async function teleport(x,z){try{await wsRequest('teleport',{x:Math.round(x),z:Math.round(z)});toast('已请求传送至 '+Math.round(x)+', '+Math.round(z));}catch(e){toast('传送失败：'+e.message);}}
 
   function enablePanelDrag(panel){
     const head=q('.panel-head',panel);if(!head)return;let moving=false,dx=0,dy=0;
@@ -533,11 +604,11 @@
     q('#markerScaleRange').oninput=e=>{settings.markerScale=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#markerDefaultColor').oninput=e=>{settings.markerDefaultColor=e.target.value.toUpperCase();saveSettings();renderSettings();};
     q('#markerDefaultSize').oninput=e=>{settings.markerDefaultSize=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#markerDefaultIconSelect').onclick=()=>openIconDropdown(q('#markerDefaultIconSelect'),settings.markerDefaultIcon,i=>{settings.markerDefaultIcon=i;saveSettings();renderSettings();});
     q('#markerIconSelect').onclick=()=>openIconDropdown(q('#markerIconSelect'),currentEditorIcon,i=>{currentEditorIcon=i;updateIconSelect(q('#markerIconSelect'),i);});q('#markerColor').oninput=e=>{q('#markerSwatch').style.background=e.target.value;q('#markerColorText').textContent=e.target.value.toUpperCase();};
-    let rt=0;const sendRuntime=()=>{clearTimeout(rt);rt=setTimeout(async()=>{try{await api('/api/v1/runtime-settings',{method:'POST',body:JSON.stringify({requestBatchSize:Number(q('#requestRange').value),liveScanIntervalTicks:Number(q('#scanRange').value)})});}catch(_){}},180);};
+    let rt=0;const sendRuntime=()=>{clearTimeout(rt);rt=setTimeout(()=>{wsRequest('runtime_settings',{payload:{requestBatchSize:Number(q('#requestRange').value),liveScanIntervalTicks:Number(q('#scanRange').value)}}).catch(()=>{});},180);};
     q('#requestRange').oninput=e=>{q('#requestValue').textContent=e.target.value;sendRuntime();};q('#scanRange').oninput=e=>{const v=Number(e.target.value);q('#scanValue').textContent=v+' tick / '+(v/20).toFixed(2)+' s';sendRuntime();};
     q('#zoomIn').onclick=()=>setZoom(view.zoom*1.25);q('#zoomOut').onclick=()=>setZoom(view.zoom/1.25);q('#locateBtn').onclick=centerPlayer;
     mapStage.addEventListener('wheel',e=>{if(e.target.closest('.floating-panel,.context-menu,.right-controls,.coord-box,.scale-box'))return;e.preventDefault();closeContexts();setZoom(e.deltaY<0?view.zoom*1.12:view.zoom/1.12,e.clientX,e.clientY);},{passive:false});
-    mapStage.addEventListener('pointerdown',e=>{if(e.button!==0||!settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker'))return;closeContexts();resetTileQueue();dragging=true;dragX=e.clientX;dragY=e.clientY;mapStage.classList.add('dragging');mapStage.setPointerCapture(e.pointerId);});
+    mapStage.addEventListener('pointerdown',e=>{if(e.button!==0||!settings.dragMap||e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker'))return;closeContexts();dragging=true;dragX=e.clientX;dragY=e.clientY;mapStage.classList.add('dragging');mapStage.setPointerCapture(e.pointerId);});
     mapStage.addEventListener('pointermove',e=>{updateCursor(e.clientX,e.clientY);if(!dragging)return;const dx=e.clientX-dragX,dy=e.clientY-dragY;dragX=e.clientX;dragY=e.clientY;view.centerX-=dx/view.zoom;view.centerZ-=dy/view.zoom;scheduleRender();});
     mapStage.addEventListener('pointerup',()=>{if(dragging){dragging=false;mapStage.classList.remove('dragging');saveView();scheduleRender();sendViewportSoon();}});
     mapStage.addEventListener('contextmenu',e=>{if(e.target.closest('.floating-panel,.context-menu,.right-controls,.map-marker'))return;e.preventDefault();openMapContext(e.clientX,e.clientY);});
@@ -546,7 +617,7 @@
     q('#addMarkerButton').onclick=async()=>{const x=Math.round(view.centerX),z=Math.round(view.centerZ);let p={x:x,y:serverState&&serverState.player?serverState.player.y:64,z:z};try{p=await queryPoint(x,z);}catch(_){}openEditor(null,p);};
     q('#saveMarkerButton').onclick=saveEditor;q('#deleteMarkerButton').onclick=deleteOrReset;q('#structureExpand').onclick=()=>q('#structureGroup').classList.toggle('expanded');
     qa('.checkbox[data-toggle]').forEach(cb=>cb.onclick=()=>{const k=cb.dataset.toggle;settings[k]=!settings[k];saveSettings();renderLayerList();syncSwitches();scheduleRender();});
-    q('#recolorCache').onclick=()=>{tileCache.clear();scheduleRender();toast('浏览器成图缓存已清除，将从世界事实重新着色');};q('#clearGpuCache').onclick=()=>{tileCache.clear();scheduleRender();toast('浏览器地图纹理缓存已清除');};q('#refreshAll').onclick=()=>{tileCache.clear();sendViewportSoon();scheduleRender();toast('当前视野将重新读取世界事实');};
+    q('#recolorCache').onclick=()=>{tileCache.clear();lastViewportSignature='';sendViewportSoon();scheduleRender();toast('浏览器成图缓存已清除，将从世界事实重新着色');};q('#clearGpuCache').onclick=()=>{tileCache.clear();lastViewportSignature='';sendViewportSoon();scheduleRender();toast('浏览器地图纹理缓存已清除');};q('#refreshAll').onclick=()=>{tileCache.clear();lastViewportSignature='';sendViewportSoon();scheduleRender();toast('当前视野将重新读取世界事实');};
     q('.window-close').onclick=()=>{window.close();setTimeout(()=>toast('可直接关闭此浏览器标签页'),80);};
     document.addEventListener('pointerdown',e=>{if(dropdown.classList.contains('open')&&!e.target.closest('#dropdown,.select,.structure-select'))dropdown.classList.remove('open');if(!e.target.closest('.context-menu,.map-marker'))closeContexts();});
     document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(dropdown.classList.contains('open'))dropdown.classList.remove('open');else if(settingsModal.style.display==='block'||editorModal.style.display==='block'||aboutModal.style.display==='block')closeModal();else closeContexts();}if((e.key==='r'||e.key==='R')&&!e.ctrlKey&&!e.altKey)centerPlayer();});
@@ -554,5 +625,6 @@
   }
 
   new ResizeObserver(resizeCanvas).observe(mapStage);
-  patchCopy();bind();renderSettings();renderHud();resizeCanvas();setConnection(false);app.dataset.webui='loaded';openSessionChannel();pollState();
+  patchCopy();bind();renderSettings();renderHud();resizeCanvas();setConnection(false);app.dataset.webui='loaded';connectSocket();
+  window.addEventListener('beforeunload',()=>{if(socket)socket.close(1000,'page unload');});
 })();
