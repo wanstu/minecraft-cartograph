@@ -29,6 +29,9 @@
   const MAX_REGION_CACHE = 48;
   const MIN_ZOOM = 0.0625;
   const MAX_ZOOM = 64;
+  const HIDDEN_BY_DEFAULT = new Set([
+    'mineshaft','trial_chambers','ancient_city','stronghold','buried_treasure'
+  ]);
 
   const defaults = {
     showCoords:true, playerRing:true, labels:true, custom:true, structures:true,
@@ -248,14 +251,14 @@
     ctx.setTransform(dpr,0,0,dpr,0,0);
     scheduleRender();sendViewportSoon();
   }
-  function resizeTransform(){
-    const s=stageSize(), dpr=Math.max(1,window.devicePixelRatio||1);
+  function resizeTransform(s){
+    const dpr=Math.max(1,window.devicePixelRatio||1);
     const w=Math.max(1,Math.round(s.width*dpr)),h=Math.max(1,Math.round(s.height*dpr));
     if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    return dpr;
   }
-  function worldToScreen(x,z){
-    const s=stageSize();
+  function worldToScreen(x,z,s){
     return {x:s.width*.5+(x-view.centerX)*view.zoom,y:s.height*.5+(z-view.centerZ)*view.zoom};
   }
   function screenToWorld(clientX,clientY){
@@ -283,8 +286,8 @@
     requestAnimationFrame(()=>{renderQueued=false;renderMap();});
   }
   function renderMap(){
-    resizeTransform();
     const s=stageSize();
+    const dpr=resizeTransform(s);
     ctx.save();ctx.fillStyle='#17383c';ctx.fillRect(0,0,s.width,s.height);
     ctx.imageSmoothingEnabled=view.zoom<1;
     if(serverState&&serverState.connected&&currentDimension){
@@ -293,17 +296,30 @@
       const minZ=Math.floor((view.centerZ-hz)/16)-1,maxZ=Math.floor((view.centerZ+hz)/16)+1;
       const minRx=Math.floor(minX/REGION_CHUNKS),maxRx=Math.floor(maxX/REGION_CHUNKS);
       const minRz=Math.floor(minZ/REGION_CHUNKS),maxRz=Math.floor(maxZ/REGION_CHUNKS);
-      for(let rz=minRz;rz<=maxRz;rz++)for(let rx=minRx;rx<=maxRx;rx++){
-        const region=regionCache.get(regionKey(rx,rz));if(!region)continue;
-        region.lastUse=++regionClock;
-        const x=s.width*.5+(rx*REGION_CHUNKS*TILE_SIZE-view.centerX)*view.zoom;
-        const y=s.height*.5+(rz*REGION_CHUNKS*TILE_SIZE-view.centerZ)*view.zoom;
-        const size=REGION_PIXELS*view.zoom;
-        ctx.drawImage(region.canvas,x,y,size,size);
+      for(let rz=minRz;rz<=maxRz;rz++){
+        const top=atlasEdge(rz,view.centerZ,s.height,dpr);
+        const bottom=atlasEdge(rz+1,view.centerZ,s.height,dpr);
+        for(let rx=minRx;rx<=maxRx;rx++){
+          const region=regionCache.get(regionKey(rx,rz));
+          if(!region)continue;
+          region.lastUse=++regionClock;
+          const left=atlasEdge(rx,view.centerX,s.width,dpr);
+          const right=atlasEdge(rx+1,view.centerX,s.width,dpr);
+          ctx.drawImage(region.canvas,left,top,right-left,bottom-top);
+        }
       }
     }
     if(settings.grid)drawChunkGrid(s.width,s.height);
-    ctx.restore();renderPlayer();renderMarkers();renderHud();
+    ctx.restore();
+    renderHud();
+    renderPlayer(s);
+    renderMarkers(s);
+  }
+
+  function atlasEdge(region,center,viewportSize,dpr){
+    // Adjacent atlases share the same physical pixel edge at fractional zoom.
+    const position=viewportSize/2+(region*REGION_PIXELS-center)*view.zoom;
+    return Math.round(position*dpr)/dpr;
   }
 
   function drawChunkGrid(width,height){
@@ -394,10 +410,10 @@
     if(batchDimension===currentDimension)scheduleRender();
   }
 
-  function renderPlayer(){
+  function renderPlayer(s){
     const p=serverState&&serverState.player;
     if(!p||!p.present){playerEl.style.display='none';playerRingEl.style.display='none';return;}
-    const pos=worldToScreen(p.x,p.z),s=stageSize();
+    const pos=worldToScreen(p.x,p.z,s);
     const visible=pos.x>-100&&pos.x<s.width+100&&pos.y>-100&&pos.y<s.height+100;
     playerEl.style.display=visible?'':'none';playerRingEl.style.display=visible&&settings.playerRing?'':'none';
     playerEl.style.left=pos.x+'px';playerEl.style.top=pos.y+'px';playerEl.style.color=settings.playerColor;
@@ -408,13 +424,27 @@
     if(icon){icon.style.width=size+'px';icon.style.height=size+'px';icon.classList.toggle('solid',settings.playerIcon!=='cross');}
     const ring=Math.max(64,size*3.2);playerRingEl.style.left=pos.x+'px';playerRingEl.style.top=pos.y+'px';playerRingEl.style.width=ring+'px';playerRingEl.style.height=ring+'px';
   }
-  function renderMarkers(){
-    const markers=serverState&&serverState.markers||[],s=stageSize(),activeIds=new Set();
+  function renderMarkers(s){
+    const markers=serverState?.markers||[];
+    const activeIds=new Set();
     const showLabels=settings.labels&&!(settings.hideLabelsLowZoom&&view.zoom<.25);
+    const avoidLabels=showLabels&&settings.avoidLabels;
+    const labelCandidates=[];
     const factor=Math.pow(Math.max(.15,Math.min(4,view.zoom)),.2*(settings.markerScale/100));
-    markers.forEach(marker=>{
+
+    for(const marker of markers){
       activeIds.add(marker.id);
       let el=markerNodes.get(marker.id);
+      const structure=marker.kind==='structure';
+      const preset=structure?structureGroupKey(marker):null;
+      const pos=worldToScreen(marker.x,marker.z,s);
+      const inView=pos.x>=-80&&pos.x<=s.width+80&&pos.y>=-80&&pos.y<=s.height+80;
+      const layerEnabled=structure?settings.structures&&isStructureLayerEnabled(preset):settings.custom;
+      if(!layerEnabled||!inView){
+        if(el)el.style.display='none';
+        continue;
+      }
+
       if(!el){
         el=document.createElement('div');el.dataset.markerId=marker.id;
         el.innerHTML='<svg class="glyph icon"><use/></svg><div class="marker-label"></div>';
@@ -424,26 +454,70 @@
         markerLayer.appendChild(el);markerNodes.set(marker.id,el);
       }
       el._marker=marker;
-      let allowed=true;
-      if(marker.kind==='structure'){
-        if(!settings.structures)allowed=false;
-        if(settings.structureFilters[structureGroupKey(marker)]===false)allowed=false;
-      }else if(!settings.custom)allowed=false;
-      const pos=worldToScreen(marker.x,marker.z);
-      if(pos.x<-80||pos.x>s.width+80||pos.y<-80||pos.y>s.height+80)allowed=false;
-      if(!allowed){el.style.display='none';return;}
       el.style.display='';
-      const cls='map-marker '+(marker.kind==='structure'?'structure':'custom');if(el.className!==cls)el.className=cls;
+      let cssClass=structure?'map-marker structure':'map-marker custom';
+      if(preset==='village')cssClass+=' village';
+      if(el.className!==cssClass)el.className=cssClass;
       el.style.transform='translate3d('+pos.x+'px,'+pos.y+'px,0) translate(-50%,-50%)';
-      el.style.color=marker.accentColor||(marker.kind==='structure'?'#FFFFFF':settings.markerDefaultColor);
-      const size=Math.max(15,Math.min(48,(marker.kind==='structure'?27:settings.markerDefaultSize)*factor));
+      el.style.color=marker.accentColor||(structure?'#FFFFFF':settings.markerDefaultColor);
+      const size=Math.max(15,Math.min(48,(structure?27:settings.markerDefaultSize)*factor));
       el._glyph.style.width=size+'px';el._glyph.style.height=size+'px';
       const href='#'+iconSymbol(marker.icon);if(el._use.getAttribute('href')!==href)el._use.setAttribute('href',href);
-      el._label.style.display=showLabels?'':'none';
-      const label=marker.name||iconLabel(marker.icon);if(el._label.textContent!==label)el._label.textContent=label;
-    });
+      const label=el._label;
+      label.style.display=showLabels?'':'none';
+      const name=marker.name||iconLabel(marker.icon);
+      if(label.textContent!==name)label.textContent=name;
+
+      if(avoidLabels){
+        // Align the label order with the glyph stacking order.
+        const priority=structure?(preset==='village'?1:2):0;
+        labelCandidates.push({id:marker.id,priority,label});
+      }else{
+        label.classList.remove('occluded');
+      }
+    }
     for(const [id,el] of markerNodes)if(!activeIds.has(id)){el.remove();markerNodes.delete(id);}
+    if(avoidLabels)avoidMarkerLabelOverlaps(labelCandidates,s.rect);
   }
+
+  function avoidMarkerLabelOverlaps(candidates,viewport){
+    const padding=2;
+    const cellSize=64;
+    const occupied=new Map();
+
+    candidates.sort((a,b)=>a.priority-b.priority||a.id.localeCompare(b.id));
+    // Read all bounds together before writing visibility.
+    const placements=candidates.map(({label})=>({label,bounds:label.getBoundingClientRect()}));
+    for(const {label,bounds} of placements){
+      if(bounds.right<=viewport.left||bounds.left>=viewport.right||
+         bounds.bottom<=viewport.top||bounds.top>=viewport.bottom){
+        label.classList.add('occluded');
+        continue;
+      }
+
+      const box={
+        left:bounds.left-padding,right:bounds.right+padding,
+        top:bounds.top-padding,bottom:bounds.bottom+padding
+      };
+      const cells=[];
+      for(let row=Math.floor(box.top/cellSize);row<=Math.floor(box.bottom/cellSize);row++){
+        for(let column=Math.floor(box.left/cellSize);column<=Math.floor(box.right/cellSize);column++){
+          cells.push(column+','+row);
+        }
+      }
+      const overlaps=cells.some(cell=>occupied.get(cell)?.some(other=>
+        box.left<other.right&&box.right>other.left&&box.top<other.bottom&&box.bottom>other.top
+      ));
+      label.classList.toggle('occluded',overlaps);
+      if(overlaps)continue;
+
+      for(const cell of cells){
+        if(!occupied.has(cell))occupied.set(cell,[]);
+        occupied.get(cell).push(box);
+      }
+    }
+  }
+
   function renderHud(){
     q('#zoomText').textContent=Math.round(view.zoom*100)+'%';
     const blocks=145/Math.max(view.zoom,.0001);q('#scaleText').textContent=blocks>=1000?(blocks/1000).toFixed(1)+' km':Math.round(blocks)+' m';
@@ -500,9 +574,13 @@
   function syncLayerToggles(){
     qa('.checkbox',layersPanel).forEach(checkbox=>{
       const filter=checkbox.dataset.structureFilter;
-      checkbox.checked=filter ? settings.structureFilters[filter]!==false
+      checkbox.checked=filter ? isStructureLayerEnabled(filter)
         : !!settings[checkbox.dataset.toggle];
     });
+  }
+  function isStructureLayerEnabled(preset){
+    const enabled=settings.structureFilters[preset];
+    return typeof enabled==='boolean'?enabled:!HIDDEN_BY_DEFAULT.has(preset);
   }
   function structureGroupKey(marker){
     return marker.preset||marker.icon||'other';

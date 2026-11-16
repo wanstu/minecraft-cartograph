@@ -37,10 +37,11 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .map-shade{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 58%,#0610153f 100%)}
 
 .marker-layer{position:absolute;inset:0;pointer-events:none}
-.map-marker{position:absolute;left:0;top:0;z-index:12;display:flex;flex-direction:column;align-items:center;gap:3px;pointer-events:auto;cursor:pointer;color:white;will-change:transform;contain:layout paint style}
+.map-marker{position:absolute;left:0;top:0;z-index:12;display:flex;align-items:center;pointer-events:auto;cursor:pointer;color:white;will-change:transform;contain:layout style}
 .map-marker .glyph{width:31px;height:31px;filter:drop-shadow(0 2px 2px #0009)}
-.map-marker.structure{color:#fff}.map-marker.custom{color:#ffd34e}
-.map-marker .marker-label{font-size:12px;background:#12191dcc;border:1px solid #536068;padding:3px 6px;border-radius:4px;white-space:nowrap;box-shadow:0 3px 10px #0006;color:#f4f6f7}
+.map-marker.structure{color:#fff}.map-marker.village{z-index:13}.map-marker.custom{color:#ffd34e;z-index:14}
+.map-marker .marker-label{position:absolute;top:calc(100% + 3px);left:50%;transform:translateX(-50%);font-size:12px;background:#12191dcc;border:1px solid #536068;padding:3px 6px;border-radius:4px;white-space:nowrap;box-shadow:0 3px 10px #0006;color:#f4f6f7}
+.map-marker .marker-label.occluded{visibility:hidden;pointer-events:none}
 .app[data-labels="off"] .marker-label{display:none}
 .app[data-structures="off"] .map-marker.structure{display:none}
 .app[data-custom="off"] .map-marker.custom{display:none}
