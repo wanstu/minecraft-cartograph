@@ -108,16 +108,12 @@ final class GeneratedChunkBackfill {
     static void requeue(ServerPlayer player, ChunkKey key) {
         if (player == null || key == null) return;
         State state = STATES.get(player.getUUID());
-        if (state == null || !state.active) return;
-        Set<ChunkKey> queued = state.queued.computeIfAbsent(
-                key.dimension(), ignored -> ConcurrentHashMap.newKeySet());
-        if (queued.add(key)) {
-            state.ready.computeIfAbsent(
-                    key.dimension(), ignored -> new ConcurrentLinkedQueue<>()).add(key);
-            return;
+        if (state == null) return;
+        Set<ChunkKey> queued = state.queued.get(key.dimension());
+        if (queued != null && queued.contains(key)) {
+            // The claim came from this queue. Keep it even while collection is paused.
+            state.ready.get(key.dimension()).add(key);
         }
-        state.ready.computeIfAbsent(
-                key.dimension(), ignored -> new ConcurrentLinkedQueue<>()).add(key);
     }
 
     static Long knownFingerprint(ServerPlayer player, ChunkKey key) {

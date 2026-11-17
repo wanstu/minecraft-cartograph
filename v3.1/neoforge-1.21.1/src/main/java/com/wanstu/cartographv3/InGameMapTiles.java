@@ -90,7 +90,11 @@ final class InGameMapTiles implements AutoCloseable {
                 atlas.next = 0;
             }
 
-            boolean dirty = false;
+            boolean firstUpload = !atlas.hasPixels;
+            int minX = REGION_CHUNKS;
+            int minZ = REGION_CHUNKS;
+            int maxX = -1;
+            int maxZ = -1;
             while (atlas.next < REGION_TILES && remaining > 0 && System.nanoTime() < deadline) {
                 int index = atlas.next++;
                 int localX = index % REGION_CHUNKS;
@@ -103,11 +107,31 @@ final class InGameMapTiles implements AutoCloseable {
                 paint(atlas.texture.getPixels(), localX, localZ, tile);
                 atlas.rendered[index] = tile;
                 atlas.hasPixels |= tile != null;
-                dirty = true;
+                minX = Math.min(minX, localX);
+                minZ = Math.min(minZ, localZ);
+                maxX = Math.max(maxX, localX);
+                maxZ = Math.max(maxZ, localZ);
                 remaining--;
             }
-            if (dirty) atlas.texture.upload();
+            if (maxX < minX) continue;
+
+            if (firstUpload) {
+                // Initialize the whole texture, including transparent gaps.
+                atlas.texture.upload();
+            } else {
+                uploadChangedTiles(atlas.texture, minX, minZ, maxX, maxZ);
+            }
         }
+    }
+
+    private static void uploadChangedTiles(
+            DynamicTexture texture, int minX, int minZ, int maxX, int maxZ) {
+        int x = minX * CHUNK;
+        int z = minZ * CHUNK;
+        int width = (maxX - minX + 1) * CHUNK;
+        int height = (maxZ - minZ + 1) * CHUNK;
+        texture.bind();
+        texture.getPixels().upload(0, x, z, x, z, width, height, false, false);
     }
 
     private boolean hasTiles(String dimension, Region atlas) {

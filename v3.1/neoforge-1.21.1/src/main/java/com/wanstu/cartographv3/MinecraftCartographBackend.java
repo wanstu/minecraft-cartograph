@@ -210,9 +210,13 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     public void close() {
         if (!opened) return;
         opened = false;
-        PacketDistributor.sendToServer(new MapProtocol.MapViewState(
-                false, CartographSettings.liveScanIntervalTicks()));
         viewport = null;
+
+        var connection = minecraft.getConnection();
+        if (connection != null && connection.getConnection().isConnected()) {
+            connection.send(new MapProtocol.MapViewState(
+                    false, CartographSettings.liveScanIntervalTicks()));
+        }
     }
 
     private int maxPendingRequests() {
