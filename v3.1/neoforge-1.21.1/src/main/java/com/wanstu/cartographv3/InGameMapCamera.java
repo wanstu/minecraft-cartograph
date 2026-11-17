@@ -1,6 +1,6 @@
 package com.wanstu.cartographv3;
 
-/** View coordinates are Minecraft GUI pixels. Zoom is measured in framebuffer pixels per block. */
+/** View coordinates are map layout units. Zoom is measured in framebuffer pixels per block. */
 final class InGameMapCamera {
     record Position(String dimension, double x, double z, double zoom) {}
 
@@ -10,16 +10,16 @@ final class InGameMapCamera {
     private int width;
     private int height;
     private int top;
-    private double guiScale = 1;
+    private int pixelsPerUnit = 1;
     private double centerX;
     private double centerZ;
     private double zoom = 1.0;
 
-    void resize(int width, int height, int top, double guiScale) {
+    void resize(int width, int height, int top, int pixelsPerUnit) {
         this.width = Math.max(1, width);
         this.height = Math.max(1, height - top);
         this.top = top;
-        this.guiScale = Math.max(1, guiScale);
+        this.pixelsPerUnit = pixelsPerUnit;
     }
 
     void restore(Position position) {
@@ -54,7 +54,7 @@ final class InGameMapCamera {
     }
 
     double zoom() { return zoom; }
-    double scale() { return zoom / guiScale; }
+    double scale() { return zoom / pixelsPerUnit; }
     double middleX() { return width / 2.0; }
     double middleY() { return top + height / 2.0; }
     int top() { return top; }

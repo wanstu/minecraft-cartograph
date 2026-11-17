@@ -23,6 +23,7 @@ final class InGameMapUi {
     static final int ACCENT = 0xfff3c94f;
     static final int BLUE = 0xff68b5f7;
     static final int DANGER = 0xffdf6d68;
+    static final float SMALL_TEXT = .75f;
 
     private static final ResourceLocation ICONS = ResourceLocation.fromNamespaceAndPath(
             "cartograph_v3", "textures/gui/map-icons.png");
@@ -49,12 +50,14 @@ final class InGameMapUi {
     final Font font;
     private final int mouseX;
     private final int mouseY;
+    private final double guiUnitsPerLayoutUnit;
 
-    InGameMapUi(GuiGraphics graphics, Font font, int mouseX, int mouseY) {
+    InGameMapUi(GuiGraphics graphics, Font font, int mouseX, int mouseY, double guiUnitsPerLayoutUnit) {
         this.g = graphics;
         this.font = font;
         this.mouseX = mouseX;
         this.mouseY = mouseY;
+        this.guiUnitsPerLayoutUnit = guiUnitsPerLayoutUnit;
     }
 
     boolean hovered(Box box) { return box.at(mouseX, mouseY); }
@@ -82,6 +85,16 @@ final class InGameMapUi {
 
     void fill(Box box, int color) { g.fill(box.x, box.y, box.right(), box.bottom(), color); }
 
+    void clip(Box box) {
+        // GuiGraphics accepts GUI coordinates independently of the current pose.
+        g.enableScissor((int) Math.floor(box.x * guiUnitsPerLayoutUnit),
+                (int) Math.floor(box.y * guiUnitsPerLayoutUnit),
+                (int) Math.ceil(box.right() * guiUnitsPerLayoutUnit),
+                (int) Math.ceil(box.bottom() * guiUnitsPerLayoutUnit));
+    }
+
+    void unclip() { g.disableScissor(); }
+
     void border(Box box, int color) { g.renderOutline(box.x, box.y, box.w, box.h, color); }
 
     void panel(Box box) {
@@ -105,9 +118,29 @@ final class InGameMapUi {
         text(clipped(value, room), x, y, color);
     }
 
+    void smallText(String value, int x, int y, int room, int color, float scale) {
+        scaledText(clipped(value, (int) (room / scale)), x, y, color, scale);
+    }
+
     void center(String value, Box box, int color) {
         String label = clipped(value, box.w - 3);
         text(label, box.x + (box.w - font.width(label)) / 2, box.y + (box.h - font.lineHeight) / 2, color);
+    }
+
+    void center(String value, Box box, int color, float scale) {
+        String label = clipped(value, (int) ((box.w - 3) / scale));
+        float x = box.x + (box.w - font.width(label) * scale) / 2;
+        float y = box.y + (box.h - font.lineHeight * scale) / 2;
+        scaledText(label, x, y, color, scale);
+    }
+
+    private void scaledText(String value, float x, float y, int color, float scale) {
+        var pose = g.pose();
+        pose.pushPose();
+        pose.translate(x, y, 0);
+        pose.scale(scale, scale, 1);
+        text(value, 0, 0, color);
+        pose.popPose();
     }
 
     void divider(int x, int y, int width) { fill(new Box(x, y, width, 1), LINE); }

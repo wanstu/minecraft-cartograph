@@ -1,11 +1,14 @@
 package com.wanstu.cartographv3;
 
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.math.Axis;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
+import org.joml.Matrix4f;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -17,9 +20,11 @@ import static com.wanstu.cartographv3.InGameMapPreferences.Flag;
 import static com.wanstu.cartographv3.InGameMapUi.*;
 
 final class InGameMapScreen extends Screen {
-    private static final int HEADER = 30;
+    private static final int HEADER = 31;
     private static final int ROW = 19;
-    private static final int GRID_LINE = 0x686a8794;
+    private static final int GRID_LINE = 0x610b161b;
+    static final int DEFAULT_PLAYER_SIZE = 12;
+    static final int DEFAULT_MARKER_SIZE = 11;
 
     private enum Panel { NONE, MARKERS, LAYERS }
     private enum Nav {
@@ -51,6 +56,12 @@ final class InGameMapScreen extends Screen {
     private List<MapMarkerStore.Marker> customMarkers = List.of();
     private List<Layer> structureLayers = List.of();
     private InGameMapUi ui;
+    private int layoutWidth;
+    private int layoutHeight;
+    private int pixelsPerUnit;
+    private double guiUnitsPerLayoutUnit;
+    private double mouseXFactor;
+    private double mouseYFactor;
     private Panel panel = Panel.NONE;
     private Menu menu;
     private Box sidebar;
@@ -86,7 +97,16 @@ final class InGameMapScreen extends Screen {
 
     @Override
     protected void init() {
-        camera.resize(width, height, HEADER, minecraft.getWindow().getGuiScale());
+        var window = minecraft.getWindow();
+        int frameWidth = window.getWidth();
+        int frameHeight = window.getHeight();
+        pixelsPerUnit = frameWidth >= 640 && frameHeight >= 480 ? 2 : 1;
+        layoutWidth = Math.ceilDiv(frameWidth, pixelsPerUnit);
+        layoutHeight = Math.ceilDiv(frameHeight, pixelsPerUnit);
+        guiUnitsPerLayoutUnit = pixelsPerUnit / window.getGuiScale();
+        mouseXFactor = frameWidth / (width * (double) pixelsPerUnit);
+        mouseYFactor = frameHeight / (height * (double) pixelsPerUnit);
+        camera.resize(layoutWidth, layoutHeight, HEADER, pixelsPerUnit);
         if (!initialized) {
             initialized = true;
             if (savedPosition != null && savedPosition.dimension().equals(backend.dimension())) {
@@ -99,6 +119,10 @@ final class InGameMapScreen extends Screen {
         dialogs.resize();
         viewportDelay = 1;
     }
+
+    int layoutWidth() { return layoutWidth; }
+    int layoutHeight() { return layoutHeight; }
+    int pixelsPerUnit() { return pixelsPerUnit; }
 
     @Override
     public void tick() {
@@ -137,16 +161,34 @@ final class InGameMapScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        var draw = new InGameMapUi(graphics, font, mouseX, mouseY);
+        // Draw the entire map in its own layout, including the vanilla text fields.
+        var pose = graphics.pose();
+        pose.pushPose();
+        try {
+            float factor = (float) guiUnitsPerLayoutUnit;
+            pose.scale(factor, factor, 1);
+            var window = minecraft.getWindow();
+            double x = minecraft.mouseHandler.xpos() * width / window.getScreenWidth() * mouseXFactor;
+            double y = minecraft.mouseHandler.ypos() * height / window.getScreenHeight() * mouseYFactor;
+            renderMap(graphics, x, y, partialTick);
+        } finally {
+            pose.popPose();
+        }
+    }
+
+    private void renderMap(GuiGraphics graphics, double mouseX, double mouseY, float partialTick) {
+        int x = (int) Math.floor(mouseX);
+        int y = (int) Math.floor(mouseY);
+        var draw = new InGameMapUi(graphics, font, x, y, guiUnitsPerLayoutUnit);
         ui = draw;
         RenderSystem.enableBlend();
-        draw.fill(new Box(0, 0, width, height), BACKGROUND);
-        graphics.enableScissor(0, HEADER, width, height);
+        draw.fill(new Box(0, 0, layoutWidth, layoutHeight), BACKGROUND);
+        draw.clip(new Box(0, HEADER, layoutWidth, layoutHeight - HEADER));
         tiles.draw(graphics, camera);
-        if (preferences.enabled(Flag.GRID)) drawGrid(draw);
+        if (preferences.enabled(Flag.GRID)) drawGrid(graphics);
         drawMarkers(draw);
         drawPlayer(graphics, draw);
-        graphics.disableScissor();
+        draw.unclip();
 
         drawHeader(draw);
         drawHud(draw);
@@ -154,13 +196,13 @@ final class InGameMapScreen extends Screen {
         if (menu != null) drawMenu(draw);
         if (dialogs.open()) {
             draw.clearActions();
-            dialogs.render(graphics, draw);
+            dialogs.render(draw);
         }
 
-        super.render(graphics, mouseX, mouseY, partialTick);
+        super.render(graphics, x, y, partialTick);
         if (toastTicks > 0) {
-            int w = Math.min(width - 12, font.width(toast) + 18);
-            Box box = new Box((width - w) / 2, height - 47, w, 18);
+            int w = Math.min(layoutWidth - 12, font.width(toast) + 18);
+            Box box = new Box((layoutWidth - w) / 2, layoutHeight - 47, w, 18);
             draw.fill(box, PANEL);
             draw.border(box, LINE);
             draw.center(toast, box, TEXT);
@@ -172,51 +214,64 @@ final class InGameMapScreen extends Screen {
         }
     }
 
-    private void drawGrid(InGameMapUi draw) {
-        double spacing = InGameMapTiles.CHUNK * camera.scale();
+    private void drawGrid(GuiGraphics graphics) {
         int step = InGameMapTiles.CHUNK;
-        while (spacing < 4) {
-            spacing *= 2;
-            step *= 2;
-        }
+        while (step * camera.zoom() < 6) step *= 2;
+        float stroke = 1f / pixelsPerUnit;
+        VertexConsumer buffer = graphics.bufferSource().getBuffer(RenderType.gui());
+        Matrix4f pose = graphics.pose().last().pose();
         long x0 = (long) Math.ceil(camera.worldX(0) / step) * step;
         long z0 = (long) Math.ceil(camera.worldZ(HEADER) / step) * step;
-        for (long x = x0; x <= camera.worldX(width); x += step) {
-            draw.fill(new Box(px(camera.screenX(x)), HEADER, 1, height - HEADER), GRID_LINE);
+        double right = camera.worldX(layoutWidth);
+        double bottom = camera.worldZ(layoutHeight);
+        for (long x = x0; x < right; x += step) {
+            float screenX = Math.round(camera.screenX(x) * pixelsPerUnit) * stroke;
+            gridQuad(buffer, pose, screenX, HEADER, screenX + stroke, layoutHeight);
         }
-        for (long z = z0; z <= camera.worldZ(height); z += step) {
-            draw.fill(new Box(0, px(camera.screenY(z)), width, 1), GRID_LINE);
+        for (long z = z0; z < bottom; z += step) {
+            float screenY = Math.round(camera.screenY(z) * pixelsPerUnit) * stroke;
+            gridQuad(buffer, pose, 0, screenY, layoutWidth, screenY + stroke);
         }
+        graphics.flush();
+    }
+
+    private static void gridQuad(VertexConsumer buffer, Matrix4f pose, float x0, float y0, float x1, float y1) {
+        buffer.addVertex(pose, x0, y0, 0).setColor(GRID_LINE);
+        buffer.addVertex(pose, x0, y1, 0).setColor(GRID_LINE);
+        buffer.addVertex(pose, x1, y1, 0).setColor(GRID_LINE);
+        buffer.addVertex(pose, x1, y0, 0).setColor(GRID_LINE);
     }
 
     private void drawHeader(InGameMapUi draw) {
-        Box header = new Box(0, 0, width, HEADER);
+        Box header = new Box(0, 0, layoutWidth, HEADER);
         draw.fill(header, TOP);
-        draw.divider(0, HEADER - 1, width);
+        draw.divider(0, HEADER - 1, layoutWidth);
         draw.block(header);
         draw.glyph("map", 10, 7, 16, TEXT);
         draw.text("地图册", 31, 11, TEXT);
 
-        int navWidth = Math.clamp((width - 76) / 6, 26, 44);
-        int left = width - 25 - navWidth * Nav.values().length;
-        if (left > 255) draw.text("Map Atlas · V3.1", 67, 11, SOFT);
+        int navWidth = Math.clamp((layoutWidth - 88) / 6, 23, 44);
+        int left = layoutWidth - 36 - navWidth * Nav.values().length;
+        if (left > 150) draw.smallText("Map Atlas · V3.1", 67, 12, left - 74, SOFT, SMALL_TEXT);
         if (left > 350) {
+            draw.fill(new Box(152, 9, 1, 13), LINE);
             draw.glyph("map", 164, 10, 10, MUTED);
-            draw.text("卫星 · 写实", 178, 11, TEXT);
+            draw.smallText("卫星 · 写实", 178, 12, 43, TEXT, SMALL_TEXT);
+            draw.fill(new Box(225, 9, 1, 13), LINE);
             String status = "结构 " + (markerLabels.size() - customMarkers.size()) + " · 标点 "
                     + customMarkers.size() + " · 缓存 " + backend.cachedCount();
-            draw.smallText(status, 236, 11, left - 244, MUTED);
+            draw.smallText(status, 233, 12, left - 241, MUTED, SMALL_TEXT);
         }
         for (Nav nav : Nav.values()) {
             Box button = new Box(left, 0, navWidth, HEADER);
             if (draw.hovered(button) || active(nav)) draw.fill(button, FIELD);
             if (active(nav)) draw.fill(new Box(left, HEADER - 2, navWidth, 2), ACCENT);
-            draw.glyph(nav.icon, left + (navWidth - 11) / 2, 4, 11, TEXT);
-            draw.center(nav.label, new Box(left, 16, navWidth, 12), TEXT);
+            draw.glyph(nav.icon, left + (navWidth - 11) / 2, 5, 11, TEXT);
+            draw.center(nav.label, new Box(left, 17, navWidth, 11), TEXT, SMALL_TEXT);
             draw.action(button, () -> navigate(nav));
             left += navWidth;
         }
-        draw.iconButton(new Box(width - 24, 4, 22, 22), "close", TEXT, this::closeScreen);
+        draw.iconButton(new Box(layoutWidth - 32, 4, 22, 22), "close", TEXT, this::closeScreen);
     }
 
     private boolean active(Nav nav) {
@@ -246,34 +301,38 @@ final class InGameMapScreen extends Screen {
     private void drawHud(InGameMapUi draw) {
         if (preferences.enabled(Flag.COORDS) && cursor != null) {
             String coords = "X " + cursor.x + "   Y " + cursor.y + "   Z " + cursor.z;
-            Box box = new Box(9, height - 70, Math.min(width / 2, Math.max(104, font.width(coords) + 24)), 32);
+            int textWidth = (int) Math.ceil(font.width(coords) * SMALL_TEXT);
+            Box box = new Box(9, layoutHeight - 72,
+                    Math.min(layoutWidth / 2, Math.max(86, textWidth + 24)), 31);
             draw.panel(box);
             draw.glyph("locate", box.x() + 6, box.y() + 6, 9, MUTED);
-            draw.smallText(coords, box.x() + 19, box.y() + 6, box.w() - 24, TEXT);
+            draw.smallText(coords, box.x() + 19, box.y() + 7, box.w() - 24, TEXT, SMALL_TEXT);
             draw.glyph("tree", box.x() + 6, box.y() + 19, 9, MUTED);
-            draw.smallText(cursor.biome, box.x() + 19, box.y() + 19, box.w() - 24, MUTED);
+            draw.smallText(cursor.biome, box.x() + 19, box.y() + 20, box.w() - 24, MUTED, SMALL_TEXT);
         }
-        Box scale = new Box(9, height - 28, 86, 20);
+        Box scale = new Box(9, layoutHeight - 30, 86, 20);
         draw.panel(scale);
         long blocks = Math.round(72 / camera.scale());
         String distance = blocks >= 1000 ? String.format(java.util.Locale.ROOT, "%.1f km", blocks / 1000.0) : blocks + " m";
-        draw.center(distance, new Box(10, scale.y() + 1, 84, 11), TEXT);
+        draw.center(distance, new Box(10, scale.y() + 1, 84, 11), TEXT, SMALL_TEXT);
         draw.fill(new Box(16, scale.y() + 14, 72, 1), MUTED);
         draw.fill(new Box(16, scale.y() + 11, 1, 4), MUTED);
         draw.fill(new Box(87, scale.y() + 11, 1, 4), MUTED);
         if (preferences.enabled(Flag.DEBUG)) {
             draw.smallText("缓存 " + backend.cachedCount() + " · 待处理 " + backend.pendingCount(),
-                    12, height - 87, width / 2 - 15, MUTED);
+                    12, layoutHeight - 87, layoutWidth / 2 - 15, MUTED);
         }
 
-        Box controls = new Box(width - 111, height - 29, 102, 21);
+        Box controls = new Box(layoutWidth - 93, layoutHeight - 32, 84, 22);
+        Box locate = new Box(controls.x() - 26, controls.y(), 22, controls.h());
+        draw.panel(locate);
+        draw.iconButton(locate, "locate", TEXT, this::centerPlayer);
         draw.panel(controls);
         int x = controls.x();
-        draw.iconButton(new Box(x + 1, controls.y() + 1, 23, 19), "locate", TEXT, this::centerPlayer);
-        draw.button(new Box(x + 27, controls.y() + 1, 18, 19), "−", false,
+        draw.button(new Box(x + 1, controls.y() + 1, 21, 20), "−", false,
                 () -> zoom(0.8, camera.middleX(), camera.middleY()));
-        draw.center(Math.round(camera.zoom() * 100) + "%", new Box(x + 45, controls.y() + 1, 38, 19), TEXT);
-        draw.button(new Box(x + 83, controls.y() + 1, 18, 19), "+", false,
+        draw.center(Math.round(camera.zoom() * 100) + "%", new Box(x + 22, controls.y() + 1, 40, 20), TEXT);
+        draw.button(new Box(x + 62, controls.y() + 1, 21, 20), "+", false,
                 () -> zoom(1.25, camera.middleX(), camera.middleY()));
     }
 
@@ -282,15 +341,15 @@ final class InGameMapScreen extends Screen {
         if (!player.present()) return;
         int x = px(camera.screenX(player.x()));
         int y = px(camera.screenY(player.z()));
-        if (x < -20 || x > width + 20 || y < HEADER - 20 || y > height + 20) return;
-        int size = preferences.number("playerSize", 14, 6, 30);
+        if (x < -20 || x > layoutWidth + 20 || y < HEADER - 20 || y > layoutHeight + 20) return;
+        int size = preferences.number("playerSize", DEFAULT_PLAYER_SIZE, 6, 30);
         if (!preferences.enabled(Flag.FIX_PLAYER_SIZE)) size = Math.clamp(px(size * Math.pow(camera.zoom(), .35)), 6, 35);
         if (preferences.enabled(Flag.PLAYER_RING)) {
-            int radius = Math.max(20, size + 7);
+            int radius = Math.max(16, px(size * 1.6));
             for (int i = 0; i < 72; i++) {
                 double angle = i * Math.PI / 36;
                 draw.fill(new Box(x + px(Math.cos(angle) * radius),
-                        y + px(Math.sin(angle) * radius), 1, 1), 0x75ffffff);
+                        y + px(Math.sin(angle) * radius), 1, 1), 0x50ffffff);
             }
         }
         int color = 0xff000000 | preferences.number("playerColor", 0xffe14e, 0, 0xffffff);
@@ -308,7 +367,7 @@ final class InGameMapScreen extends Screen {
                         .comparingInt(InGameMapScreen::priority).reversed().thenComparing(marker -> marker.id))
                 .map(marker -> {
                     String name = font.plainSubstrByWidth(marker.name, 140);
-                    return new MapLabel(marker, name, font.width(name));
+                    return new MapLabel(marker, name, (int) Math.ceil(font.width(name) * SMALL_TEXT));
                 }).toList();
         customMarkers = source.stream().filter(MapMarkerStore.Marker::appearsAsCustom).toList();
         var groups = new LinkedHashMap<String, Layer>();
@@ -351,14 +410,14 @@ final class InGameMapScreen extends Screen {
             }
             int x = px(camera.screenX(marker.x));
             int y = px(camera.screenY(marker.z));
-            if (x < -75 || x > width + 75 || y < HEADER - 22 || y > height + 14) continue;
-            int base = marker.appearsAsCustom() ? preferences.number("markerSize", 13, 7, 25) : 15;
-            int size = Math.clamp(px(base * scaleFactor), 7, 26);
+            if (x < -40 || x > layoutWidth + 40 || y < HEADER - 40 || y > layoutHeight + 40) continue;
+            double base = marker.appearsAsCustom() ? preferences.number("markerSize", DEFAULT_MARKER_SIZE, 7, 25) : 13.5;
+            int size = Math.clamp(px(base * scaleFactor), 8, 24);
             Box icon = new Box(x - size / 2, y - size / 2, size, size);
-            Box name = new Box(x - label.width / 2 - 4, icon.bottom() + 2, label.width + 8, 13);
+            Box name = new Box(x - label.width / 2 - 4, icon.bottom() + 2, label.width + 8, 12);
             Box padded = new Box(name.x() - 2, name.y() - 2, name.w() + 4, name.h() + 4);
-            boolean nameVisible = showNames && name.bottom() > HEADER && name.y() < height
-                    && name.right() > 0 && name.x() < width
+            boolean nameVisible = showNames && name.bottom() > HEADER && name.y() < layoutHeight
+                    && name.right() > 0 && name.x() < layoutWidth
                     && (!avoid || occupied.stream().noneMatch(padded::overlaps));
             if (nameVisible && avoid) occupied.add(padded);
             pins.add(new Pin(label, icon, name, nameVisible));
@@ -371,9 +430,9 @@ final class InGameMapScreen extends Screen {
         }
         for (Pin pin : pins) {
             if (!pin.nameVisible) continue;
-            draw.fill(pin.name, 0xe012191d);
+            draw.fill(pin.name, 0xcc12191d);
             draw.border(pin.name, LINE);
-            draw.center(pin.label.text, pin.name, TEXT);
+            draw.center(pin.label.text, pin.name, TEXT, SMALL_TEXT);
         }
     }
 
@@ -408,9 +467,9 @@ final class InGameMapScreen extends Screen {
         List<Row> rows = layers ? layerRows() : List.of();
         int count = layers ? rows.size() : customMarkers.size();
         int bodyTop = HEADER + 34;
-        int availableRows = Math.max(1, (height - bodyTop - 45) / ROW);
+        int availableRows = Math.max(1, (layoutHeight - bodyTop - 45) / ROW);
         int visibleRows = Math.max(1, Math.min(availableRows, count));
-        sidebar = new Box(8, HEADER + 9, Math.min(layers ? 150 : 177, width / 2 + 20),
+        sidebar = new Box(8, HEADER + 9, Math.min(layers ? 150 : 177, layoutWidth / 2 + 20),
                 bodyTop - (HEADER + 9) + visibleRows * ROW + 6);
         Box box = sidebar;
         draw.panel(box);
@@ -471,8 +530,8 @@ final class InGameMapScreen extends Screen {
 
     private void drawMenu(InGameMapUi draw) {
         Menu current = menu;
-        Box box = new Box(Math.clamp(current.left, 3, Math.max(3, width - 129)),
-                Math.clamp(current.top, HEADER + 2, Math.max(HEADER + 2, height - 83)), 126, 77);
+        Box box = new Box(Math.clamp(current.left, 3, Math.max(3, layoutWidth - 129)),
+                Math.clamp(current.top, HEADER + 2, Math.max(HEADER + 2, layoutHeight - 83)), 126, 77);
         draw.panel(box);
         Point point = current.point;
         draw.smallText(point.x + " / " + point.y + " / " + point.z, box.x() + 6, box.y() + 5, box.w() - 12, MUTED);
@@ -525,6 +584,8 @@ final class InGameMapScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double x, double y, int button) {
+        x *= mouseXFactor;
+        y *= mouseYFactor;
         if (ui == null) return false;
         if (dialogs.open()) {
             if (super.mouseClicked(x, y, button)) return true;
@@ -567,10 +628,11 @@ final class InGameMapScreen extends Screen {
     @Override
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         if (dragging && button == 0) {
-            camera.pan(dx, dy);
+            camera.pan(dx * mouseXFactor, dy * mouseYFactor);
             return true;
         }
-        return super.mouseDragged(x, y, button, dx, dy);
+        return super.mouseDragged(x * mouseXFactor, y * mouseYFactor, button,
+                dx * mouseXFactor, dy * mouseYFactor);
     }
 
     @Override
@@ -580,11 +642,13 @@ final class InGameMapScreen extends Screen {
             viewportDelay = 1;
             return true;
         }
-        return super.mouseReleased(x, y, button);
+        return super.mouseReleased(x * mouseXFactor, y * mouseYFactor, button);
     }
 
     @Override
     public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+        x *= mouseXFactor;
+        y *= mouseYFactor;
         if (dialogs.open()) return dialogs.scroll(x, y, scrollY);
         if (sidebar != null && sidebar.at(x, y)) {
             panelScroll = Math.max(0, panelScroll - (int) Math.signum(scrollY) * 3);

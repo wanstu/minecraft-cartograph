@@ -1,7 +1,6 @@
 package com.wanstu.cartographv3;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 
@@ -95,9 +94,9 @@ final class InGameMapDialogs {
     }
 
     private Box centered(int w, int h) {
-        int width = Math.min(screen.width - 14, w);
-        int height = Math.min(screen.height - 20, h);
-        return new Box((screen.width - width) / 2, (screen.height - height) / 2, width, height);
+        int width = Math.min(screen.layoutWidth() - 14, w);
+        int height = Math.min(screen.layoutHeight() - 20, h);
+        return new Box((screen.layoutWidth() - width) / 2, (screen.layoutHeight() - height) / 2, width, height);
     }
 
     private Box settingsBox() { return centered(526, 333); }
@@ -145,15 +144,16 @@ final class InGameMapDialogs {
         return edit;
     }
 
-    void render(GuiGraphics graphics, InGameMapUi ui) {
-        ui.fill(new Box(0, 0, screen.width, screen.height), 0xa4070b0e);
-        if (mode == Mode.SETTINGS) renderSettings(graphics, ui);
+    void render(InGameMapUi ui) {
+        Box viewport = new Box(0, 0, screen.layoutWidth(), screen.layoutHeight());
+        ui.fill(viewport, 0xa4070b0e);
+        if (mode == Mode.SETTINGS) renderSettings(ui);
         if (mode == Mode.EDIT) renderEditor(ui);
         if (mode == Mode.ABOUT) renderAbout(ui);
 
         if (iconResult != null || colorResult != null) {
             ui.clearActions();
-            ui.fill(new Box(0, 0, screen.width, screen.height), 0x85070b0e);
+            ui.fill(viewport, 0x85070b0e);
             if (iconResult != null) renderIcons(ui);
             else renderColors(ui);
         }
@@ -167,7 +167,7 @@ final class InGameMapDialogs {
         ui.iconButton(new Box(box.right() - 21, box.y() + 4, 17, 17), "close", MUTED, close);
     }
 
-    private void renderSettings(GuiGraphics graphics, InGameMapUi ui) {
+    private void renderSettings(InGameMapUi ui) {
         Box box = settingsBox();
         title(ui, box, "settings", "设置", this::close);
         int railWidth = Math.clamp(box.w() / 5, 71, 98);
@@ -207,7 +207,7 @@ final class InGameMapDialogs {
         rowsInView = Math.max(1, (content.bottom() - body) / 22);
         rowOffset = Math.clamp(rowOffset, 0, Math.max(0, total - rowsInView));
 
-        graphics.enableScissor(content.x(), body, content.right(), content.bottom());
+        ui.clip(new Box(content.x(), body, content.w(), content.bottom() - body));
         for (int i = rowOffset; i < Math.min(total, rowOffset + rowsInView); i++) {
             Box row = new Box(content.x(), body + 22 * (i - rowOffset), content.w(), 22);
             switch (tab) {
@@ -226,7 +226,7 @@ final class InGameMapDialogs {
                 default -> { }
             }
         }
-        graphics.disableScissor();
+        ui.unclip();
         scrollbar(ui, content.right(), body, Math.min(rowsInView, total) * 22, total);
     }
 
@@ -247,8 +247,7 @@ final class InGameMapDialogs {
             case 7 -> color(ui, row, "玩家图标颜色",
                     preferences.number("playerColor", 0xffe14e, 0, 0xffffff),
                     value -> preferences.number("playerColor", value));
-            case 8 -> stepper(ui, row, "玩家图标大小", preferences.number("playerSize", 14, 6, 30),
-                    6, 30, 1, " px", value -> preferences.number("playerSize", value));
+            case 8 -> pixelStepper(ui, row, "玩家图标大小", "playerSize", InGameMapScreen.DEFAULT_PLAYER_SIZE, 6, 30);
             default -> { }
         }
     }
@@ -282,8 +281,7 @@ final class InGameMapDialogs {
             case 0 -> action(ui, row, "默认图标", preferences.markerIcon().label, () -> icons(preferences::markerIcon));
             case 1 -> color(ui, row, "默认颜色", preferences.number("markerColor", 0xffd34e, 0, 0xffffff),
                     value -> preferences.number("markerColor", value));
-            case 2 -> stepper(ui, row, "标点大小", preferences.number("markerSize", 13, 7, 25),
-                    7, 25, 1, " px", value -> preferences.number("markerSize", value));
+            case 2 -> pixelStepper(ui, row, "标点大小", "markerSize", InGameMapScreen.DEFAULT_MARKER_SIZE, 7, 25);
             case 3 -> toggle(ui, row, "25% 以下隐藏标签", Flag.HIDE_LOW_ZOOM);
             case 4 -> toggle(ui, row, "标签避让", Flag.AVOID_LABELS);
             default -> { }
@@ -329,6 +327,13 @@ final class InGameMapDialogs {
         ui.button(new Box(x, row.y() + 2, 16, 17), "−", false, () -> result.accept(Math.max(min, value - step)));
         ui.center(value + units, new Box(x + 18, row.y() + 2, 67, 17), TEXT);
         ui.button(new Box(x + 87, row.y() + 2, 16, 17), "+", false, () -> result.accept(Math.min(max, value + step)));
+    }
+
+    private void pixelStepper(InGameMapUi ui, Box row, String label, String key, int fallback, int min, int max) {
+        int pixels = screen.pixelsPerUnit();
+        int size = preferences.number(key, fallback, min, max);
+        stepper(ui, row, label, size * pixels, min * pixels, max * pixels, pixels, " px",
+                value -> preferences.number(key, value / pixels));
     }
 
     private CartographSettings.StructureAppearance appearance(MapMarkerStore.StructurePreset preset) {
