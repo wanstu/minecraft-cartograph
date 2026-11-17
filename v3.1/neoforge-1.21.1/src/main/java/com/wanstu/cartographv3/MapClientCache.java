@@ -10,7 +10,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public final class MapClientCache {
     private static final org.slf4j.Logger LOG =
             org.slf4j.LoggerFactory.getLogger("cartograph.v3.client");
-    private static final Map<ChunkKey, SurfaceTile> TILES = new HashMap<>();
+    private record CachedTile(SurfaceTile tile, boolean restoredFromDisk) {}
+    private static final Map<ChunkKey, CachedTile> TILES = new HashMap<>();
     private static final Set<ChunkKey> PENDING = new HashSet<>();
     private static final Map<ChunkKey, Integer> MISSING_AT = new HashMap<>();
     private static final Map<ChunkKey, Long> VALIDATED_SESSION = new HashMap<>();
@@ -78,7 +79,8 @@ public final class MapClientCache {
     }
 
     public static SurfaceTile tile(ChunkKey key) {
-        return TILES.get(key);
+        CachedTile cached = TILES.get(key);
+        return cached == null ? null : cached.tile();
     }
 
     public static void restoreVisibleFromDisk(
@@ -149,8 +151,7 @@ public final class MapClientCache {
             ChunkKey key = raw.key();
             if (MISSING_AT.containsKey(key) || TILES.containsKey(key)) continue;
 
-            SurfaceTile tile = raw;
-            TILES.put(key, tile);
+            TILES.put(key, new CachedTile(raw, true));
             addRegionTile(key);
             markRegionChanged(key);
             restored++;
@@ -172,15 +173,14 @@ public final class MapClientCache {
 
     public static boolean needsRequest(ChunkKey key) {
         if (world == null || worldId == null || PENDING.contains(key)) return false;
-        SurfaceTile tile = TILES.get(key);
-        if (tile == null) return !DISK_RESTORE_SCHEDULED.contains(key);
+        if (!TILES.containsKey(key)) return !DISK_RESTORE_SCHEDULED.contains(key);
         return VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) != mapSession;
     }
 
     public static void request(ChunkKey key) {
         if (world == null || worldId == null || PENDING.contains(key)) return;
 
-        SurfaceTile inMemory = TILES.get(key);
+        SurfaceTile inMemory = tile(key);
         if (inMemory != null) {
             if (VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) == mapSession) return;
             PENDING.add(key);
@@ -192,7 +192,7 @@ public final class MapClientCache {
         java.util.Optional<SurfaceTile> disk = PersistentTileStore.load(worldId, key);
         if (disk.isPresent()) {
             SurfaceTile restoredTile = disk.get();
-            if (TILES.put(key, restoredTile) == null) addRegionTile(key);
+            if (TILES.put(key, new CachedTile(restoredTile, true)) == null) addRegionTile(key);
             markRegionChanged(key);
             int restored = TILES.size();
             if (restored == 1 || restored % 64 == 0)
@@ -263,20 +263,22 @@ public final class MapClientCache {
             return;
         }
         MISSING_AT.remove(key);
+        VALIDATED_SESSION.put(key, mapSession);
         if (!packet.changed()) {
-            VALIDATED_SESSION.put(key, mapSession);
-            validated++;
-            if (validated == 1 || validated % 64 == 0)
-                LOG.info("V3_MAP_CACHE_VALID validated={} cached={} pending={} example={},{}",
-                        validated, TILES.size(), PENDING.size(), key.x(), key.z());
+            recordValidation(key);
             return;
         }
-        SurfaceTile tile = SurfaceTile.fromFacts(
-                key,
-                packet.stateIds(), packet.biomeIds(),
-                packet.surfaceHeights(), packet.reliefHeights(), packet.waterDepths());
-        VALIDATED_SESSION.put(key, mapSession);
-        if (TILES.put(key, tile) == null) addRegionTile(key);
+        CachedTile existing = TILES.get(key);
+        if (existing != null && packet.matchesFacts(existing.tile())) {
+            // A tile restored from disk is already persisted. Keep retries for tiles received this session.
+            if (worldId != null && !existing.restoredFromDisk()) PersistentTileStore.save(worldId, existing.tile());
+            recordValidation(key);
+            return;
+        }
+
+        SurfaceTile tile = packet.toSurfaceTile(key);
+        TILES.put(key, new CachedTile(tile, false));
+        if (existing == null) addRegionTile(key);
         markRegionChanged(key);
         if (worldId != null) PersistentTileStore.save(worldId, tile);
         received++;
@@ -286,6 +288,13 @@ public final class MapClientCache {
             LOG.info("V3_MAP_TILE received={} cached={} pending={} elapsed_ms={} example={},{}",
                     received, TILES.size(), PENDING.size(), elapsed, key.x(), key.z());
         }
+    }
+
+    private static void recordValidation(ChunkKey key) {
+        validated++;
+        if (validated == 1 || validated % 64 == 0)
+            LOG.info("V3_MAP_CACHE_VALID validated={} cached={} pending={} example={},{}",
+                    validated, TILES.size(), PENDING.size(), key.x(), key.z());
     }
 
     public static int cachedCount() { return TILES.size(); }

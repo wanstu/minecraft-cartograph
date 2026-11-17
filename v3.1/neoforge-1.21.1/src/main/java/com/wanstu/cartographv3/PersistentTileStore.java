@@ -3,8 +3,10 @@ package com.wanstu.cartographv3;
 import net.minecraft.client.Minecraft;
 
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.nio.file.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -30,6 +32,8 @@ import java.util.function.BiConsumer;
 final class PersistentTileStore {
     private static final int MAGIC = 0x43543331; // CT31
     private static final int VERSION = 1;
+    private static final int FILE_BYTES = 4 * Integer.BYTES + SurfaceTile.PIXELS
+            * (2 * Integer.BYTES + 2 * Short.BYTES + Byte.BYTES);
     private static final int REGION_EDGE = CartographBackendApi.REGION_CHUNKS;
     private static final int MAX_INDEXED_DIRECTORIES = 4;
     private static final org.slf4j.Logger LOG =
@@ -157,36 +161,19 @@ final class PersistentTileStore {
     static void save(UUID worldId, SurfaceTile tile) {
         if (worldId == null || tile == null || !tile.hasSurfaceFacts()) return;
 
-        int[] states = tile.stateIds();
-        int[] biomes = tile.biomeIds();
-        short[] surface = tile.surfaceHeights();
-        short[] relief = tile.reliefHeights();
-        byte[] water = tile.waterDepths();
-
         WRITER.execute(() -> {
             Path target = file(directory(worldId, tile.key().dimension()), tile.key());
             Path tmp = target.resolveSibling(
                     target.getFileName() + ".tmp-" + UUID.randomUUID());
             try {
-                Files.createDirectories(target.getParent());
-                try (DataOutputStream output = new DataOutputStream(
-                        new BufferedOutputStream(Files.newOutputStream(
-                                tmp,
-                                StandardOpenOption.CREATE_NEW,
-                                StandardOpenOption.WRITE)))) {
-                    output.writeInt(MAGIC);
-                    output.writeInt(VERSION);
-                    output.writeInt(tile.key().x());
-                    output.writeInt(tile.key().z());
-
-                    for (int i = 0; i < SurfaceTile.PIXELS; i++) {
-                        output.writeInt(states[i]);
-                        output.writeInt(biomes[i]);
-                        output.writeShort(surface[i]);
-                        output.writeShort(relief[i]);
-                        output.writeByte(water[i]);
-                    }
+                byte[] encoded = encode(tile);
+                // Server packets can arrive before the client has applied the restored tile.
+                if (matchesExisting(target, encoded)) {
+                    refreshIndex(target, tile.key());
+                    return;
                 }
+                Files.createDirectories(target.getParent());
+                Files.write(tmp, encoded, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
                 try {
                     Files.move(
                             tmp, target,
@@ -202,6 +189,33 @@ final class PersistentTileStore {
                 try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
             }
         });
+    }
+
+    private static byte[] encode(SurfaceTile tile) {
+        ByteBuffer output = ByteBuffer.allocate(FILE_BYTES);
+        output.putInt(MAGIC);
+        output.putInt(VERSION);
+        output.putInt(tile.key().x());
+        output.putInt(tile.key().z());
+        for (int i = 0; i < SurfaceTile.PIXELS; i++) {
+            output.putInt(tile.stateIdAt(i));
+            output.putInt(tile.biomeIdAt(i));
+            output.putShort((short) tile.surfaceHeightAt(i));
+            output.putShort((short) tile.reliefHeightAt(i));
+            output.put((byte) tile.waterDepthAt(i));
+        }
+        return output.array();
+    }
+
+    private static boolean matchesExisting(Path target, byte[] encoded) {
+        try (InputStream input = Files.newInputStream(target)) {
+            byte[] existing = new byte[encoded.length];
+            return input.readNBytes(existing, 0, existing.length) == existing.length
+                    && input.read() == -1
+                    && Arrays.equals(existing, encoded);
+        } catch (IOException unavailable) {
+            return false;
+        }
     }
 
     private static RegionIndex indexFor(Path directory) {

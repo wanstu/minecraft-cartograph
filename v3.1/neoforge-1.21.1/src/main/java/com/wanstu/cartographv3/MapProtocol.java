@@ -154,6 +154,14 @@ public final class MapProtocol {
                     structures);
         }
 
+        boolean matchesFacts(SurfaceTile tile) {
+            return tile.matchesFacts(stateIds, biomeIds, surfaceHeights, reliefHeights, waterDepths);
+        }
+
+        SurfaceTile toSurfaceTile(ChunkKey key) {
+            return SurfaceTile.fromFacts(key, stateIds, biomeIds, surfaceHeights, reliefHeights, waterDepths);
+        }
+
         @Override public int[] stateIds() { return stateIds.clone(); }
         @Override public int[] biomeIds() { return biomeIds.clone(); }
         @Override public short[] surfaceHeights() { return surfaceHeights.clone(); }

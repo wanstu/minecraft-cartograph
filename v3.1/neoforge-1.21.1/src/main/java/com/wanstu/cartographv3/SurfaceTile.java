@@ -1,5 +1,7 @@
 package com.wanstu.cartographv3;
 
+import java.util.Arrays;
+
 public record SurfaceTile(
         ChunkKey key,
         int[] rgb,
@@ -60,6 +62,15 @@ public record SurfaceTile(
 
     boolean hasSurfaceFacts() {
         return stateIds != null;
+    }
+
+    boolean matchesFacts(int[] states, int[] biomes, short[] surface, short[] relief, byte[] water) {
+        return hasSurfaceFacts()
+                && Arrays.equals(stateIds, states)
+                && Arrays.equals(biomeIds, biomes)
+                && Arrays.equals(surfaceHeights, surface)
+                && Arrays.equals(reliefHeights, relief)
+                && Arrays.equals(waterDepths, water);
     }
 
 
