@@ -25,60 +25,36 @@ final class SurfaceColors {
 
     static int[] shade(int[] rgb, short[] heights) {
         int[] out = rgb.clone();
-        for (int z = 0; z < 16; z++) {
-            for (int x = 0; x < 16; x++) {
-                int i = z * 16 + x;
-                int base = rgb[i] & 0x00ffffff;
-                if (heights[i] == UNKNOWN_HEIGHT) {
-                    out[i] = 0;
-                    continue;
-                }
-
-                double slopeX = axisSlope(heights, x, z, 1, 0);
-                double slopeZ = axisSlope(heights, x, z, 0, 1);
-                double sum = 0.0;
-                int axes = 0;
-                if (!Double.isNaN(slopeX)) {
-                    sum += slopeX;
-                    axes++;
-                }
-                if (!Double.isNaN(slopeZ)) {
-                    sum += slopeZ;
-                    axes++;
-                }
-
-                double delta = axes == 0 ? 0.0 : sum / axes;
-                double factor = Math.max(0.78, Math.min(1.20, 1.0 + delta * 0.035));
-                int r = Math.min(255, (int) (((base >>> 16) & 255) * factor));
-                int g = Math.min(255, (int) (((base >>> 8) & 255) * factor));
-                int b = Math.min(255, (int) ((base & 255) * factor));
-                out[i] = 0xff000000 | (r << 16) | (g << 8) | b;
+        java.util.function.IntUnaryOperator heightAt = i -> heights[i];
+        for (int z = 0; z < SurfaceTile.SIZE; z++) {
+            for (int x = 0; x < SurfaceTile.SIZE; x++) {
+                int index = z * SurfaceTile.SIZE + x;
+                out[index] = shadePixel(rgb[index], index, x, z, heightAt);
             }
         }
         return out;
     }
 
-    private static double axisSlope(short[] heights, int x, int z, int dx, int dz) {
-        int centerIndex = z * 16 + x;
-        short center = heights[centerIndex];
+    static int shadePixel(int color, int index, int x, int z, java.util.function.IntUnaryOperator heightAt) {
+        int center = heightAt.applyAsInt(index);
+        if (center == UNKNOWN_HEIGHT) return 0;
 
-        int previousX = x - dx;
-        int previousZ = z - dz;
-        int nextX = x + dx;
-        int nextZ = z + dz;
+        int west = x == 0 ? UNKNOWN_HEIGHT : heightAt.applyAsInt(index - 1);
+        int east = x == SurfaceTile.SIZE - 1 ? UNKNOWN_HEIGHT : heightAt.applyAsInt(index + 1);
+        int north = z == 0 ? UNKNOWN_HEIGHT : heightAt.applyAsInt(index - SurfaceTile.SIZE);
+        int south = z == SurfaceTile.SIZE - 1 ? UNKNOWN_HEIGHT : heightAt.applyAsInt(index + SurfaceTile.SIZE);
+        double slopeX = axisSlope(center, west, east);
+        double slopeZ = axisSlope(center, north, south);
+        double delta = Double.isNaN(slopeX) ? (Double.isNaN(slopeZ) ? 0.0 : slopeZ)
+                : (Double.isNaN(slopeZ) ? slopeX : (slopeX + slopeZ) * 0.5);
+        double factor = Math.max(0.78, Math.min(1.20, 1.0 + delta * 0.035));
+        int r = Math.min(255, (int) (((color >>> 16) & 255) * factor));
+        int g = Math.min(255, (int) (((color >>> 8) & 255) * factor));
+        int b = Math.min(255, (int) ((color & 255) * factor));
+        return 0xff000000 | (r << 16) | (g << 8) | b;
+    }
 
-        boolean hasPrevious = previousX >= 0 && previousX < 16
-                && previousZ >= 0 && previousZ < 16;
-        boolean hasNext = nextX >= 0 && nextX < 16
-                && nextZ >= 0 && nextZ < 16;
-
-        short previous = hasPrevious
-                ? heights[previousZ * 16 + previousX]
-                : UNKNOWN_HEIGHT;
-        short next = hasNext
-                ? heights[nextZ * 16 + nextX]
-                : UNKNOWN_HEIGHT;
-
+    private static double axisSlope(int center, int previous, int next) {
         boolean previousKnown = previous != UNKNOWN_HEIGHT;
         boolean nextKnown = next != UNKNOWN_HEIGHT;
         if (previousKnown && nextKnown) return (next - previous) * 0.5;

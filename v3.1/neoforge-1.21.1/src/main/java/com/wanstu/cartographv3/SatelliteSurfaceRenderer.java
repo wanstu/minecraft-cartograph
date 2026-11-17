@@ -89,44 +89,66 @@ final class SatelliteSurfaceRenderer {
 
     static SurfaceTile render(SurfaceTile tile) {
         if (!tile.hasSurfaceFacts()) return tile;
+        return tile.withRgb(renderPixels(tile, 1));
+    }
 
+    static int[] renderPixels(SurfaceTile tile, int stride) {
         Minecraft minecraft = Minecraft.getInstance();
-        Registry<Biome> biomeRegistry = minecraft.level == null ? null
+        Registry<Biome> biomes = minecraft.level == null ? null
                 : minecraft.level.registryAccess().registryOrThrow(Registries.BIOME);
-
-        int[] rgb = new int[SurfaceTile.PIXELS];
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        int chunkBaseX = tile.key().x() * SurfaceTile.SIZE;
-        int chunkBaseZ = tile.key().z() * SurfaceTile.SIZE;
-
-        for (int z = 0; z < SurfaceTile.SIZE; z++) {
-            for (int x = 0; x < SurfaceTile.SIZE; x++) {
-                int index = z * SurfaceTile.SIZE + x;
-                int stateId = tile.stateIdAt(index);
-                if (stateId < 0) continue;
-
-                BlockState state = Block.stateById(stateId);
-                if (state == null) continue;
-
-                int worldX = chunkBaseX + x;
-                int worldZ = chunkBaseZ + z;
-                int surfaceY = tile.surfaceHeightAt(index);
-                if (surfaceY == SurfaceTile.UNKNOWN_HEIGHT) surfaceY = 0;
-                pos.set(worldX, surfaceY, worldZ);
-
-                Biome biome = null;
-                int biomeId = tile.biomeIdAt(index);
-                if (biomeRegistry != null && biomeId >= 0 && biomeId < biomeRegistry.size()) {
-                    biome = biomeRegistry.byId(biomeId);
+        java.util.function.IntUnaryOperator heightAt = tile::reliefHeightAt;
+        int baseX = tile.key().x() * SurfaceTile.SIZE;
+        int baseZ = tile.key().z() * SurfaceTile.SIZE;
+        int edge = SurfaceTile.SIZE / stride;
+        int[] rgb = new int[edge * edge];
+        for (int z = 0; z < edge; z++) {
+            for (int x = 0; x < edge; x++) {
+                int startX = x * stride;
+                int startZ = z * stride;
+                if (stride == 1) {
+                    rgb[z * edge + x] = shadedPixel(minecraft, biomes, pos, tile, heightAt, baseX, baseZ, x, z);
+                } else {
+                    int low = stride / 4;
+                    int high = stride / 2 + low;
+                    int a = shadedPixel(minecraft, biomes, pos, tile, heightAt, baseX, baseZ, startX + low, startZ + low);
+                    int b = shadedPixel(minecraft, biomes, pos, tile, heightAt, baseX, baseZ, startX + high, startZ + low);
+                    int c = shadedPixel(minecraft, biomes, pos, tile, heightAt, baseX, baseZ, startX + low, startZ + high);
+                    int d = shadedPixel(minecraft, biomes, pos, tile, heightAt, baseX, baseZ, startX + high, startZ + high);
+                    rgb[z * edge + x] = average(a, b, c, d);
                 }
-
-                rgb[index] = colorFor(
-                        minecraft, stateId, state, biome, pos,
-                        tile.waterDepthAt(index), worldX, worldZ);
             }
         }
+        return rgb;
+    }
 
-        return tile.withRgb(SurfaceColors.shade(rgb, tile.reliefHeights()));
+    private static int shadedPixel(
+            Minecraft minecraft, Registry<Biome> biomes, BlockPos.MutableBlockPos pos,
+            SurfaceTile tile, java.util.function.IntUnaryOperator heightAt,
+            int baseX, int baseZ, int x, int z) {
+        int index = z * SurfaceTile.SIZE + x;
+        int stateId = tile.stateIdAt(index);
+        int rgb = 0;
+        if (stateId >= 0) {
+            BlockState state = Block.stateById(stateId);
+            if (state != null) {
+                int worldX = baseX + x;
+                int worldZ = baseZ + z;
+                int y = tile.surfaceHeightAt(index);
+                pos.set(worldX, y == SurfaceTile.UNKNOWN_HEIGHT ? 0 : y, worldZ);
+                int biomeId = tile.biomeIdAt(index);
+                Biome biome = biomes != null && biomeId >= 0 && biomeId < biomes.size() ? biomes.byId(biomeId) : null;
+                rgb = colorFor(minecraft, stateId, state, biome, pos, tile.waterDepthAt(index), worldX, worldZ);
+            }
+        }
+        return SurfaceColors.shadePixel(rgb, index, x, z, heightAt);
+    }
+
+    private static int average(int a, int b, int c, int d) {
+        int r = ((a >>> 16 & 255) + (b >>> 16 & 255) + (c >>> 16 & 255) + (d >>> 16 & 255)) / 4;
+        int g = ((a >>> 8 & 255) + (b >>> 8 & 255) + (c >>> 8 & 255) + (d >>> 8 & 255)) / 4;
+        int blue = ((a & 255) + (b & 255) + (c & 255) + (d & 255)) / 4;
+        return r << 16 | g << 8 | blue;
     }
 
     private static int colorFor(

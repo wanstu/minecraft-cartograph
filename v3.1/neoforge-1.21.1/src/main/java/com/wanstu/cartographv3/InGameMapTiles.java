@@ -9,39 +9,50 @@ import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 
-/** Draws a bounded set of client GPU atlases made from the shared surface facts. */
+/** Draws cached surface facts at the resolution appropriate for the current view. */
 final class InGameMapTiles implements AutoCloseable {
     static final int CHUNK = 16;
     private static final int CACHE_REGIONS_PER_ATLAS = 2;
     private static final int REGION_CHUNKS = CartographBackendApi.REGION_CHUNKS * CACHE_REGIONS_PER_ATLAS;
     private static final int REGION_SIZE = CHUNK * REGION_CHUNKS;
     private static final int REGION_TILES = REGION_CHUNKS * REGION_CHUNKS;
-    private static final int MAX_ATLASES = 48;
+    private static final long RETAINED_TEXELS = 48L * REGION_SIZE * REGION_SIZE;
     private static final int MAX_PAINTED_TILES = 96;
     private static final long CPU_BUDGET_NS = 4_000_000L;
 
     private record Region(int x, int z) {}
+    private record TextureKey(Region region, int stride) {}
+    private record DrawTile(Region region, Atlas atlas) {}
 
     private static final class Atlas {
         final SurfaceTile[] rendered = new SurfaceTile[REGION_TILES];
         final DynamicTexture texture;
         final ResourceLocation id;
+        final int size;
         int next = REGION_TILES;
         long revision = Long.MIN_VALUE;
         boolean hasPixels;
+        boolean complete;
 
-        Atlas(TextureManager textures) {
-            texture = new DynamicTexture(REGION_SIZE, REGION_SIZE, true);
+        Atlas(TextureManager textures, int stride) {
+            size = REGION_SIZE / stride;
+            texture = new DynamicTexture(size, size, true);
             id = textures.register("cartograph_native_map", texture);
         }
+
+        long texels() { return (long) size * size; }
     }
 
     private final TextureManager textures = Minecraft.getInstance().getTextureManager();
-    private final LinkedHashMap<Region, Atlas> atlases = new LinkedHashMap<>(16, .75f, true);
+    private final LinkedHashMap<TextureKey, Atlas> atlases = new LinkedHashMap<>(16, .75f, true);
     private final CartographBackendApi backend;
+    private List<DrawTile> frame = List.of();
+    private long allocatedTexels;
     private String dimension = "";
     private long signature;
 
@@ -60,78 +71,130 @@ final class InGameMapTiles implements AutoCloseable {
         if (dim.isBlank()) return;
 
         List<Region> visible = new ArrayList<>();
-        for (int z = region(camera.worldZ(camera.top())); z <= region(camera.worldZ(camera.bottom())); z++) {
-            for (int x = region(camera.worldX(0)); x <= region(camera.worldX(camera.width())); x++) {
+        int minX = region(camera.worldX(0));
+        int maxX = region(camera.worldX(camera.width()));
+        int minZ = region(camera.worldZ(camera.top()));
+        int maxZ = region(camera.worldZ(camera.bottom()));
+        for (int z = minZ; z <= maxZ; z++) {
+            for (int x = minX; x <= maxX; x++) {
                 Region key = new Region(x, z);
-                if (atlases.containsKey(key) || hasTiles(dim, key)) visible.add(key);
+                if (hasTiles(dim, key)) visible.add(key);
             }
         }
         int middleX = region(camera.worldX(camera.middleX()));
         int middleZ = region(camera.worldZ(camera.middleY()));
         visible.sort(Comparator.comparingInt(key -> Math.abs(key.x - middleX) + Math.abs(key.z - middleZ)));
-        if (visible.size() > MAX_ATLASES) visible = visible.subList(0, MAX_ATLASES);
-        // Mark already visible atlases as recent before allocating anything.
-        for (Region key : visible) atlases.get(key);
 
-        int remaining = MAX_PAINTED_TILES;
+        int stride = overviewStride(camera.zoom(), visible.size());
+        int remaining = MAX_PAINTED_TILES * Math.max(1, stride * stride / 4);
         long deadline = System.nanoTime() + CPU_BUDGET_NS;
-        for (Region key : visible) {
+        for (Region region : visible) {
             if (remaining == 0 || System.nanoTime() >= deadline) break;
+            TextureKey key = new TextureKey(region, stride);
             Atlas atlas = atlases.get(key);
             if (atlas == null) {
-                if (atlases.size() == MAX_ATLASES) textures.release(atlases.pollFirstEntry().getValue().id);
-                atlas = new Atlas(textures);
+                atlas = new Atlas(textures, stride);
                 atlases.put(key, atlas);
+                allocatedTexels += atlas.texels();
             }
-            if (atlas.next == REGION_TILES) {
-                long current = revision(dim, key);
-                if (atlas.revision == current) continue;
-                atlas.revision = current;
-                atlas.next = 0;
-            }
-
-            boolean firstUpload = !atlas.hasPixels;
-            int minX = REGION_CHUNKS;
-            int minZ = REGION_CHUNKS;
-            int maxX = -1;
-            int maxZ = -1;
-            while (atlas.next < REGION_TILES && remaining > 0 && System.nanoTime() < deadline) {
-                int index = atlas.next++;
-                int localX = index % REGION_CHUNKS;
-                int localZ = index / REGION_CHUNKS;
-                SurfaceTile tile = backend.tile(new ChunkKey(dim,
-                        key.x * REGION_CHUNKS + localX, key.z * REGION_CHUNKS + localZ));
-                if (tile != null && !tile.hasSurfaceFacts()) tile = null;
-                if (tile == atlas.rendered[index]) continue;
-
-                paint(atlas.texture.getPixels(), localX, localZ, tile);
-                atlas.rendered[index] = tile;
-                atlas.hasPixels |= tile != null;
-                minX = Math.min(minX, localX);
-                minZ = Math.min(minZ, localZ);
-                maxX = Math.max(maxX, localX);
-                maxZ = Math.max(maxZ, localZ);
-                remaining--;
-            }
-            if (maxX < minX) continue;
-
-            if (firstUpload) {
-                // Initialize the whole texture, including transparent gaps.
-                atlas.texture.upload();
-            } else {
-                uploadChangedTiles(atlas.texture, minX, minZ, maxX, maxZ);
-            }
+            remaining -= updateAtlas(dim, region, atlas, stride, remaining, deadline);
         }
+
+        List<DrawTile> drawing = new ArrayList<>(visible.size());
+        Set<TextureKey> keep = new HashSet<>();
+        for (Region region : visible) {
+            TextureKey key = new TextureKey(region, stride);
+            Atlas atlas = atlases.get(key);
+            if (atlas != null) keep.add(key);
+            if (atlas == null || !atlas.complete) {
+                // Keep displaying cached terrain while another resolution is prepared.
+                for (int alternate = 1; alternate <= CHUNK; alternate *= 2) {
+                    if (alternate == stride) continue;
+                    TextureKey fallback = new TextureKey(region, alternate);
+                    Atlas candidate = atlases.get(fallback);
+                    if (candidate == null || !candidate.complete || !candidate.hasPixels) continue;
+                    keep.add(fallback);
+                    atlas = candidate;
+                    break;
+                }
+            }
+            if (atlas != null && atlas.hasPixels) drawing.add(new DrawTile(region, atlas));
+        }
+        frame = drawing;
+        evictOffscreen(keep);
     }
 
-    private static void uploadChangedTiles(
-            DynamicTexture texture, int minX, int minZ, int maxX, int maxZ) {
-        int x = minX * CHUNK;
-        int z = minZ * CHUNK;
-        int width = (maxX - minX + 1) * CHUNK;
-        int height = (maxZ - minZ + 1) * CHUNK;
-        texture.bind();
-        texture.getPixels().upload(0, x, z, x, z, width, height, false, false);
+    private static int overviewStride(double zoom, int regions) {
+        int stride = 1;
+        while (stride < CHUNK) {
+            int size = REGION_SIZE / stride;
+            if (zoom * stride * 2 > 1.0 && (long) regions * size * size <= RETAINED_TEXELS) break;
+            stride *= 2;
+        }
+        return stride;
+    }
+
+    private int updateAtlas(
+            String dimension, Region key, Atlas atlas, int stride, int remaining, long deadline) {
+        if (atlas.next == REGION_TILES) {
+            long current = revision(dimension, key);
+            if (atlas.revision == current) return 0;
+            atlas.revision = current;
+            atlas.next = 0;
+        }
+
+        int edge = CHUNK / stride;
+        boolean firstUpload = !atlas.hasPixels;
+        int minX = REGION_CHUNKS;
+        int minZ = REGION_CHUNKS;
+        int maxX = -1;
+        int maxZ = -1;
+        int painted = 0;
+        while (atlas.next < REGION_TILES && painted < remaining && System.nanoTime() < deadline) {
+            int index = atlas.next++;
+            int localX = index % REGION_CHUNKS;
+            int localZ = index / REGION_CHUNKS;
+            SurfaceTile tile = backend.tile(new ChunkKey(dimension,
+                    key.x * REGION_CHUNKS + localX, key.z * REGION_CHUNKS + localZ));
+            if (tile != null && !tile.hasSurfaceFacts()) tile = null;
+            if (tile == atlas.rendered[index]) continue;
+
+            paint(atlas.texture.getPixels(), localX, localZ, tile, stride, edge);
+            atlas.rendered[index] = tile;
+            atlas.hasPixels |= tile != null;
+            minX = Math.min(minX, localX);
+            minZ = Math.min(minZ, localZ);
+            maxX = Math.max(maxX, localX);
+            maxZ = Math.max(maxZ, localZ);
+            painted++;
+        }
+        atlas.complete |= atlas.next == REGION_TILES;
+        if (painted == 0) return 0;
+
+        if (firstUpload) {
+            // Initialize transparent regions on the GPU before uploading individual updates.
+            atlas.texture.upload();
+        } else {
+            int x = minX * edge;
+            int z = minZ * edge;
+            int width = (maxX - minX + 1) * edge;
+            int height = (maxZ - minZ + 1) * edge;
+            atlas.texture.bind();
+            atlas.texture.getPixels().upload(0, x, z, x, z, width, height, false, false);
+        }
+        return painted;
+    }
+
+    private void evictOffscreen(Set<TextureKey> keep) {
+        var entries = atlases.entrySet().iterator();
+        while (allocatedTexels > RETAINED_TEXELS && entries.hasNext()) {
+            var entry = entries.next();
+            if (keep.contains(entry.getKey())) continue;
+            Atlas discarded = entry.getValue();
+            textures.release(discarded.id);
+            allocatedTexels -= discarded.texels();
+            entries.remove();
+        }
     }
 
     private boolean hasTiles(String dimension, Region atlas) {
@@ -157,12 +220,12 @@ final class InGameMapTiles implements AutoCloseable {
         return newest;
     }
 
-    private static void paint(NativeImage image, int x, int z, SurfaceTile tile) {
-        int[] colors = tile == null ? null : SatelliteSurfaceRenderer.render(tile).rgb();
-        for (int row = 0; row < CHUNK; row++) {
-            for (int column = 0; column < CHUNK; column++) {
-                int pixel = colors == null ? 0 : opaqueAbgr(colors[row * CHUNK + column]);
-                image.setPixelRGBA(x * CHUNK + column, z * CHUNK + row, pixel);
+    private static void paint(NativeImage image, int x, int z, SurfaceTile tile, int stride, int edge) {
+        int[] colors = tile == null ? null : SatelliteSurfaceRenderer.renderPixels(tile, stride);
+        for (int row = 0; row < edge; row++) {
+            for (int column = 0; column < edge; column++) {
+                int pixel = colors == null ? 0 : opaqueAbgr(colors[row * edge + column]);
+                image.setPixelRGBA(x * edge + column, z * edge + row, pixel);
             }
         }
     }
@@ -172,18 +235,16 @@ final class InGameMapTiles implements AutoCloseable {
     }
 
     void draw(GuiGraphics graphics, InGameMapCamera camera) {
-        for (var entry : atlases.entrySet()) {
-            Region region = entry.getKey();
-            Atlas atlas = entry.getValue();
-            if (!atlas.hasPixels) continue;
-
+        for (DrawTile item : frame) {
+            Region region = item.region;
+            Atlas atlas = item.atlas;
             int x = Math.round((float) camera.screenX((long) region.x * REGION_SIZE));
             int y = Math.round((float) camera.screenY((long) region.z * REGION_SIZE));
             int right = Math.round((float) camera.screenX(((long) region.x + 1) * REGION_SIZE));
             int bottom = Math.round((float) camera.screenY(((long) region.z + 1) * REGION_SIZE));
             if (right <= 0 || x >= camera.width() || bottom <= camera.top() || y >= camera.bottom()) continue;
             graphics.blit(atlas.id, x, y, right - x, bottom - y,
-                    0f, 0f, REGION_SIZE, REGION_SIZE, REGION_SIZE, REGION_SIZE);
+                    0f, 0f, atlas.size, atlas.size, atlas.size, atlas.size);
         }
     }
 
@@ -195,5 +256,7 @@ final class InGameMapTiles implements AutoCloseable {
     public void close() {
         for (Atlas atlas : atlases.values()) textures.release(atlas.id);
         atlases.clear();
+        frame = List.of();
+        allocatedTexels = 0;
     }
 }
