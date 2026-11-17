@@ -11,6 +11,11 @@ import java.util.Properties;
 import java.util.function.Consumer;
 
 final class InGameMapPreferences {
+    static final String FONT_SCALE = "fontScale";
+    static final String UI_SCALE = "uiScale";
+    static final int MIN_SCALE = 75;
+    static final int MAX_SCALE = 150;
+
     enum Flag {
         CUSTOM("custom", true), STRUCTURES("structures", true), NAMES("names", true),
         GRID("grid", false), COORDS("coords", true), PLAYER_RING("playerRing", true),
@@ -57,6 +62,10 @@ final class InGameMapPreferences {
 
     void toggleLayer(String id, MapMarkerStore.StructurePreset preset) {
         change(p -> p.setProperty("layer." + id, Boolean.toString(!layer(id, preset))));
+    }
+
+    int scalePercent(String key) {
+        return number(key, 100, MIN_SCALE, MAX_SCALE);
     }
 
     int number(String key, int fallback, int min, int max) {

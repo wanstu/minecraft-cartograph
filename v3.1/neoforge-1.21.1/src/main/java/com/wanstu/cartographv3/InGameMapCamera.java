@@ -10,12 +10,12 @@ final class InGameMapCamera {
     private int width;
     private int height;
     private int top;
-    private int pixelsPerUnit = 1;
+    private double pixelsPerUnit = 1;
     private double centerX;
     private double centerZ;
     private double zoom = 1.0;
 
-    void resize(int width, int height, int top, int pixelsPerUnit) {
+    void resize(int width, int height, int top, double pixelsPerUnit) {
         this.width = Math.max(1, width);
         this.height = Math.max(1, height - top);
         this.top = top;

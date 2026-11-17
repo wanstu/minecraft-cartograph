@@ -1,6 +1,8 @@
 package com.wanstu.cartographv3;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 
@@ -12,6 +14,10 @@ import java.util.function.IntConsumer;
 import java.util.function.Consumer;
 
 import static com.wanstu.cartographv3.InGameMapPreferences.Flag;
+import static com.wanstu.cartographv3.InGameMapPreferences.FONT_SCALE;
+import static com.wanstu.cartographv3.InGameMapPreferences.MAX_SCALE;
+import static com.wanstu.cartographv3.InGameMapPreferences.MIN_SCALE;
+import static com.wanstu.cartographv3.InGameMapPreferences.UI_SCALE;
 import static com.wanstu.cartographv3.InGameMapUi.*;
 
 final class InGameMapDialogs {
@@ -29,6 +35,7 @@ final class InGameMapDialogs {
             0xa77ce8, 0x68b5f7, 0x70c7ce, 0x71d797, 0x89a972, 0x758794
     };
     private static final int STRUCTURE_ROW = 23;
+    private static final int DISPLAY_ROWS = 8;
 
     private final InGameMapScreen screen;
     private final InGameMapPreferences preferences;
@@ -104,13 +111,18 @@ final class InGameMapDialogs {
     private Box colorsBox() { return centered(228, 126); }
     private Box iconsBox() { return centered(240, 160); }
 
-    private Box editorName(Box box) { return new Box(box.x() + 58, box.y() + 33, box.w() - 71, 16); }
+    private static int editorRowY(Box box, int row) {
+        int step = Math.clamp((box.h() - 83) / 3, 17, 25);
+        return box.y() + 33 + row * step;
+    }
+
+    private Box editorName(Box box) { return new Box(box.x() + 58, editorRowY(box, 0), box.w() - 71, 16); }
     private Box editorCoord(Box box, int i) {
         int gap = 15;
         int w = (box.w() - 83 - gap * 2) / 3;
-        return new Box(box.x() + 64 + (w + gap) * i, box.y() + 58, w, 16);
+        return new Box(box.x() + 64 + (w + gap) * i, editorRowY(box, 1), w, 16);
     }
-    private Box editorNote(Box box) { return new Box(box.x() + 58, box.y() + 83, box.w() - 71, 16); }
+    private Box editorNote(Box box) { return new Box(box.x() + 58, editorRowY(box, 2), box.w() - 71, 16); }
     private Box hexBox(Box box) { return new Box(box.x() + 44, box.bottom() - 51, box.w() - 59, 16); }
 
     private void rebuildInputs() {
@@ -133,8 +145,8 @@ final class InGameMapDialogs {
     }
 
     private EditBox input(Box box, String narration, String value, int limit, Consumer<String> action) {
-        var edit = new EditBox(Minecraft.getInstance().font, box.x() + 4, box.y() + 4,
-                box.w() - 8, box.h() - 4, Component.literal(narration));
+        var edit = new ScaledInput(Minecraft.getInstance().font, box, screen.fontScale(),
+                Component.literal(narration));
         edit.setBordered(false);
         edit.setTextColor(TEXT);
         edit.setMaxLength(limit);
@@ -142,6 +154,41 @@ final class InGameMapDialogs {
         edit.setResponder(action);
         screen.addInput(edit);
         return edit;
+    }
+
+    private static final class ScaledInput extends EditBox {
+        private final float scale;
+
+        ScaledInput(Font font, Box box, float scale, Component narration) {
+            super(font, box.x() + 4, box.y() + Math.round((box.h() - font.lineHeight * scale) / 2),
+                    Math.max(1, (int) ((box.w() - 8) / scale)),
+                    Math.max(1, (int) ((box.h() - 4) / scale)), narration);
+            this.scale = scale;
+        }
+
+        @Override
+        public boolean mouseClicked(double x, double y, int button) {
+            return super.mouseClicked(getX() + (x - getX()) / scale,
+                    getY() + (y - getY()) / scale, button);
+        }
+
+        @Override
+        public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            if (scale == 1) {
+                super.renderWidget(graphics, mouseX, mouseY, partialTick);
+                return;
+            }
+            var pose = graphics.pose();
+            pose.pushPose();
+            try {
+                pose.translate(getX(), getY(), 0);
+                pose.scale(scale, scale, 1);
+                pose.translate(-getX(), -getY(), 0);
+                super.renderWidget(graphics, mouseX, mouseY, partialTick);
+            } finally {
+                pose.popPose();
+            }
+        }
     }
 
     void render(InGameMapUi ui) {
@@ -173,12 +220,16 @@ final class InGameMapDialogs {
         int railWidth = Math.clamp(box.w() / 5, 71, 98);
         ui.fill(new Box(box.x() + 1, box.y() + 27, railWidth, box.h() - 28), 0xff131b20);
         ui.fill(new Box(box.x() + railWidth + 1, box.y() + 27, 1, box.h() - 28), LINE);
+        int tabStep = Math.clamp((box.h() - 38) / Tab.values().length, 11, 21);
         for (Tab item : Tab.values()) {
-            Box nav = new Box(box.x() + 6, box.y() + 33 + item.ordinal() * 21, railWidth - 10, 19);
+            Box nav = new Box(box.x() + 6, box.y() + 33 + item.ordinal() * tabStep, railWidth - 10, tabStep - 2);
             if (item == tab || ui.hovered(nav)) ui.fill(nav, item == tab ? 0xff2e414e : FIELD);
             if (item == tab) ui.fill(new Box(nav.x(), nav.y(), 2, nav.h()), BLUE);
-            ui.glyph(item.icon, nav.x() + 6, nav.y() + 4, 11, TEXT);
-            ui.smallText(item.label, nav.x() + 21, nav.y() + 6, nav.w() - 23, TEXT);
+            int iconSize = Math.min(11, nav.h() - 3);
+            ui.glyph(item.icon, nav.x() + 6, nav.y() + (nav.h() - iconSize) / 2, iconSize, TEXT);
+            float textScale = Math.min(1f, (nav.h() - 2f) / ui.textHeight());
+            int y = nav.y() + (nav.h() - ui.textHeight(textScale)) / 2 + 1;
+            ui.smallText(item.label, nav.x() + 21, y, nav.w() - 23, TEXT, textScale);
             ui.action(nav, () -> { tab = item; rowOffset = 0; });
         }
 
@@ -198,7 +249,7 @@ final class InGameMapDialogs {
         int body = content.y() + 18;
         int total = switch (tab) {
             case GENERAL -> 9;
-            case DISPLAY -> 6;
+            case DISPLAY -> DISPLAY_ROWS;
             case PERFORMANCE -> 3;
             case MARKER -> 5;
             case SHORTCUT, ADVANCED -> 2;
@@ -261,8 +312,17 @@ final class InGameMapDialogs {
             case 4 -> toggle(ui, row, "固定玩家图标大小", Flag.FIX_PLAYER_SIZE);
             case 5 -> stepper(ui, row, "标点随缩放变化", preferences.number("markerScale", 35, 0, 100),
                     0, 100, 5, "%", value -> preferences.number("markerScale", value));
+            case 6 -> scaleStepper(ui, row, "字号", FONT_SCALE);
+            case 7 -> scaleStepper(ui, row, "UI 缩放倍率", UI_SCALE);
             default -> { }
         }
+    }
+
+    private void scaleStepper(InGameMapUi ui, Box row, String label, String key) {
+        stepper(ui, row, label, preferences.scalePercent(key), MIN_SCALE, MAX_SCALE, 5, "%", value -> {
+            screen.displayScale(key, value);
+            if (key.equals(UI_SCALE)) rowOffset = DISPLAY_ROWS - 1;
+        });
     }
 
     private void performanceRow(InGameMapUi ui, Box row, int i) {
@@ -289,8 +349,13 @@ final class InGameMapDialogs {
     }
 
     private void rowLabel(InGameMapUi ui, Box row, String label) {
+        rowLabel(ui, row, label, 110);
+    }
+
+    private void rowLabel(InGameMapUi ui, Box row, String label, int rightPadding) {
         ui.divider(row.x(), row.bottom() - 1, row.w());
-        ui.smallText(label, row.x() + 2, row.y() + 7, Math.max(45, row.w() - 110), TEXT);
+        ui.smallText(label, row.x() + 2, row.y() + (row.h() - ui.textHeight()) / 2 + 1,
+                row.w() - rightPadding, TEXT);
     }
 
     private void summary(InGameMapUi ui, Box row, String label, String value) {
@@ -304,7 +369,7 @@ final class InGameMapDialogs {
     }
 
     private void toggle(InGameMapUi ui, Box row, String label, Flag flag) {
-        rowLabel(ui, row, label);
+        rowLabel(ui, row, label, 31);
         boolean checked = preferences.enabled(flag);
         Box box = new Box(row.right() - 27, row.y() + 6, 21, 10);
         ui.fill(box, checked ? 0xff3776ab : FIELD);
@@ -322,18 +387,27 @@ final class InGameMapDialogs {
 
     private void stepper(InGameMapUi ui, Box row, String label, int value, int min, int max,
                          int step, String units, IntConsumer result) {
-        rowLabel(ui, row, label);
-        int x = row.right() - 105;
-        ui.button(new Box(x, row.y() + 2, 16, 17), "−", false, () -> result.accept(Math.max(min, value - step)));
-        ui.center(value + units, new Box(x + 18, row.y() + 2, 67, 17), TEXT);
-        ui.button(new Box(x + 87, row.y() + 2, 16, 17), "+", false, () -> result.accept(Math.min(max, value + step)));
+        drawStepper(ui, row, label, value + units,
+                () -> result.accept(Math.max(min, value - step)),
+                () -> result.accept(Math.min(max, value + step)));
+    }
+
+    private void drawStepper(InGameMapUi ui, Box row, String label, String value,
+                             Runnable decrease, Runnable increase) {
+        int width = Math.clamp(row.w() / 2, 68, 105);
+        rowLabel(ui, row, label, width + 5);
+        int x = row.right() - width;
+        ui.button(new Box(x, row.y() + 2, 16, 17), "−", false, decrease);
+        ui.center(value, new Box(x + 18, row.y() + 2, width - 38, 17), TEXT);
+        ui.button(new Box(row.right() - 18, row.y() + 2, 16, 17), "+", false, increase);
     }
 
     private void pixelStepper(InGameMapUi ui, Box row, String label, String key, int fallback, int min, int max) {
-        int pixels = screen.pixelsPerUnit();
         int size = preferences.number(key, fallback, min, max);
-        stepper(ui, row, label, size * pixels, min * pixels, max * pixels, pixels, " px",
-                value -> preferences.number(key, value / pixels));
+        String value = Math.round(size * screen.pixelsPerUnit()) + " px";
+        drawStepper(ui, row, label, value,
+                () -> preferences.number(key, Math.max(min, size - 1)),
+                () -> preferences.number(key, Math.min(max, size + 1)));
     }
 
     private CartographSettings.StructureAppearance appearance(MapMarkerStore.StructurePreset preset) {
@@ -406,19 +480,19 @@ final class InGameMapDialogs {
     private void renderEditor(InGameMapUi ui) {
         Box box = editorBox();
         title(ui, box, "pin", editing == null ? "添加标点" : "编辑标点", this::close);
-        ui.text("名称", box.x() + 13, box.y() + 38, TEXT);
+        ui.text("名称", box.x() + 13, editorRowY(box, 0) + 5, TEXT);
         field(ui, editorName(box));
-        ui.text("坐标", box.x() + 13, box.y() + 63, TEXT);
+        ui.text("坐标", box.x() + 13, editorRowY(box, 1) + 5, TEXT);
         String[] coords = {"X", "Y", "Z"};
         for (int i = 0; i < coords.length; i++) {
             Box area = editorCoord(box, i);
             ui.text(coords[i], area.x() - 10, area.y() + 5, MUTED);
             field(ui, area);
         }
-        ui.text("简介", box.x() + 13, box.y() + 88, TEXT);
+        ui.text("简介", box.x() + 13, editorRowY(box, 2) + 5, TEXT);
         field(ui, editorNote(box));
-        ui.text("样式", box.x() + 13, box.y() + 113, TEXT);
-        Box icon = new Box(box.x() + 58, box.y() + 107, (box.w() - 76) / 2, 19);
+        ui.text("样式", box.x() + 13, editorRowY(box, 3) + 5, TEXT);
+        Box icon = new Box(box.x() + 58, editorRowY(box, 3) - 1, (box.w() - 76) / 2, 19);
         ui.button(icon, markerIcon.label, false, () -> icons(value -> markerIcon = value));
         ui.glyph(markerIcon, icon.x() + 4, icon.y() + 3, 13, 0xff000000 | markerColor);
         Box color = new Box(icon.right() + 7, icon.y(), box.right() - icon.right() - 20, 19);
@@ -468,8 +542,8 @@ final class InGameMapDialogs {
         Box box = centered(270, 143);
         title(ui, box, "info", "关于", this::close);
         ui.glyph("map", box.x() + 13, box.y() + 36, 29, ACCENT);
-        ui.text("地图册 · Map Atlas", box.x() + 50, box.y() + 37, TEXT);
-        ui.text("Cartograph V3.1 · 游戏内地图", box.x() + 50, box.y() + 52, MUTED);
+        ui.smallText("地图册 · Map Atlas", box.x() + 50, box.y() + 37, box.w() - 60, TEXT);
+        ui.smallText("Cartograph V3.1 · 游戏内地图", box.x() + 50, box.y() + 52, box.w() - 60, MUTED);
         ui.divider(box.x() + 12, box.y() + 71, box.w() - 24);
         ui.text("地图风格", box.x() + 13, box.y() + 83, SOFT);
         ui.text("卫星 · 写实", box.x() + 83, box.y() + 83, TEXT);

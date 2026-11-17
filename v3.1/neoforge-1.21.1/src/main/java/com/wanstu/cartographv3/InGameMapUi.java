@@ -51,13 +51,16 @@ final class InGameMapUi {
     private final int mouseX;
     private final int mouseY;
     private final double guiUnitsPerLayoutUnit;
+    private final float fontScale;
 
-    InGameMapUi(GuiGraphics graphics, Font font, int mouseX, int mouseY, double guiUnitsPerLayoutUnit) {
+    InGameMapUi(GuiGraphics graphics, Font font, int mouseX, int mouseY,
+                double guiUnitsPerLayoutUnit, float fontScale) {
         this.g = graphics;
         this.font = font;
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         this.guiUnitsPerLayoutUnit = guiUnitsPerLayoutUnit;
+        this.fontScale = fontScale;
     }
 
     boolean hovered(Box box) { return box.at(mouseX, mouseY); }
@@ -105,30 +108,47 @@ final class InGameMapUi {
     }
 
     void text(String value, int x, int y, int color) {
-        g.drawString(font, value, x, y, color, false);
+        if (fontScale == 1) g.drawString(font, value, x, y, color, false);
+        else scaledText(value, x, y, color, fontScale);
     }
 
-    String clipped(String value, int room) {
-        if (room <= 0) return "";
-        if (font.width(value) <= room) return value;
-        return font.plainSubstrByWidth(value, Math.max(0, room - font.width("…"))) + "…";
+    int textWidth(String value) { return textWidth(value, 1); }
+    int textWidth(String value, float styleScale) {
+        return (int) Math.ceil(font.width(value) * styleScale * fontScale);
+    }
+
+    int textHeight() { return textHeight(1); }
+    int textHeight(float styleScale) {
+        return (int) Math.ceil(font.lineHeight * styleScale * fontScale);
+    }
+
+    private String clipped(String value, int room, float scale) {
+        int available = (int) (room / scale);
+        if (available <= 0) return "";
+        if (font.width(value) <= available) return value;
+        int ellipsis = font.width("…");
+        if (available < ellipsis) return "";
+        return font.plainSubstrByWidth(value, available - ellipsis) + "…";
     }
 
     void smallText(String value, int x, int y, int room, int color) {
-        text(clipped(value, room), x, y, color);
+        text(clipped(value, room, fontScale), x, y, color);
     }
 
-    void smallText(String value, int x, int y, int room, int color, float scale) {
-        scaledText(clipped(value, (int) (room / scale)), x, y, color, scale);
+    void smallText(String value, int x, int y, int room, int color, float styleScale) {
+        float scale = styleScale * fontScale;
+        scaledText(clipped(value, room, scale), x, y, color, scale);
     }
 
     void center(String value, Box box, int color) {
-        String label = clipped(value, box.w - 3);
-        text(label, box.x + (box.w - font.width(label)) / 2, box.y + (box.h - font.lineHeight) / 2, color);
+        String label = clipped(value, box.w - 3, fontScale);
+        text(label, box.x + (box.w - textWidth(label)) / 2,
+                box.y + (box.h - textHeight()) / 2, color);
     }
 
-    void center(String value, Box box, int color, float scale) {
-        String label = clipped(value, (int) ((box.w - 3) / scale));
+    void center(String value, Box box, int color, float styleScale) {
+        float scale = styleScale * fontScale;
+        String label = clipped(value, box.w - 3, scale);
         float x = box.x + (box.w - font.width(label) * scale) / 2;
         float y = box.y + (box.h - font.lineHeight * scale) / 2;
         scaledText(label, x, y, color, scale);
@@ -139,7 +159,7 @@ final class InGameMapUi {
         pose.pushPose();
         pose.translate(x, y, 0);
         pose.scale(scale, scale, 1);
-        text(value, 0, 0, color);
+        g.drawString(font, value, 0, 0, color, false);
         pose.popPose();
     }
 
