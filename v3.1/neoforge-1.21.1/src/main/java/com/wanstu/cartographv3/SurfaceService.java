@@ -3,13 +3,13 @@ package com.wanstu.cartographv3;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.neoforge.event.level.ChunkDataEvent;
 
-import java.nio.file.Path;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class SurfaceService {
     private static final org.slf4j.Logger LOG =
@@ -24,14 +24,6 @@ final class SurfaceService {
     private static final Set<Key> DISK_STALE = ConcurrentHashMap.newKeySet();
     private static final ConcurrentHashMap<Key, CompletableFuture<Optional<SurfaceTile>>> PENDING =
             new ConcurrentHashMap<>();
-    private static final ExecutorService DISK = Executors.newFixedThreadPool(8, new ThreadFactory() {
-        private int count;
-        @Override public synchronized Thread newThread(Runnable task) {
-            Thread thread = new Thread(task, "cartograph-v3-mca-" + (++count));
-            thread.setDaemon(true);
-            return thread;
-        }
-    });
 
     private SurfaceService() {}
 
@@ -48,7 +40,8 @@ final class SurfaceService {
     }
 
     static CompletableFuture<Optional<SurfaceTile>> request(
-            ServerLevel level, int chunkX, int chunkZ) {
+            ServerLevel level, int chunkX, int chunkZ,
+            boolean watchLive, SavedChunkRead saved) {
         if (!level.getServer().isSameThread())
             throw new IllegalStateException("Surface request must start on server thread");
 
@@ -63,21 +56,22 @@ final class SurfaceService {
         if (cached != null && !DISK_STALE.contains(key))
             return CompletableFuture.completedFuture(Optional.of(cached));
 
-        Optional<SurfaceTile> loaded = LoadedSurfaceReader.capture(level, chunkX, chunkZ);
-        if (loaded.isPresent()) {
-            CACHE.put(key, loaded.get());
-            DISK_STALE.remove(key);
-            int count = LOADED_HITS.incrementAndGet();
-            if (count == 1 || count % 64 == 0)
-                LOG.info("V3_LOADED_DIRECT_READ count={} dim={} example={},{}",
-                        count, dimension, chunkX, chunkZ);
-            return CompletableFuture.completedFuture(loaded);
+        if (watchLive) {
+            Optional<SurfaceTile> loaded = LoadedSurfaceReader.capture(level, chunkX, chunkZ);
+            if (loaded.isPresent()) {
+                CACHE.put(key, loaded.get());
+                DISK_STALE.remove(key);
+                int count = LOADED_HITS.incrementAndGet();
+                if (count == 1 || count % 64 == 0)
+                    LOG.info("V3_LOADED_DIRECT_READ count={} dim={} example={},{}",
+                            count, dimension, chunkX, chunkZ);
+                return CompletableFuture.completedFuture(loaded);
+            }
         }
 
         CompletableFuture<Optional<SurfaceTile>> existing = PENDING.get(key);
         if (existing != null) return existing;
 
-        Path region = regionDirectory(level);
         int minY = level.getMinBuildHeight();
         int height = level.getHeight();
         var biomeRegistry = level.registryAccess().registryOrThrow(Registries.BIOME);
@@ -86,55 +80,14 @@ final class SurfaceService {
         CompletableFuture<Optional<SurfaceTile>> raced = PENDING.putIfAbsent(key, future);
         if (raced != null) return raced;
 
-        DISK.execute(() -> {
+        saved.whenRead((nbt, error) -> {
             try {
-                Optional<SurfaceTile> result = SavedSurfaceReader.read(
-                        region, dimension, chunkX, chunkZ, minY, height, biomeRegistry);
-                result.ifPresent(tile -> {
-                    CACHE.put(key, tile);
-                    int count = DISK_HITS.incrementAndGet();
-                    if (count == 1 || count % 64 == 0)
-                        LOG.info("V3_FULL_DIRECT_READ count={} dim={} example={},{}",
-                                count, dimension, chunkX, chunkZ);
-                });
-                DISK_STALE.remove(key);
-                future.complete(result);
-            } catch (Throwable failure) {
-                future.completeExceptionally(failure);
-            } finally {
-                PENDING.remove(key, future);
-            }
-        });
-        return future;
-    }
-
-    static CompletableFuture<Optional<SurfaceTile>> requestSaved(
-            ServerLevel level, int chunkX, int chunkZ) {
-        if (!level.getServer().isSameThread())
-            throw new IllegalStateException("Saved surface request must start on server thread");
-
-        String dimension = level.dimension().location().toString();
-        Key key = key(level, chunkX, chunkZ);
-        SurfaceTile cached = CACHE.get(key);
-        if (cached != null && !DISK_STALE.contains(key))
-            return CompletableFuture.completedFuture(Optional.of(cached));
-
-        CompletableFuture<Optional<SurfaceTile>> existing = PENDING.get(key);
-        if (existing != null) return existing;
-
-        Path region = regionDirectory(level);
-        int minY = level.getMinBuildHeight();
-        int height = level.getHeight();
-        var biomeRegistry = level.registryAccess().registryOrThrow(Registries.BIOME);
-
-        CompletableFuture<Optional<SurfaceTile>> future = new CompletableFuture<>();
-        CompletableFuture<Optional<SurfaceTile>> raced = PENDING.putIfAbsent(key, future);
-        if (raced != null) return raced;
-
-        DISK.execute(() -> {
-            try {
-                Optional<SurfaceTile> result = SavedSurfaceReader.read(
-                        region, dimension, chunkX, chunkZ, minY, height, biomeRegistry);
+                if (error != null) {
+                    future.completeExceptionally(error);
+                    return;
+                }
+                Optional<SurfaceTile> result = nbt.flatMap(tag -> SavedSurfaceReader.fromSaved(
+                        tag, dimension, chunkX, chunkZ, minY, height, biomeRegistry));
                 result.ifPresent(tile -> {
                     CACHE.put(key, tile);
                     int count = DISK_HITS.incrementAndGet();
@@ -191,16 +144,5 @@ final class SurfaceService {
         String root = level.getServer().getWorldPath(LevelResource.ROOT)
                 .toAbsolutePath().normalize().toString();
         return new Key(root, level.dimension().location().toString(), chunkX, chunkZ);
-    }
-
-    private static Path regionDirectory(ServerLevel level) {
-        Path root = level.getServer().getWorldPath(LevelResource.ROOT);
-        if (level.dimension() == Level.OVERWORLD) return root.resolve("region");
-        if (level.dimension() == Level.NETHER) return root.resolve("DIM-1").resolve("region");
-        if (level.dimension() == Level.END) return root.resolve("DIM1").resolve("region");
-
-        var id = level.dimension().location();
-        return root.resolve("dimensions").resolve(id.getNamespace())
-                .resolve(id.getPath()).resolve("region");
     }
 }

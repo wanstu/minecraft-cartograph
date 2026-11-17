@@ -219,16 +219,13 @@ final class TileRequestScheduler {
             LiveSurfaceUpdates.watch(player, watchedKey);
         }
 
-        var surfaceFuture = watchLive
-                ? SurfaceService.request(
-                        player.serverLevel(), request.chunkX(), request.chunkZ())
-                : SurfaceService.requestSaved(
-                        player.serverLevel(), request.chunkX(), request.chunkZ());
-        var structureFuture = watchLive
-                ? StructureDiscovery.request(
-                        player.serverLevel(), request.chunkX(), request.chunkZ())
-                : StructureDiscovery.requestSaved(
-                        player.serverLevel(), request.chunkX(), request.chunkZ());
+        var level = player.serverLevel();
+        var saved = new SavedChunkRead();
+        var surfaceFuture = SurfaceService.request(
+                level, request.chunkX(), request.chunkZ(), watchLive, saved);
+        var structureFuture = StructureDiscovery.request(
+                level, request.chunkX(), request.chunkZ(), watchLive, saved);
+        saved.submit(level, request.chunkX(), request.chunkZ());
 
         surfaceFuture.thenCombine(
                         structureFuture,
