@@ -13,7 +13,7 @@ def require(condition, message):
         raise SystemExit(message)
 
 
-def verify_neoforge(archive, names, version):
+def verify_neoforge(archive, names, version, minecraft):
     require("fabric.mod.json" not in names, "Unexpected Fabric metadata")
     metadata = tomllib.loads(archive.read("META-INF/neoforge.mods.toml").decode("utf-8"))
     mods = metadata.get("mods", [])
@@ -29,14 +29,14 @@ def verify_neoforge(archive, names, version):
         for item in metadata.get("dependencies", {}).get("cartograph_v3", [])
     }
     require(
-        dependencies.get("minecraft", {}).get("versionRange") == "[1.21.1]"
+        dependencies.get("minecraft", {}).get("versionRange") == f"[{minecraft}]"
         and dependencies.get("neoforge", {}).get("type") == "required",
-        "Expected dependencies on Minecraft 1.21.1 and NeoForge",
+        f"Expected dependencies on Minecraft {minecraft} and NeoForge",
     )
     return ("CartographV3Mod", "CartographV3Client")
 
 
-def verify_fabric(archive, names, version):
+def verify_fabric(archive, names, version, minecraft):
     require("META-INF/neoforge.mods.toml" not in names, "Unexpected NeoForge metadata")
     metadata = json.loads(archive.read("fabric.mod.json"))
     require(
@@ -45,10 +45,10 @@ def verify_fabric(archive, names, version):
     )
     dependencies = metadata.get("depends", {})
     require(
-        dependencies.get("minecraft") == "1.21.1"
-        and dependencies.get("java") == ">=21"
+        dependencies.get("minecraft") == minecraft
+        and dependencies.get("java") == (">=25" if minecraft == "26.3" else ">=21")
         and all(dependencies.get(loader) for loader in ("fabricloader", "fabric-api")),
-        "Expected dependencies on Minecraft 1.21.1, Java 21, Fabric Loader and Fabric API",
+        f"Expected dependencies on Minecraft {minecraft}, Java, Fabric Loader and Fabric API",
     )
     entrypoints = metadata.get("entrypoints", {})
     require(
@@ -69,8 +69,9 @@ def main():
     parser.add_argument("jar", type=Path)
     parser.add_argument("version")
     parser.add_argument("--loader", choices=("neoforge", "fabric"), default="neoforge")
+    parser.add_argument("--minecraft", choices=("1.21.1", "26.3"), default="1.21.1")
     args = parser.parse_args()
-    expected_name = f"Cartograph-V3.1-{args.version}-mc1.21.1-{args.loader}.jar"
+    expected_name = f"Cartograph-V3.1-{args.version}-mc{args.minecraft}-{args.loader}.jar"
     require(args.jar.name == expected_name, f"Expected artifact {expected_name}")
 
     with ZipFile(args.jar) as archive:
@@ -78,7 +79,7 @@ def main():
         require(invalid is None, f"Invalid JAR entry: {invalid}")
         names = set(archive.namelist())
         verify_loader = verify_fabric if args.loader == "fabric" else verify_neoforge
-        loader_classes = verify_loader(archive, names, args.version)
+        loader_classes = verify_loader(archive, names, args.version, args.minecraft)
         for entry in (
             *(f"com/wanstu/cartographv3/{name}.class" for name in loader_classes),
             "com/wanstu/cartographv3/MapProtocol.class",

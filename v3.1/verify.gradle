@@ -1,6 +1,6 @@
-def commonMain = file('../common-1.21.1/src/main')
+def commonMain = file('../common/src/main')
 def commonJava = file("$commonMain/java/com/wanstu/cartographv3")
-def distributionJar = tasks.named(plugins.hasPlugin('fabric-loom') ? 'remapJar' : 'jar')
+def distributionJar = tasks.named(tasks.names.contains('remapJar') ? 'remapJar' : 'jar')
 
 tasks.register('verifyV3Isolation') {
     dependsOn distributionJar

@@ -10,28 +10,35 @@ on:
 permissions:
   contents: read
 
-env:
-  MINECRAFT_VERSION: '1.21.1'
-
 jobs:
   build:
-    name: Minecraft 1.21.1 / ${{ matrix.loader }}
+    name: Minecraft ${{ matrix.minecraft }} / ${{ matrix.loader }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        loader: [neoforge, fabric]
+        include:
+          - { minecraft: '1.21.1', loader: neoforge, java: '21' }
+          - { minecraft: '1.21.1', loader: fabric, java: '21' }
+          - { minecraft: '26.3', loader: neoforge, java: '25' }
+          - { minecraft: '26.3', loader: fabric, java: '25' }
     env:
+      MINECRAFT_VERSION: ${{ matrix.minecraft }}
       LOADER: ${{ matrix.loader }}
-      TARGET_DIR: v3.1/${{ matrix.loader }}-1.21.1
+      TARGET_DIR: v3.1/${{ matrix.loader }}-${{ matrix.minecraft }}
     outputs:
       version: ${{ steps.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
+        if: matrix.minecraft == '26.3' && matrix.loader == 'neoforge'
         with:
           distribution: temurin
           java-version: '21'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
       - uses: gradle/actions/setup-gradle@v4
       - name: Check version and target
         id: metadata
@@ -56,10 +63,10 @@ jobs:
           JAR: ${{ steps.metadata.outputs.jar }}
         run: |
           set -euo pipefail
-          python3 scripts/verify-v31-jar.py "$TARGET_DIR/build/libs/$JAR" "$VERSION" --loader "$LOADER"
+          python3 scripts/verify-v31-jar.py "$TARGET_DIR/build/libs/$JAR" "$VERSION" --loader "$LOADER" --minecraft "$MINECRAFT_VERSION"
           mkdir -p dist
           cp "$TARGET_DIR/build/libs/$JAR" dist/
-          (cd dist && sha256sum "$JAR" > "$LOADER.SHA256SUMS.txt")
+          (cd dist && sha256sum "$JAR" > "$MINECRAFT_VERSION-$LOADER.SHA256SUMS.txt")
       - uses: actions/upload-artifact@v4
         with:
           name: cartograph-v31-mc${{ env.MINECRAFT_VERSION }}-${{ matrix.loader }}
@@ -80,7 +87,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: cartograph-v31-mc${{ env.MINECRAFT_VERSION }}-*
+          pattern: cartograph-v31-mc*-*
           merge-multiple: true
           path: dist/
       - name: Check exact release assets
@@ -90,11 +97,13 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             test -s "docs/releases/$GITHUB_REF_NAME.md"
           fi
-          test "$(find dist -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 2
-          for loader in neoforge fabric; do
-            jar="Cartograph-V3.1-$VERSION-mc$MINECRAFT_VERSION-$loader.jar"
-            python3 scripts/verify-v31-jar.py "dist/$jar" "$VERSION" --loader "$loader"
-            (cd dist && sha256sum -c "$loader.SHA256SUMS.txt")
+          test "$(find dist -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 4
+          for mc in 1.21.1 26.3; do
+            for loader in neoforge fabric; do
+              jar="Cartograph-V3.1-$VERSION-mc$mc-$loader.jar"
+              python3 scripts/verify-v31-jar.py "dist/$jar" "$VERSION" --loader "$loader" --minecraft "$mc"
+              (cd dist && sha256sum -c "$mc-$loader.SHA256SUMS.txt")
+            done
           done
           (cd dist && sha256sum Cartograph-V3.1-*.jar > SHA256SUMS.txt)
       - uses: softprops/action-gh-release@v2
@@ -117,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           title="Cartograph V3.1 Development Preview"
-          notes="Cartograph V3.1 $VERSION for Minecraft $MINECRAFT_VERSION (NeoForge and Fabric). Build: $GITHUB_SHA."
+          notes="Cartograph V3.1 $VERSION for Minecraft 1.21.1 and 26.3 (NeoForge and Fabric). Build: $GITHUB_SHA."
           if gh release view development >/dev/null 2>&1; then
             gh release edit development --title "$title" --notes "$notes" --prerelease
           else
