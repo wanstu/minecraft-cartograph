@@ -1,4 +1,6 @@
 # Cartograph 多版本工程与发布契约
+
+本文记录 V1 时期的多版本工程。V3.1 的实际构建目标见 [GitHub 发布说明](GITHUB_RELEASE.md)。
 2026-11-09。参考 GeoWorld 的 **公共核心 + 版本适配 + GitHub Actions 构建矩阵** 设计，代码实现独立，不复制 Map Atlases GPL-3.0 源码。
 
 ## 版本矩阵

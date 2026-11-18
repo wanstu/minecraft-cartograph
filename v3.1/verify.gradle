@@ -1,0 +1,171 @@
+def commonMain = file('../common/src/main')
+def commonJava = file("$commonMain/java/com/wanstu/cartographv3")
+def distributionJar = tasks.named(tasks.names.contains('remapJar') ? 'remapJar' : 'jar')
+
+tasks.register('verifyV3Isolation') {
+    dependsOn distributionJar
+    doLast {
+        def jarFile = distributionJar.get().archiveFile.get().asFile
+        def legacy = zipTree(jarFile).matching { include 'com/wanstu/cartograph/**' }.files
+        if (!legacy.isEmpty()) {
+            throw new GradleException("V3 JAR contains legacy runtime classes: " + legacy)
+        }
+        def sourceLeak = sourceSets.main.allJava.files.findAll { it.text.contains('import com.wanstu.cartograph.') }
+        if (!sourceLeak.isEmpty()) {
+            throw new GradleException("V3 source imports legacy runtime: " + sourceLeak)
+        }
+        def sharedSources = fileTree(commonJava).matching { include '**/*.java' }.files
+        def loaderImports = sharedSources.findAll { file ->
+            ['net.neoforged.', 'net.fabricmc.'].any { file.text.contains(it) }
+        }
+        if (!loaderImports.isEmpty()) {
+            throw new GradleException("Shared Minecraft code imports a loader API: " + loaderImports)
+        }
+    }
+}
+
+tasks.register('verifyV31WebUiBoundary') {
+    dependsOn distributionJar
+    doLast {
+        def javaSources = sourceSets.main.allJava.files
+        def forbiddenSourceTokens = [
+            'net.ethrocky.pane',
+            'class MapScreenV3',
+            'class MapScreenV31',
+            'MapPaneRenderer',
+            'NativeMapCanvas',
+            'NativeCartographThemeFrontend'
+        ]
+        forbiddenSourceTokens.each { token ->
+            def offenders = javaSources.findAll { it.text.contains(token) }
+            if (!offenders.isEmpty()) {
+                throw new GradleException(
+                    'V3.1 must not contain the removed Pane or legacy renderer (' + token + '): ' + offenders)
+            }
+        }
+
+        def client = file(
+            "$commonJava/CartographClient.java").text
+        if (client.contains('CartographWebUiServer')
+                || client.contains('openInBrowser(')) {
+            throw new GradleException(
+                'M shortcut must not be coupled directly to the WebUI implementation')
+        }
+        if (!client.contains('openConfiguredFrontend()')) {
+            throw new GradleException(
+                'M shortcut must route through the backend-controlled frontend router')
+        }
+
+        def webBridge = file(
+            "$commonJava/CartographWebUiServer.java").text
+        if (webBridge.contains('new MinecraftCartographBackend(')) {
+            throw new GradleException(
+                'WebUI transport must use the shared injected backend, not create its own')
+        }
+
+        def store = file(
+            "$commonJava/PersistentTileStore.java").text
+        if (store.contains('SatelliteSurfaceRenderer')
+                || store.contains('.rgb()')
+                || store.contains('renderSignature')) {
+            throw new GradleException(
+                'V3.1 persistent cache must store facts only, never rendered pixels')
+        }
+
+        def jarFile = distributionJar.get().archiveFile.get().asFile
+        def index = zipTree(jarFile).matching { include 'webui/index.html' }.files
+        def script = zipTree(jarFile).matching { include 'webui/app.js' }.files
+        if (index.size() != 1 || script.size() != 1) {
+            throw new GradleException(
+                'V3.1 JAR must contain webui/index.html and webui/app.js')
+        }
+        def nativeEntries = zipTree(jarFile).matching {
+            include 'com/wanstu/cartographv3/InGameMapScreen.class'
+            include 'com/wanstu/cartographv3/InGameCartographFrontend.class'
+            include 'assets/cartograph_v3/textures/gui/map-icons.png'
+        }.files
+        if (nativeEntries.size() != 3) {
+            throw new GradleException('V3.1 JAR must ship the native screen, frontend, and icon atlas')
+        }
+        def nativeBindings = javaSources.findAll { it.name.startsWith('InGame') }
+        if (nativeBindings.any { source ->
+            ['MapClientCache', 'MapTransport', 'PacketDistributor', 'CartographWebUiServer',
+             'new MinecraftCartographBackend('].any { token -> source.text.contains(token) }
+        }) {
+            throw new GradleException('Native frontend must consume the shared backend API')
+        }
+
+        def paneEntries = zipTree(jarFile).matching {
+            include '**/*pane*'
+            include 'net/ethrocky/pane/**'
+            include 'META-INF/jarjar/**'
+        }.files
+        if (!paneEntries.isEmpty()) {
+            throw new GradleException(
+                'V3.1 WebUI JAR still contains Pane/Jar-in-Jar UI artifacts: ' + paneEntries)
+        }
+
+        def screenClasses = zipTree(jarFile).matching {
+            include 'com/wanstu/cartographv3/MapScreen*.class'
+            include 'com/wanstu/cartographv3/MapPane*.class'
+            include 'com/wanstu/cartographv3/MapHifi*.class'
+            include 'com/wanstu/cartographv3/NativeMapCanvas*.class'
+            include 'com/wanstu/cartographv3/NativeCartographThemeFrontend*.class'
+        }.files
+        if (!screenClasses.isEmpty()) {
+            throw new GradleException(
+                'V3.1 JAR contains removed in-game UI classes: ' + screenClasses)
+        }
+    }
+}
+
+tasks.register('verifyV31WebSocketTransport') {
+    doLast {
+        def app = file("$commonMain/resources/webui/app.js").text
+        def server = file(
+            "$commonJava/CartographWebUiServer.java").text
+        def cache = file(
+            "$commonJava/MapClientCache.java").text
+
+        ['fetch(', 'XMLHttpRequest', 'EventSource',
+         '/api/v1/state', '/api/v1/tiles', '/api/v1/session',
+         '/api/v1/viewport', '/api/v1/point', '/api/v1/teleport',
+         '/api/v1/markers', '/api/v1/runtime-settings'].each { token ->
+            if (app.contains(token)) {
+                throw new GradleException(
+                    'WebUI runtime must use one WebSocket, found legacy transport: ' + token)
+            }
+        }
+        ['text/event-stream', '/api/v1/state', '/api/v1/tiles',
+         '/api/v1/session', '/api/v1/viewport', '/api/v1/point',
+         '/api/v1/teleport', '/api/v1/markers', '/api/v1/runtime-settings'].each { token ->
+            if (server.contains(token)) {
+                throw new GradleException(
+                    'Legacy runtime HTTP endpoint remains in the WebUI server: ' + token)
+            }
+        }
+        ['Sec-WebSocket-Accept', 'WebSocketSession', 'sendBinary',
+         'readWebSocketFrame'].each { token ->
+            if (!server.contains(token)) {
+                throw new GradleException(
+                    'WebSocket server implementation is incomplete: ' + token)
+            }
+        }
+        if (!app.contains('new WebSocket(')
+                || !app.contains('binaryType=\'arraybuffer\'')) {
+            throw new GradleException(
+                'WebUI must use one binary-capable WebSocket connection')
+        }
+        if (!cache.contains('addTileChangeListener')
+                || !server.contains('MapClientCache.addTileChangeListener')) {
+            throw new GradleException(
+                'Map tile updates must be pushed from backend cache-change events')
+        }
+    }
+}
+
+tasks.named('check').configure {
+    dependsOn tasks.named('verifyV3Isolation')
+    dependsOn tasks.named('verifyV31WebUiBoundary')
+    dependsOn tasks.named('verifyV31WebSocketTransport')
+}

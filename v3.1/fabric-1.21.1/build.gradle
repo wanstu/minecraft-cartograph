@@ -1,0 +1,39 @@
+plugins {
+    id 'fabric-loom' version '1.7.4'
+}
+
+group = 'com.wanstu.cartographv3'
+version = providers.gradleProperty('mod_version')
+        .getOrElse(file('../VERSION').text.trim())
+base.archivesName = 'Cartograph-V3.1'
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:$minecraft_version"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:$loader_version"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:$fabric_api_version"
+}
+
+sourceSets.main.java.srcDir '../common/src/main/java'
+sourceSets.main.java.srcDir "../common-$minecraft_version/src/main/java"
+sourceSets.main.resources.srcDir '../common/src/main/resources'
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+processResources {
+    def metadata = [version: project.version, minecraft: minecraft_version]
+    inputs.properties metadata
+    filesMatching('fabric.mod.json') {
+        expand metadata
+    }
+}
+
+tasks.named('remapJar') {
+    archiveFileName = "Cartograph-V3.1-$version-mc$minecraft_version-fabric.jar"
+}
+
+apply from: '../verify.gradle'
