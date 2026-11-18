@@ -2,7 +2,6 @@ package com.wanstu.cartographv3;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
-import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.List;
 import java.util.UUID;
@@ -11,7 +10,7 @@ import java.util.UUID;
  * NeoForge/client implementation of the stable Cartograph frontend API.
  *
  * This class owns network/cache/request policy. Themes never touch
- * PacketDistributor or MapClientCache directly.
+ * MapTransport or MapClientCache directly.
  */
 final class MinecraftCartographBackend implements CartographBackendApi {
     private static final int MIN_PENDING_REQUESTS = 32;
@@ -37,7 +36,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         opened = true;
         MapClientCache.ensureWorld(minecraft.level);
         MapClientCache.beginMapSession();
-        PacketDistributor.sendToServer(new MapProtocol.MapViewState(
+        MapTransport.sendToServer(new MapProtocol.MapViewState(
                 true, CartographSettings.liveScanIntervalTicks()));
     }
 
@@ -194,7 +193,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
 
     @Override
     public void teleport(int blockX, int blockZ) {
-        PacketDistributor.sendToServer(new MapProtocol.TeleportRequest(
+        MapTransport.sendToServer(new MapProtocol.TeleportRequest(
                 dimension(), blockX, blockZ));
     }
 
@@ -202,7 +201,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     public void setLiveScanInterval(int ticks) {
         CartographSettings.setLiveScanIntervalTicks(ticks);
         if (opened) {
-            PacketDistributor.sendToServer(new MapProtocol.MapViewState(true, ticks));
+            MapTransport.sendToServer(new MapProtocol.MapViewState(true, ticks));
         }
     }
 
@@ -214,7 +213,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
 
         var connection = minecraft.getConnection();
         if (connection != null && connection.getConnection().isConnected()) {
-            connection.send(new MapProtocol.MapViewState(
+            MapTransport.sendToServer(new MapProtocol.MapViewState(
                     false, CartographSettings.liveScanIntervalTicks()));
         }
     }

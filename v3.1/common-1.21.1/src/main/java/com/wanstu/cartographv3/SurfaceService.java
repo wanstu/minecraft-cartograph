@@ -1,10 +1,10 @@
 package com.wanstu.cartographv3;
 
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.storage.LevelResource;
-import net.neoforged.neoforge.event.level.ChunkDataEvent;
 
 import java.util.Optional;
 import java.util.Set;
@@ -123,9 +123,7 @@ final class SurfaceService {
         return Optional.of(next);
     }
 
-    static void invalidate(ChunkDataEvent.Save event) {
-        if (!(event.getLevel() instanceof ServerLevel level)) return;
-        var pos = event.getChunk().getPos();
+    static void invalidate(ServerLevel level, ChunkPos pos) {
         // Save means the on-disk copy may have changed. Keep the in-memory
         // fingerprint so live comparison remains meaningful; only force the
         // next *unloaded* disk request to bypass CACHE.

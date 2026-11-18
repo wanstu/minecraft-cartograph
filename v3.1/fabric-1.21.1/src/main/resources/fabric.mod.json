@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "cartograph_v3",
+  "version": "${version}",
+  "name": "Cartograph V3.1",
+  "description": "Map atlas backed by generated Minecraft terrain.",
+  "authors": ["wanstu"],
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.wanstu.cartographv3.FabricCartograph"],
+    "client": ["com.wanstu.cartographv3.FabricCartographClient"]
+  },
+  "mixins": ["cartograph_v3.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.15.11",
+    "fabric-api": "*",
+    "minecraft": "${minecraft}",
+    "java": ">=21"
+  },
+  "license": "All Rights Reserved"
+}

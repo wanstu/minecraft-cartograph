@@ -8,12 +8,10 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.neoforge.network.PacketDistributor;
-import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
 public final class MapProtocol {
+    static final String MOD_ID = "cartograph_v3";
+
     private MapProtocol() {}
 
     public record StructureHit(
@@ -30,7 +28,7 @@ public final class MapProtocol {
             liveScanIntervalTicks = Math.max(5, Math.min(100, liveScanIntervalTicks));
         }
         public static final Type<MapViewState> TYPE = new Type<>(
-                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "map_view_state"));
+                ResourceLocation.fromNamespaceAndPath(MOD_ID, "map_view_state"));
         public static final StreamCodec<RegistryFriendlyByteBuf, MapViewState> CODEC =
                 StreamCodec.of(
                         (buf, value) -> {
@@ -43,7 +41,7 @@ public final class MapProtocol {
 
     public record RequestWorldInfo() implements CustomPacketPayload {
         public static final Type<RequestWorldInfo> TYPE = new Type<>(
-                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "request_world_info"));
+                ResourceLocation.fromNamespaceAndPath(MOD_ID, "request_world_info"));
         public static final StreamCodec<RegistryFriendlyByteBuf, RequestWorldInfo> CODEC =
                 StreamCodec.of((buf, value) -> {}, buf -> new RequestWorldInfo());
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -51,7 +49,7 @@ public final class MapProtocol {
 
     public record WorldInfo(String worldId, String dimension) implements CustomPacketPayload {
         public static final Type<WorldInfo> TYPE = new Type<>(
-                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "world_info"));
+                ResourceLocation.fromNamespaceAndPath(MOD_ID, "world_info"));
         public static final StreamCodec<RegistryFriendlyByteBuf, WorldInfo> CODEC =
                 StreamCodec.of(
                         (buf, value) -> {
@@ -66,7 +64,7 @@ public final class MapProtocol {
                               boolean hasKnownFingerprint, long knownFingerprint)
             implements CustomPacketPayload {
         public static final Type<RequestTile> TYPE = new Type<>(
-                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "request_tile"));
+                ResourceLocation.fromNamespaceAndPath(MOD_ID, "request_tile"));
         public static final StreamCodec<RegistryFriendlyByteBuf, RequestTile> CODEC =
                 StreamCodec.of(
                         (buf, value) -> {
@@ -84,7 +82,7 @@ public final class MapProtocol {
     public record TeleportRequest(String dimension, int blockX, int blockZ)
             implements CustomPacketPayload {
         public static final Type<TeleportRequest> TYPE = new Type<>(
-                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "teleport"));
+                ResourceLocation.fromNamespaceAndPath(MOD_ID, "teleport"));
         public static final StreamCodec<RegistryFriendlyByteBuf, TeleportRequest> CODEC =
                 StreamCodec.of(
                         (buf, value) -> {
@@ -169,7 +167,7 @@ public final class MapProtocol {
         @Override public byte[] waterDepths() { return waterDepths.clone(); }
 
         public static final Type<Tile> TYPE = new Type<>(
-                ResourceLocation.fromNamespaceAndPath(CartographV3Mod.MOD_ID, "tile"));
+                ResourceLocation.fromNamespaceAndPath(MOD_ID, "tile"));
 
         public static final StreamCodec<RegistryFriendlyByteBuf, Tile> CODEC =
                 StreamCodec.of(
@@ -278,62 +276,40 @@ public final class MapProtocol {
     }
 
     static void pushChanged(ServerPlayer player, SurfaceTile tile) {
-        PacketDistributor.sendToPlayer(player, Tile.changed(tile));
+        MapTransport.sendToPlayer(player, Tile.changed(tile));
     }
 
-    public static void register(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("8");
-        registrar.playToServer(MapViewState.TYPE, MapViewState.CODEC, (request, context) ->
-                context.enqueueWork(() -> {
-                    if (!(context.player() instanceof ServerPlayer player)) return;
-                    if (request.open()) {
-                        TileRequestScheduler.open(player);
-                        LiveSurfaceUpdates.open(player, request.liveScanIntervalTicks());
-                    } else {
-                        LiveSurfaceUpdates.close(player);
-                        TileRequestScheduler.close(player);
-                    }
-                }));
-        registrar.playToServer(RequestWorldInfo.TYPE, RequestWorldInfo.CODEC, (request, context) ->
-                context.enqueueWork(() -> {
-                    if (!(context.player() instanceof ServerPlayer player)) return;
-                    PacketDistributor.sendToPlayer(player, new WorldInfo(
-                            WorldIdentity.get(player.server).toString(),
-                            player.serverLevel().dimension().location().toString()));
-                }));
-        registrar.playToServer(TeleportRequest.TYPE, TeleportRequest.CODEC, (request, context) ->
-                context.enqueueWork(() -> {
-                    if (!(context.player() instanceof ServerPlayer player)) return;
-                    var level = player.serverLevel();
-                    if (!level.dimension().location().toString().equals(request.dimension())) return;
-                    if (!player.server.isSingleplayerOwner(player.getGameProfile())
-                            && !player.hasPermissions(2)) return;
+    static void handleViewState(ServerPlayer player, MapViewState request) {
+        if (request.open()) {
+            TileRequestScheduler.open(player);
+            LiveSurfaceUpdates.open(player, request.liveScanIntervalTicks());
+        } else {
+            LiveSurfaceUpdates.close(player);
+            TileRequestScheduler.close(player);
+        }
+    }
 
-                    int x = request.blockX();
-                    int z = request.blockZ();
+    static void replyWorldInfo(ServerPlayer player) {
+        MapTransport.sendToPlayer(player, new WorldInfo(
+                WorldIdentity.get(player.server).toString(),
+                player.serverLevel().dimension().location().toString()));
+    }
 
-                    // Force the target chunk to exist before consulting heightmaps.
-                    level.getChunk(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
-                    int y = findSafeTeleportY(level, x, z);
+    static void handleTeleport(ServerPlayer player, TeleportRequest request) {
+        var level = player.serverLevel();
+        if (!level.dimension().location().toString().equals(request.dimension())) return;
+        if (!player.server.isSingleplayerOwner(player.getGameProfile())
+                && !player.hasPermissions(2)) return;
 
-                    player.teleportTo(
-                            level, x + 0.5, y, z + 0.5,
-                            player.getYRot(), player.getXRot());
-                }));
+        int x = request.blockX();
+        int z = request.blockZ();
 
-        registrar.playToServer(RequestTile.TYPE, RequestTile.CODEC, (request, context) ->
-                context.enqueueWork(() -> {
-                    if (!(context.player() instanceof ServerPlayer player)) return;
-                    TileRequestScheduler.enqueue(player, request);
-                }));
+        // Force the target chunk to exist before consulting heightmaps.
+        level.getChunk(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
+        int y = findSafeTeleportY(level, x, z);
 
-        registrar.playToClient(WorldInfo.TYPE, WorldInfo.CODEC, (info, context) ->
-                context.enqueueWork(() -> {
-                    if (FMLEnvironment.dist == Dist.CLIENT) MapClientCache.accept(info);
-                }));
-        registrar.playToClient(Tile.TYPE, Tile.CODEC, (tile, context) ->
-                context.enqueueWork(() -> {
-                    if (FMLEnvironment.dist == Dist.CLIENT) MapClientCache.accept(tile);
-                }));
+        player.teleportTo(
+                level, x + 0.5, y, z + 0.5,
+                player.getYRot(), player.getXRot());
     }
 }

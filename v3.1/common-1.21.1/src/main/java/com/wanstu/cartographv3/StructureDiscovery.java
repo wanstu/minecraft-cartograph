@@ -1,5 +1,6 @@
 package com.wanstu.cartographv3;
 
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -7,7 +8,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.storage.LevelResource;
-import net.neoforged.neoforge.event.level.ChunkDataEvent;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -83,9 +83,7 @@ final class StructureDiscovery {
         return future;
     }
 
-    static void invalidate(ChunkDataEvent.Save event) {
-        if (!(event.getLevel() instanceof ServerLevel level)) return;
-        var pos = event.getChunk().getPos();
+    static void invalidate(ServerLevel level, ChunkPos pos) {
         STALE.add(key(level, pos.x, pos.z));
     }
 

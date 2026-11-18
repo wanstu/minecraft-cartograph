@@ -1,9 +1,9 @@
 package com.wanstu.cartographv3;
 
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,10 +66,8 @@ final class LiveSurfaceUpdates {
         }
     }
 
-    static void tick(ServerTickEvent.Post event) {
+    static void tick(MinecraftServer server) {
         tickCounter++;
-
-        var server = event.getServer();
         WATCHERS.keySet().removeIf(uuid -> server.getPlayerList().getPlayer(uuid) == null);
 
         for (var watcher : WATCHERS.entrySet()) {

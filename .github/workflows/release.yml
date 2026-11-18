@@ -1,4 +1,4 @@
-name: Cartograph V3.1 NeoForge
+name: Cartograph V3.1
 
 on:
   push:
@@ -11,15 +11,21 @@ permissions:
   contents: read
 
 env:
-  TARGET_DIR: v3.1/neoforge-1.21.1
-  ARTIFACT_NAME: cartograph-v31-mc1.21.1-neoforge
+  MINECRAFT_VERSION: '1.21.1'
 
 jobs:
   build:
+    name: Minecraft 1.21.1 / ${{ matrix.loader }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        loader: [neoforge, fabric]
+    env:
+      LOADER: ${{ matrix.loader }}
+      TARGET_DIR: v3.1/${{ matrix.loader }}-1.21.1
     outputs:
       version: ${{ steps.metadata.outputs.version }}
-      jar: ${{ steps.metadata.outputs.jar }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -32,59 +38,67 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          properties="$TARGET_DIR/gradle.properties"
-          grep -Fx 'minecraft_version=1.21.1' "$properties"
-          grep -Fx 'mod_id=cartograph_v3' "$properties"
-          version="$(sed -n 's/^mod_version=//p' "$properties")"
+          grep -Fx "minecraft_version=$MINECRAFT_VERSION" "$TARGET_DIR/gradle.properties"
+          version="$(cat v3.1/VERSION)"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             [[ "$GITHUB_REF_NAME" == "v$version" && "$version" != *-* ]]
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "jar=Cartograph-V3.1-$version-mc1.21.1-neoforge.jar" >> "$GITHUB_OUTPUT"
+          echo "jar=Cartograph-V3.1-$version-mc$MINECRAFT_VERSION-$LOADER.jar" >> "$GITHUB_OUTPUT"
       - name: Build and check V3.1
         working-directory: ${{ env.TARGET_DIR }}
         run: bash ./gradlew --no-daemon --max-workers=2 check build
-      - name: Verify JAR and create SHA-256 manifest
+      - name: Verify JAR and checksum
         shell: bash
         env:
           VERSION: ${{ steps.metadata.outputs.version }}
           JAR: ${{ steps.metadata.outputs.jar }}
         run: |
           set -euo pipefail
-          python3 scripts/verify-v31-jar.py "$TARGET_DIR/build/libs/$JAR" "$VERSION"
+          python3 scripts/verify-v31-jar.py "$TARGET_DIR/build/libs/$JAR" "$VERSION" --loader "$LOADER"
           mkdir -p dist
           cp "$TARGET_DIR/build/libs/$JAR" dist/
-          (cd dist && sha256sum "$JAR" > SHA256SUMS.txt)
+          (cd dist && sha256sum "$JAR" > "$LOADER.SHA256SUMS.txt")
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: cartograph-v31-mc${{ env.MINECRAFT_VERSION }}-${{ matrix.loader }}
           path: dist/
           if-no-files-found: error
 
-  github-release:
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+  publish:
+    if: >-
+      (github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(needs.build.outputs.version, '-'))
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          pattern: cartograph-v31-mc${{ env.MINECRAFT_VERSION }}-*
+          merge-multiple: true
           path: dist/
       - name: Check exact release assets
         shell: bash
-        env:
-          JAR: ${{ needs.build.outputs.jar }}
         run: |
           set -euo pipefail
-          test -s "docs/releases/$GITHUB_REF_NAME.md"
-          test -f "dist/$JAR"
-          test "$(find dist -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 1
-          (cd dist && sha256sum --check SHA256SUMS.txt)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            test -s "docs/releases/$GITHUB_REF_NAME.md"
+          fi
+          test "$(find dist -maxdepth 1 -type f -name '*.jar' | wc -l)" -eq 2
+          for loader in neoforge fabric; do
+            jar="Cartograph-V3.1-$VERSION-mc$MINECRAFT_VERSION-$loader.jar"
+            python3 scripts/verify-v31-jar.py "dist/$jar" "$VERSION" --loader "$loader"
+            (cd dist && sha256sum -c "$loader.SHA256SUMS.txt")
+          done
+          (cd dist && sha256sum Cartograph-V3.1-*.jar > SHA256SUMS.txt)
       - uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
         with:
           name: Cartograph V3.1 ${{ github.ref_name }}
           body_path: docs/releases/${{ github.ref_name }}.md
@@ -92,35 +106,21 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           files: |
-            dist/${{ needs.build.outputs.jar }}
+            dist/*.jar
             dist/SHA256SUMS.txt
-
-  development-preview:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(needs.build.outputs.version, '-')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: dist/
       - name: Update development preview
+        if: github.ref_type != 'tag'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          VERSION: ${{ needs.build.outputs.version }}
-          JAR: ${{ needs.build.outputs.jar }}
         run: |
           set -euo pipefail
-          (cd dist && sha256sum --check SHA256SUMS.txt)
           title="Cartograph V3.1 Development Preview"
-          notes="Cartograph V3.1 $VERSION for Minecraft 1.21.1 on NeoForge. Build: $GITHUB_SHA."
+          notes="Cartograph V3.1 $VERSION for Minecraft $MINECRAFT_VERSION (NeoForge and Fabric). Build: $GITHUB_SHA."
           if gh release view development >/dev/null 2>&1; then
             gh release edit development --title "$title" --notes "$notes" --prerelease
           else
             gh release create development --target "$GITHUB_SHA" --title "$title" --notes "$notes" --prerelease
           fi
-          gh release upload development "dist/$JAR" dist/SHA256SUMS.txt --clobber
+          gh release upload development dist/*.jar dist/SHA256SUMS.txt --clobber

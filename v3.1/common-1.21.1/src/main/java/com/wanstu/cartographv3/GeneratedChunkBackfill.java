@@ -1,11 +1,11 @@
 package com.wanstu.cartographv3;
 
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
-import net.neoforged.neoforge.event.level.ChunkDataEvent;
 
 import java.io.RandomAccessFile;
 import java.nio.file.DirectoryStream;
@@ -137,9 +137,7 @@ final class GeneratedChunkBackfill {
         completeAttempt(state, key);
     }
 
-    static void chunkSaved(ChunkDataEvent.Save event) {
-        if (!(event.getLevel() instanceof ServerLevel level)) return;
-        var pos = event.getChunk().getPos();
+    static void chunkSaved(ServerLevel level, ChunkPos pos) {
         ChunkKey key = new ChunkKey(
                 level.dimension().location().toString(), pos.x, pos.z);
 

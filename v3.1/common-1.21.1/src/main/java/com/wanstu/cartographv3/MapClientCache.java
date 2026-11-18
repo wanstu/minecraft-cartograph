@@ -1,7 +1,6 @@
 package com.wanstu.cartographv3;
 
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -66,7 +65,7 @@ public final class MapClientCache {
     private static void requestWorldInfo() {
         if (world == null || worldInfoRequested) return;
         worldInfoRequested = true;
-        PacketDistributor.sendToServer(new MapProtocol.RequestWorldInfo());
+        MapTransport.sendToServer(new MapProtocol.RequestWorldInfo());
     }
 
     public static void tick() {
@@ -184,7 +183,7 @@ public final class MapClientCache {
         if (inMemory != null) {
             if (VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) == mapSession) return;
             PENDING.add(key);
-            PacketDistributor.sendToServer(new MapProtocol.RequestTile(
+            MapTransport.sendToServer(new MapProtocol.RequestTile(
                     key.dimension(), key.x(), key.z(), true, inMemory.fingerprint64()));
             return;
         }
@@ -199,7 +198,7 @@ public final class MapClientCache {
                 LOG.info("V3_MAP_CACHE_RESTORE restored={} example={},{}",
                         restored, key.x(), key.z());
             PENDING.add(key);
-            PacketDistributor.sendToServer(new MapProtocol.RequestTile(
+            MapTransport.sendToServer(new MapProtocol.RequestTile(
                     key.dimension(), key.x(), key.z(), true, restoredTile.fingerprint64()));
             return;
         }
@@ -207,7 +206,7 @@ public final class MapClientCache {
         if (missing != null && ticks - missing < 40) return;
         PENDING.add(key);
         if (firstRequestNanos == 0L) firstRequestNanos = System.nanoTime();
-        PacketDistributor.sendToServer(new MapProtocol.RequestTile(
+        MapTransport.sendToServer(new MapProtocol.RequestTile(
                 key.dimension(), key.x(), key.z(), false, 0L));
     }
 
