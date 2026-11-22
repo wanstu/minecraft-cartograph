@@ -258,7 +258,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .settings-main{overflow:auto;scrollbar-gutter:stable}
 .settings-footer{position:sticky;bottom:-18px;background:var(--theme-footer-bg);z-index:5}
 .style-card.disabled{opacity:.48;cursor:not-allowed;position:relative;filter:saturate(.55)}
-.style-card.disabled:hover{border-color:#44525b;box-shadow:none}
+.style-card.disabled:hover{border-color:var(--theme-control-border);box-shadow:none}
 .coming-badge{position:absolute;right:7px;top:7px;padding:3px 7px;border-radius:10px;background:var(--theme-control-bg);border:1px solid var(--theme-control-border);color:var(--text);font-size:10px;z-index:2}
 .dropdown{position:fixed;z-index:120;min-width:190px;max-height:280px;overflow:auto;padding:5px;background:var(--panel);border:1px solid var(--theme-control-border);border-radius:var(--theme-control-radius);box-shadow:var(--shadow);display:none}
 .dropdown.open{display:block}
@@ -377,28 +377,28 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
 .marker-tab .badge{min-width:18px;height:18px;padding:0 5px;border-radius:10px;background:var(--panel3);color:var(--text);display:grid;place-items:center;font-size:10px}
 .marker-tab.active .badge{background:var(--accent);color:var(--bg)}
 .marker-pane{display:none}.marker-pane.active{display:block}
-.marker-origin{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:9px;border:1px solid #596771;color:#aeb8be;font-size:10px;margin-left:5px;vertical-align:1px}
-.marker-origin.edited-auto{border-color:#8f7841;color:#e4c66f;background:#5b481d44}
-.mini.reset:hover{color:#f0cf69}
+.marker-origin{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:9px;border:1px solid var(--theme-control-border);color:var(--theme-surface-muted);font-size:10px;margin-left:5px;vertical-align:1px}
+.marker-origin.edited-auto{border-color:var(--theme-warning-border);color:var(--theme-warning-text);background:var(--theme-warning-bg)}
+.mini.reset:hover{color:var(--accent)}
 .recycle-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:7px}
-.recycle-toolbar .hint{flex:1;color:#87949b;font-size:11px;line-height:1.35}
+.recycle-toolbar .hint{flex:1;color:var(--theme-surface-muted);font-size:11px;line-height:1.35}
 .recycle-list{max-height:calc(100vh - 245px);overflow:auto;scrollbar-gutter:stable}
 .recycle-row{display:flex;align-items:center;gap:9px;padding:10px 4px;border-bottom:1px solid #ffffff0b}
-.recycle-row .trash-icon{width:25px;height:25px;color:#86939a}
+.recycle-row .trash-icon{width:25px;height:25px;color:var(--theme-surface-muted)}
 .recycle-row .info{min-width:0;flex:1}.recycle-row .title{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.recycle-row .meta{font-size:10px;color:#849198;margin-top:3px}
-.recycle-kind{display:inline-flex;height:17px;align-items:center;padding:0 5px;border:1px solid #4f5c64;border-radius:8px;margin-right:5px;color:#aab4b9}
-.recycle-empty{padding:30px 10px;text-align:center;color:#829098;font-size:12px;line-height:1.7}
-.recycle-footer{margin-top:8px;padding-top:8px;border-top:1px solid #ffffff0b;color:#78858d;font-size:10px;text-align:center}
+.recycle-row .meta{font-size:10px;color:var(--theme-surface-muted);margin-top:3px}
+.recycle-kind{display:inline-flex;height:17px;align-items:center;padding:0 5px;border:1px solid var(--theme-control-border);border-radius:8px;margin-right:5px;color:var(--theme-surface-muted)}
+.recycle-empty{padding:30px 10px;text-align:center;color:var(--theme-surface-muted);font-size:12px;line-height:1.7}
+.recycle-footer{margin-top:8px;padding-top:8px;border-top:1px solid var(--theme-row-border);color:var(--theme-surface-muted);font-size:10px;text-align:center}
 .btn.compact{height:30px;padding:0 9px;font-size:11px}
-.btn.confirm-danger{border-color:#9a5551;background:#5e2e2b;color:#ffd4d1}
+.btn.confirm-danger{border-color:var(--theme-offline-border);background:var(--theme-offline-bg);color:var(--theme-offline-text)}
 
 
 /* Runtime WebUI map surface: the original high-fidelity UI remains DOM/CSS/SVG. */
 .world-wrap{position:absolute;inset:0;left:0;top:0;width:100%;height:100%;transform:none!important;transform-origin:center}
 #mapCanvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:#17383c}
 .player,.player-ring{left:0;top:0}
-.app[data-connection="offline"] .location-info{color:#df6d68}
+.app[data-connection="offline"] .location-info{color:var(--danger)}
 .webui-offline{position:absolute;z-index:110;left:50%;top:calc(var(--header) + 24px);transform:translateX(-50%);background:var(--theme-offline-bg);border:1px solid var(--theme-offline-border);border-radius:7px;padding:8px 13px;display:none;color:var(--theme-offline-text);box-shadow:0 8px 24px #0008}
 .app[data-connection="offline"] .webui-offline{display:block}
 
