@@ -54,6 +54,7 @@ $browserTest = @'
 
     const settingsModal = document.querySelector('#settingsModal');
     const settingsRect = rect(settingsModal);
+    const footerBg = getComputedStyle(settingsModal.querySelector('.settings-footer')).backgroundColor;
     assert(getComputedStyle(settingsModal).display !== 'none', id + ': settings modal closed during theme switch');
     assert(settingsRect.left >= -0.5 && settingsRect.top >= -0.5, id + ': settings modal starts outside viewport');
     assert(settingsRect.right <= innerWidth + 0.5 && settingsRect.bottom <= innerHeight + 0.5, id + ': settings modal extends outside viewport');
@@ -89,6 +90,7 @@ $browserTest = @'
       aboutLabel: document.querySelector('#aboutThemeValue').textContent.trim(),
       stored,
       settingsModal: settingsRect,
+      footerBg,
       stage: rect(stage),
       topbar: rect(topbar),
       panel: rect(panel),
@@ -172,6 +174,9 @@ $browserTest = @'
         assert(label === expectedLabels[item.id], item.id + ': dynamic theme label mismatch: ' + label);
       }
     }
+    assert(satellite.footerBg !== modern.footerBg, 'modern settings footer still uses satellite surface');
+    assert(satellite.footerBg !== ancient.footerBg, 'ancient settings footer still uses satellite surface');
+    assert(modern.footerBg !== ancient.footerBg, 'modern and ancient settings footer surfaces collapsed together');
 
     document.body.dataset.themeBrowserTest = encodeURIComponent(JSON.stringify({
       ok: failures.length === 0,

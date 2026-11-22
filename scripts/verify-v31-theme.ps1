@@ -49,7 +49,8 @@ foreach ($hook in @(
   '--theme-close-color:',
   '--theme-close-hover:',
   '--theme-overlay-bg:',
-  '--theme-focus:'
+  '--theme-focus:',
+  '--theme-footer-bg:'
 )) { Require-Contains $html $hook "theme CSS hook missing: $hook" }
 
 foreach ($hook in @(
