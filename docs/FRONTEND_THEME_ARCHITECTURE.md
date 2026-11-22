@@ -46,6 +46,13 @@ Switching a theme therefore must not rescan the world, rebuild the facts cache, 
 
 The WebUI stores `frontendTheme` as a frontend-only preference.
 
+The loopback server intentionally remains a thin transport and currently serves the two
+frontend bundles (`index.html` and `app.js`). Theme implementation therefore stays
+inside those frontend bundles instead of adding theme-specific HTTP routes. Shared
+controls consume theme surface tokens such as `--theme-control-bg`,
+`--theme-control-border`, `--theme-control-hover` and
+`--theme-surface-muted`, so new controls inherit the active theme by default.
+
 `FRONTEND_THEMES` is the theme registry. Each theme declares:
 
 - stable theme id

@@ -196,7 +196,9 @@ tasks.register('verifyV31FrontendThemes') {
             }
         }
 
-        ['id="activeThemeLabel"',
+        ['--theme-control-bg:', '--theme-control-border:', '--theme-control-hover:',
+         '--theme-row-border:', '--theme-surface-muted:', '--theme-toast-bg:',
+         'id="activeThemeLabel"',
          'id="i-theme-modern-pin"', 'id="i-theme-modern-village"',
          'id="i-theme-engraved-pin"', 'id="i-theme-engraved-village"',
          '.app[data-theme-layout="modern-atlas"] .map-stage{inset:0}',
