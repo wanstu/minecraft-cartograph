@@ -62,6 +62,7 @@ The WebUI stores `frontendTheme` as a frontend-only preference.
 - `app.dataset.theme` selects the theme identity
 - `themeLayout` selects the layout family
 - `themeIcons` selects the icon family
+- semantic marker icons are resolved through `THEME_ICON_SYMBOLS`; persisted marker data keeps semantic names such as `village`, `mountain` and `water`
 - `themeDensity` selects control spacing/density
 - `themeTypography` selects typography semantics
 - `app.dataset.style` exposes the active map renderer identity
@@ -94,6 +95,12 @@ usable on narrow windows.
 The ancient theme already has an independent palette, typography, density and layout
 identity. Its stronger atlas/paper composition will be refined separately instead of
 being implemented as a sepia filter on the modern theme.
+
+Marker and structure icon data stays semantic. The modern and engraved icon families
+currently provide independent glyphs for the most common atlas concepts (pin, home,
+village, mountain and water) and safely fall back to the technical symbol set for the
+rest. Switching themes refreshes existing marker/layer UI without mutating persisted
+marker definitions.
 
 ## Future theme renderer contract
 

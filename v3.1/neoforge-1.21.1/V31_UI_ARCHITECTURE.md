@@ -135,7 +135,9 @@ composition while consuming the same `CartographBackendApi` contract.
 
 The built-in theme identities are `satellite`, `modern` and `ancient`. Each theme
 declares its layout family, icon family, control density, typography family and map
-renderer. Theme selection is frontend-only state and must not rescan the world, rebuild
+renderer. Marker/structure data stores semantic icon identities; the active theme maps
+those identities to its own glyph family, with safe fallback to the technical glyph set.
+Theme selection is frontend-only state and must not rescan the world, rebuild
 the persistent facts cache, reconnect transport or create a second backend instance.
 
 The current theme runtime enables all three UI themes. Map composition dispatches

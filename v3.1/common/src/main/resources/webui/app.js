@@ -124,7 +124,7 @@
   }
   function selectFrontendTheme(id){
     if(!FRONTEND_THEMES[id])return;
-    settings.frontendTheme=id;saveSettings();applyFrontendTheme();renderSettings();scheduleRender(DRAW_ALL);
+    settings.frontendTheme=id;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
     const theme=currentFrontendTheme();
     toast(theme.mapReady?'已切换到 '+theme.label:'已切换到 '+theme.label+'；地图暂使用卫星真值');
   }
@@ -265,7 +265,21 @@
   }
   function setConnection(on){ app.dataset.connection=on?'online':'offline'; }
 
-  function iconSymbol(raw){
+  const THEME_ICON_SYMBOLS = Object.freeze({
+    modern:Object.freeze({
+      pin:'i-theme-modern-pin',home:'i-theme-modern-home',camp:'i-theme-modern-home',
+      village:'i-theme-modern-village',mountain:'i-theme-modern-mountain',
+      mountain_range:'i-theme-modern-mountain',water:'i-theme-modern-water',
+      lake:'i-theme-modern-water',river:'i-theme-modern-water'
+    }),
+    engraved:Object.freeze({
+      pin:'i-theme-engraved-pin',home:'i-theme-engraved-home',camp:'i-theme-engraved-home',
+      village:'i-theme-engraved-village',mountain:'i-theme-engraved-mountain',
+      mountain_range:'i-theme-engraved-mountain',water:'i-theme-engraved-water',
+      lake:'i-theme-engraved-water',river:'i-theme-engraved-water'
+    })
+  });
+  function baseIconSymbol(raw){
     const i=String(raw||'pin').toLowerCase();
     const m={
       pin:'i-pin',home:'i-home',camp:'i-home',mine:'i-mine',ship:'i-ship',
@@ -282,6 +296,12 @@
       fortress:'i-fortress',cave:'i-cave',water:'i-water',lake:'i-water',river:'i-water'
     };
     return m[i] || 'i-pin';
+  }
+  function iconSymbol(raw){
+    const semantic=String(raw||'pin').toLowerCase();
+    const family=currentFrontendTheme().iconFamily;
+    const themed=THEME_ICON_SYMBOLS[family];
+    return themed&&themed[semantic] ? themed[semantic] : baseIconSymbol(semantic);
   }
   function iconLabel(raw){
     const i=String(raw||'pin').toLowerCase();

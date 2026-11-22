@@ -177,8 +177,9 @@ tasks.register('verifyV31FrontendThemes') {
                 throw new GradleException('Missing frontend theme registry entry: ' + theme)
             }
         }
-        ['FRONTEND_THEMES', 'MAP_RENDERERS', 'frontendTheme:\'satellite\'',
-         'applyFrontendTheme()', 'selectFrontendTheme(id)',
+        ['FRONTEND_THEMES', 'MAP_RENDERERS', 'THEME_ICON_SYMBOLS', 'frontendTheme:\'satellite\'',
+         'applyFrontendTheme()', 'selectFrontendTheme(id)', 'refreshStaticUi(true)',
+         'function baseIconSymbol(raw)', 'function iconSymbol(raw)',
          'function renderSatelliteTerrain(s)'].each { token ->
             if (!app.contains(token)) {
                 throw new GradleException('Frontend theme runtime is incomplete: ' + token)
@@ -196,6 +197,8 @@ tasks.register('verifyV31FrontendThemes') {
         }
 
         ['id="activeThemeLabel"',
+         'id="i-theme-modern-pin"', 'id="i-theme-modern-village"',
+         'id="i-theme-engraved-pin"', 'id="i-theme-engraved-village"',
          '.app[data-theme-layout="modern-atlas"] .map-stage{inset:0}',
          '.app[data-theme-layout="modern-atlas"] .topbar{left:auto;right:22px'].each { token ->
             if (!page.contains(token)) {
