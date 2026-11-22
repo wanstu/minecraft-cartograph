@@ -168,136 +168,150 @@ tasks.register('verifyV31FrontendThemes') {
     doLast {
         def app = file("$commonMain/resources/webui/app.js").text
         def page = file("$commonMain/resources/webui/index.html").text
-        def sharedSettings = file("$commonMain/java/com/wanstu/cartographv3/CartographSettings.java").text
-        def sharedTheme = file("$commonMain/java/com/wanstu/cartographv3/CartographFrontendTheme.java").text
-        def webServer = file("$commonMain/java/com/wanstu/cartographv3/CartographWebUiServer.java").text
+        def settings = file("$commonMain/java/com/wanstu/cartographv3/CartographSettings.java").text
+        def mode = file("$commonMain/java/com/wanstu/cartographv3/MapDrawingMode.java").text
+        def registry = file("$commonMain/java/com/wanstu/cartographv3/MapVisualStyleRegistry.java").text
+        def processor = file("$commonMain/java/com/wanstu/cartographv3/MapVisualStyleProcessor.java").text
+        def processors = file("$commonMain/java/com/wanstu/cartographv3/MapVisualStyleProcessors.java").text
+        def satelliteData = file("$commonMain/java/com/wanstu/cartographv3/SatelliteMapData.java").text
+        def handData = file("$commonMain/java/com/wanstu/cartographv3/HandDrawnMapData.java").text
+        def renderer = file("$commonMain/java/com/wanstu/cartographv3/MapPresentationRenderer.java").text
+        def server = file("$commonMain/java/com/wanstu/cartographv3/CartographWebUiServer.java").text
         def dialogs = file("$commonMain/java/com/wanstu/cartographv3/InGameMapDialogs.java").text
         def nativeUi = file("$commonMain/java/com/wanstu/cartographv3/InGameMapUi.java").text
         def nativeTiles = file("$commonMain/java/com/wanstu/cartographv3/InGameMapTiles.java").text
-        def themeStyle = file("$commonMain/java/com/wanstu/cartographv3/FrontendThemeStyle.java").text
 
-        ['SATELLITE("satellite", "原生 · 卫星")',
-         'MODERN("modern", "手绘 · 现代")',
-         'ANCIENT("ancient", "手绘 · 古式")',
-         'CartographFrontendTheme next()',
-         'static CartographFrontendTheme parse(String raw)'].each { token ->
-            if (!sharedTheme.contains(token)) {
-                throw new GradleException('Shared frontend theme enum is incomplete: ' + token)
+        ['SATELLITE("satellite", "卫星")',
+         'HAND_DRAWN("hand_drawn", "手绘")',
+         'return this == SATELLITE ? HAND_DRAWN : SATELLITE;'].each { token ->
+            if (!mode.contains(token)) {
+                throw new GradleException('DrawingMode contract is incomplete: ' + token)
             }
         }
-        ['private static CartographFrontendTheme frontendTheme = CartographFrontendTheme.SATELLITE;',
-         'static synchronized CartographFrontendTheme frontendTheme()',
-         'static synchronized void setFrontendTheme(CartographFrontendTheme value)',
-         'p.setProperty("frontendTheme", frontendTheme.id())'].each { token ->
-            if (!sharedSettings.contains(token)) {
-                throw new GradleException('Shared frontend theme persistence is incomplete: ' + token)
+        ['MODERN', 'ANCIENT', 'ANIME'].each { forbidden ->
+            if (mode.contains(forbidden)) {
+                throw new GradleException('DrawingMode must stay closed to satellite/hand-drawn: ' + forbidden)
             }
         }
-        ['String frontendTheme) {}',
-         '"frontendTheme", CartographSettings.frontendTheme().id()',
-         'CartographSettings.setFrontendTheme(',
-         'CartographFrontendTheme.parse(settings.frontendTheme())'].each { token ->
-            if (!webServer.contains(token)) {
-                throw new GradleException('WebUI runtime theme bridge is incomplete: ' + token)
+
+        ['"modern", "现代"', '"ancient", "古式"', '"anime", "动漫"',
+         'MapVisualStyleProcessors.MODERN', 'MapVisualStyleProcessors.ANCIENT',
+         'MapVisualStyleProcessors.ANIME', 'private static void register(Style style)'].each { token ->
+            if (!registry.contains(token)) {
+                throw new GradleException('VisualStyle registry is incomplete: ' + token)
             }
         }
-        ['action(ui, row, "前端主题", theme.label()',
-         'CartographSettings.setFrontendTheme(theme.next())'].each { token ->
+        ['int[] renderSatellite(SatelliteMapData data, int stride);',
+         'int[] renderHandDrawn(HandDrawnMapData data, int stride);'].each { token ->
+            if (!processor.contains(token)) {
+                throw new GradleException('VisualStyle processor dual-entry contract is incomplete: ' + token)
+            }
+        }
+        ['class Modern implements MapVisualStyleProcessor',
+         'class Ancient implements MapVisualStyleProcessor',
+         'class Anime implements MapVisualStyleProcessor',
+         'renderSatellite(SatelliteMapData data, int stride)',
+         'renderHandDrawn(HandDrawnMapData data, int stride)'].each { token ->
+            if (!processors.contains(token)) {
+                throw new GradleException('Built-in VisualStyle processor is incomplete: ' + token)
+            }
+        }
+
+        ['record SatelliteMapData(SurfaceTile facts)',
+         'SatelliteSurfaceRenderer.renderPixels(facts, stride)'].each { token ->
+            if (!satelliteData.contains(token)) {
+                throw new GradleException('SatelliteMapData contract is incomplete: ' + token)
+            }
+        }
+        ['record HandDrawnMapData(', 'static final int CELL_SIZE = 4;',
+         'static HandDrawnMapData from(SurfaceTile tile)',
+         'int[] abstractPixels(int stride)'].each { token ->
+            if (!handData.contains(token)) {
+                throw new GradleException('HandDrawnMapData contract is incomplete: ' + token)
+            }
+        }
+        ['switch (CartographSettings.drawingMode())',
+         'case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);',
+         'case HAND_DRAWN -> processor.renderHandDrawn(HandDrawnMapData.from(tile), stride);'].each { token ->
+            if (!renderer.contains(token)) {
+                throw new GradleException('Presentation renderer composition is incomplete: ' + token)
+            }
+        }
+
+        ['private static final int SCHEMA = 3;',
+         'p.setProperty("drawingMode", drawingMode.id())',
+         'p.setProperty("visualStyle", visualStyleId)'].each { token ->
+            if (!settings.contains(token)) {
+                throw new GradleException('Shared presentation settings are incomplete: ' + token)
+            }
+        }
+        if (settings.contains('frontendTheme')) {
+            throw new GradleException('Legacy frontendTheme persistence must be removed')
+        }
+
+        ['"drawingMode", CartographSettings.drawingMode().id()',
+         '"visualStyle", CartographSettings.visualStyle().id()',
+         'MapPresentationRenderer.renderSignature()',
+         'MapPresentationRenderer.render(facts).rgb()'].each { token ->
+            if (!server.contains(token)) {
+                throw new GradleException('WebUI presentation bridge is incomplete: ' + token)
+            }
+        }
+        ['action(ui, row, "绘图方式", mode.label()',
+         'action(ui, row, "绘图风格", style.label()'].each { token ->
             if (!dialogs.contains(token)) {
-                throw new GradleException('Native theme selector is incomplete: ' + token)
+                throw new GradleException('Native presentation selector is incomplete: ' + token)
             }
+        }
+        if (!nativeUi.contains('MapVisualStyleProcessor.Palette palette = MapPresentationRenderer.palette();')
+                || !nativeTiles.contains('MapPresentationRenderer.renderPixels(tile, stride)')) {
+            throw new GradleException('Native frontend is not consuming the split presentation model')
         }
 
-        ['record Palette(', 'case SATELLITE -> SATELLITE;', 'case MODERN -> MODERN;',
-         'case ANCIENT -> ANCIENT;', 'static long renderSignature()',
-         'static int[] renderPixels(SurfaceTile tile, int stride)',
-         'SatelliteSurfaceRenderer.renderPixels(tile, stride)'].each { token ->
-            if (!themeStyle.contains(token)) {
-                throw new GradleException('Shared native/map theme style is incomplete: ' + token)
+        ['satellite','hand_drawn'].each { id ->
+            if (!page.contains('data-drawing-mode="' + id + '"')) {
+                throw new GradleException('Missing drawing-mode card: ' + id)
             }
         }
-        ['FrontendThemeStyle.Palette palette = FrontendThemeStyle.palette();',
-         'BACKGROUND = palette.background();', 'PANEL = palette.panel();',
-         'MARKER_LABEL = palette.markerLabel();'].each { token ->
-            if (!nativeUi.contains(token)) {
-                throw new GradleException('Native UI theme palette is incomplete: ' + token)
+        ['modern','ancient','anime'].each { id ->
+            if (!page.contains('data-visual-style="' + id + '"')
+                    || !page.contains('.app[data-theme="' + id + '"]')) {
+                throw new GradleException('Missing VisualStyle UI/CSS: ' + id)
             }
         }
-        ['FrontendThemeStyle.renderSignature()',
-         'FrontendThemeStyle.renderPixels(tile, stride)'].each { token ->
-            if (!nativeTiles.contains(token)) {
-                throw new GradleException('Native themed terrain renderer is incomplete: ' + token)
-            }
-        }
-        ['FrontendThemeStyle.renderSignature()',
-         'FrontendThemeStyle.render(facts).rgb()'].each { token ->
-            if (!webServer.contains(token)) {
-                throw new GradleException('WebUI themed tile renderer is incomplete: ' + token)
-            }
-        }
-
-        ['satellite', 'modern', 'ancient'].each { theme ->
-            if (!page.contains('data-theme-choice="' + theme + '"')) {
-                throw new GradleException('Missing frontend theme card: ' + theme)
-            }
-            if (!app.contains(theme + ":{id:'" + theme + "'")) {
-                throw new GradleException('Missing frontend theme registry entry: ' + theme)
-            }
-        }
-        ['FRONTEND_THEMES', 'MAP_RENDERERS', 'THEME_ICON_SYMBOLS', 'frontendTheme:\'satellite\'',
-         'applyFrontendTheme()', 'selectFrontendTheme(id)', 'refreshStaticUi(true)',
-         'function baseIconSymbol(raw)', 'function iconSymbol(raw)',
-         'function renderThemeTerrain(s)', 'function refreshThemeTerrain()'].each { token ->
+        ['DRAWING_MODES', 'VISUAL_STYLES', 'MAP_RENDERERS',
+         'function applyPresentation()', 'selectDrawingMode(id)', 'selectVisualStyle(id)',
+         'function renderMapTerrain(s)', 'function refreshPresentationTerrain()',
+         'app.dataset.mapRenderer=mode.id'].each { token ->
             if (!app.contains(token)) {
-                throw new GradleException('Frontend theme runtime is incomplete: ' + token)
+                throw new GradleException('WebUI presentation runtime is incomplete: ' + token)
+            }
+        }
+        ['frontendTheme', 'FRONTEND_THEMES', 'data-theme-choice'].each { legacy ->
+            if (app.contains(legacy) || page.contains(legacy)) {
+                throw new GradleException('Legacy combined-theme token remains: ' + legacy)
             }
         }
 
-        ['app.dataset.themeLayout=theme.layout',
-         'app.dataset.themeIcons=theme.iconFamily',
-         'app.dataset.themeDensity=theme.density',
-         'app.dataset.themeTypography=theme.typography',
-         "q('#activeThemeLabel')"].each { token ->
-            if (!app.contains(token)) {
-                throw new GradleException('Theme capability is not applied: ' + token)
-            }
-        }
-
-        ['--theme-control-bg:', '--theme-control-border:', '--theme-control-hover:',
-         '--theme-row-border:', '--theme-surface-muted:', '--theme-toast-bg:',
-         'id="activeThemeLabel"',
-         'id="i-theme-modern-pin"', 'id="i-theme-modern-village"',
-         'id="i-theme-engraved-pin"', 'id="i-theme-engraved-village"',
-         '.app[data-theme-layout="modern-atlas"] .map-stage{inset:0}',
-         '.app[data-theme-layout="modern-atlas"] .topbar{left:auto;right:22px',
-         '.app[data-theme-layout="ancient-atlas"] .map-stage{inset:88px 18px 18px',
-         '.app[data-theme-layout="ancient-atlas"] .topbar{left:18px;right:18px;top:14px'].each { token ->
-            if (!page.contains(token)) {
-                throw new GradleException('Frontend theme UI contract is incomplete: ' + token)
-            }
-        }
-
-        def renderDispatch = app.indexOf('const renderer=MAP_RENDERERS[theme.mapRenderer]||MAP_RENDERERS.satellite')
+        def renderDispatch = app.indexOf('const renderer=MAP_RENDERERS[mode.id]||MAP_RENDERERS.satellite')
         if (renderDispatch < 0) {
-            throw new GradleException('Terrain rendering must dispatch through the theme renderer registry')
+            throw new GradleException('Terrain rendering must dispatch through DrawingMode')
         }
 
-        def start = app.indexOf('function applyFrontendTheme()')
-        def end = app.indexOf('async function selectFrontendTheme(', start)
+        def start = app.indexOf('function applyPresentation()')
+        def end = app.indexOf('async function selectDrawingMode(', start)
         if (start < 0 || end <= start) {
-            throw new GradleException('Cannot inspect frontend theme runtime boundary')
+            throw new GradleException('Cannot inspect presentation application boundary')
         }
-        def themeRuntime = app.substring(start, end)
-        ['wsRequest(', 'connectSocket(', 'sendViewport', 'tileCache.clear',
-         'regionCache.clear'].each { forbidden ->
-            if (themeRuntime.contains(forbidden)) {
+        def presentationRuntime = app.substring(start, end)
+        ['wsRequest(', 'connectSocket(', 'sendViewport', 'tileCache.clear', 'regionCache.clear'].each { forbidden ->
+            if (presentationRuntime.contains(forbidden)) {
                 throw new GradleException(
-                    'Frontend theme switching must not own backend/cache/transport work: ' + forbidden)
+                    'Presentation application must not own backend/cache/transport work: ' + forbidden)
             }
         }
     }
 }
-
 tasks.named('check').configure {
     dependsOn tasks.named('verifyV3Isolation')
     dependsOn tasks.named('verifyV31WebUiBoundary')

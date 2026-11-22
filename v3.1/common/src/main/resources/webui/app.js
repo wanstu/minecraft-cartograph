@@ -37,15 +37,18 @@
   const HIDDEN_BY_DEFAULT = new Set([
     'mineshaft','trial_chambers','ancient_city','stronghold','buried_treasure'
   ]);
-  const FRONTEND_THEMES = Object.freeze({
-    satellite:{id:'satellite',label:'原生 · 卫星',layout:'technical',iconFamily:'technical',density:'compact',typography:'sans',mapRenderer:'satellite',mapReady:true},
-    modern:{id:'modern',label:'手绘 · 现代',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans',mapRenderer:'modern',mapReady:true},
-    ancient:{id:'ancient',label:'手绘 · 古式',layout:'ancient-atlas',iconFamily:'engraved',density:'comfortable',typography:'serif',mapRenderer:'ancient',mapReady:true}
+  const DRAWING_MODES = Object.freeze({
+    satellite:{id:'satellite',label:'卫星'},
+    hand_drawn:{id:'hand_drawn',label:'手绘'}
+  });
+  const VISUAL_STYLES = Object.freeze({
+    modern:{id:'modern',label:'现代',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans'},
+    ancient:{id:'ancient',label:'古式',layout:'ancient-atlas',iconFamily:'engraved',density:'comfortable',typography:'serif'},
+    anime:{id:'anime',label:'动漫',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans'}
   });
   const MAP_RENDERERS = Object.freeze({
-    satellite:renderThemeTerrain,
-    modern:renderThemeTerrain,
-    ancient:renderThemeTerrain
+    satellite:renderMapTerrain,
+    hand_drawn:renderMapTerrain
   });
 
   const defaults = {
@@ -54,7 +57,7 @@
     playerSize:24, playerColor:'#FFE14E', markerScale:35,
     markerDefaultIcon:'pin', markerDefaultColor:'#FFD34E',
     markerDefaultSize:22, hideLabelsLowZoom:true, avoidLabels:true,
-    frontendTheme:'satellite', debug:false, structureFilters:{}
+    drawingMode:'satellite', visualStyle:'modern', debug:false, structureFilters:{}
   };
 
   let settings = loadJson(LOCAL_KEY, defaults);
@@ -109,38 +112,58 @@
     catch(_){/* The current session still uses the in-memory state. */}
   }
   function saveSettings(){ saveJson(LOCAL_KEY,settings); }
-  function currentFrontendTheme(){return FRONTEND_THEMES[settings.frontendTheme]||FRONTEND_THEMES.satellite;}
-  function applyFrontendTheme(){
-    const theme=currentFrontendTheme();
-    settings.frontendTheme=theme.id;
-    app.dataset.theme=theme.id;
-    app.dataset.themeLayout=theme.layout;
-    app.dataset.themeIcons=theme.iconFamily;
-    app.dataset.themeDensity=theme.density;
-    app.dataset.themeTypography=theme.typography;
-    app.dataset.mapRenderer=theme.mapRenderer;
-    document.documentElement.dataset.cartographTheme=theme.id;
-    applyThemeUiIcons();
-    const activeThemeLabel=q('#activeThemeLabel');if(activeThemeLabel)activeThemeLabel.textContent=theme.label;
-    const interfaceThemeValue=q('#interfaceThemeValue');if(interfaceThemeValue)interfaceThemeValue.textContent=theme.label;
-    const aboutTheme=q('#aboutThemeValue');if(aboutTheme)aboutTheme.textContent=theme.label;
-    const aboutRenderer=q('#aboutThemeRenderer');if(aboutRenderer)aboutRenderer.textContent=theme.mapReady?'主题地图 renderer 已启用':'主题地图 renderer 待实现；当前使用卫星真值兜底';
+  function currentDrawingMode(){return DRAWING_MODES[settings.drawingMode]||DRAWING_MODES.satellite;}
+  function currentVisualStyle(){return VISUAL_STYLES[settings.visualStyle]||VISUAL_STYLES.modern;}
+  function presentationLabel(){
+    return currentDrawingMode().label+' · '+currentVisualStyle().label;
   }
-  async function selectFrontendTheme(id){
-    if(!FRONTEND_THEMES[id])return;
-    const previous=settings.frontendTheme;
-    settings.frontendTheme=id;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
-    const theme=currentFrontendTheme();
+  function applyPresentation(){
+    const mode=currentDrawingMode(),style=currentVisualStyle();
+    settings.drawingMode=mode.id;
+    settings.visualStyle=style.id;
+    app.dataset.theme=style.id;
+    app.dataset.themeLayout=style.layout;
+    app.dataset.themeIcons=style.iconFamily;
+    app.dataset.themeDensity=style.density;
+    app.dataset.themeTypography=style.typography;
+    app.dataset.mapRenderer=mode.id;
+    app.dataset.drawingMode=mode.id;
+    app.dataset.visualStyle=style.id;
+    document.documentElement.dataset.cartographTheme=style.id;
+    applyThemeUiIcons();
+    const label=presentationLabel();
+    const activeThemeLabel=q('#activeThemeLabel');if(activeThemeLabel)activeThemeLabel.textContent=label;
+    const interfaceThemeValue=q('#interfaceThemeValue');if(interfaceThemeValue)interfaceThemeValue.textContent=label;
+    const aboutTheme=q('#aboutThemeValue');if(aboutTheme)aboutTheme.textContent=label;
+    const aboutRenderer=q('#aboutThemeRenderer');if(aboutRenderer)aboutRenderer.textContent=mode.label+'数据 · '+style.label+'风格';
+  }
+  async function selectDrawingMode(id){
+    if(!DRAWING_MODES[id])return;
+    const previous=settings.drawingMode;
+    settings.drawingMode=id;saveSettings();applyPresentation();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
     if(socket&&socket.readyState===WebSocket.OPEN){
-      try{await wsRequest('runtime_settings',{payload:{frontendTheme:id}});refreshThemeTerrain();}
+      try{await wsRequest('runtime_settings',{payload:{drawingMode:id}});refreshPresentationTerrain();}
       catch(_){
-        settings.frontendTheme=previous;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
-        toast('前端主题保存失败');return;
+        settings.drawingMode=previous;saveSettings();applyPresentation();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
+        toast('绘图方式保存失败');return;
       }
     }
-    toast('已切换到 '+theme.label);
+    toast('绘图方式：'+currentDrawingMode().label);
   }
-  function refreshThemeTerrain(){
+  async function selectVisualStyle(id){
+    if(!VISUAL_STYLES[id])return;
+    const previous=settings.visualStyle;
+    settings.visualStyle=id;saveSettings();applyPresentation();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
+    if(socket&&socket.readyState===WebSocket.OPEN){
+      try{await wsRequest('runtime_settings',{payload:{visualStyle:id}});refreshPresentationTerrain();}
+      catch(_){
+        settings.visualStyle=previous;saveSettings();applyPresentation();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
+        toast('绘图风格保存失败');return;
+      }
+    }
+    toast('绘图风格：'+currentVisualStyle().label);
+  }
+  function refreshPresentationTerrain(){
     regionCache.clear();tileCache.clear();lastViewportSignature='';
     scheduleRender(DRAW_TERRAIN);
     if(socket&&socket.readyState===WebSocket.OPEN)sendViewportSoon();
@@ -240,7 +263,8 @@
     if(live.player)serverState.player=live.player;
     if(live.runtime)serverState.runtime={...previousRuntime,...live.runtime};
 
-    if(live.runtime&&(previousRuntime?.frontendTheme!==serverState.runtime?.frontendTheme||
+    if(live.runtime&&(previousRuntime?.drawingMode!==serverState.runtime?.drawingMode||
+                     previousRuntime?.visualStyle!==serverState.runtime?.visualStyle||
                      previousRuntime?.frontendTarget!==serverState.runtime?.frontendTarget||
                      previousRuntime?.requestBatchSize!==serverState.runtime?.requestBatchSize||
                      previousRuntime?.liveScanIntervalTicks!==serverState.runtime?.liveScanIntervalTicks)){
@@ -306,7 +330,7 @@
   });
   function uiIconSymbol(raw){
     const semantic=String(raw||'').toLowerCase();
-    const family=currentFrontendTheme().iconFamily;
+    const family=currentVisualStyle().iconFamily;
     const themed=THEME_UI_ICON_SYMBOLS[family];
     return themed&&themed[semantic] ? themed[semantic] : (BASE_UI_ICON_SYMBOLS[semantic]||'i-info');
   }
@@ -348,7 +372,7 @@
   }
   function iconSymbol(raw){
     const semantic=String(raw||'pin').toLowerCase();
-    const family=currentFrontendTheme().iconFamily;
+    const family=currentVisualStyle().iconFamily;
     const themed=THEME_ICON_SYMBOLS[family];
     return themed&&themed[semantic] ? themed[semantic] : baseIconSymbol(semantic);
   }
@@ -425,13 +449,13 @@
     if(flags&DRAW_MARKERS)renderMarkers(s);
   }
   function renderTerrain(s){
-    const theme=currentFrontendTheme();
-    const renderer=MAP_RENDERERS[theme.mapRenderer]||MAP_RENDERERS.satellite;
+    const mode=currentDrawingMode();
+    const renderer=MAP_RENDERERS[mode.id]||MAP_RENDERERS.satellite;
     renderer(s);
   }
-  function renderThemeTerrain(s){
-    const dpr=resizeTransform(s),theme=currentFrontendTheme();
-    const background=theme.id==='modern'?'#e7ece8':theme.id==='ancient'?'#bca06f':'#17383c';
+  function renderMapTerrain(s){
+    const dpr=resizeTransform(s),style=currentVisualStyle();
+    const background=style.id==='ancient'?'#bca06f':style.id==='anime'?'#dcecf2':'#e7ece8';
     ctx.save();ctx.fillStyle=background;ctx.fillRect(0,0,s.width,s.height);
     ctx.imageSmoothingEnabled=view.zoom<1;
     if(serverState&&serverState.connected&&currentDimension){
@@ -846,8 +870,15 @@
   }
   function syncRuntimeSettings(){
     const r=serverState&&serverState.runtime;if(!r)return;
-    if(r.frontendTheme&&FRONTEND_THEMES[r.frontendTheme]&&settings.frontendTheme!==r.frontendTheme){
-      settings.frontendTheme=r.frontendTheme;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);refreshThemeTerrain();scheduleRender(DRAW_ALL);
+    let presentationChanged=false;
+    if(r.drawingMode&&DRAWING_MODES[r.drawingMode]&&settings.drawingMode!==r.drawingMode){
+      settings.drawingMode=r.drawingMode;presentationChanged=true;
+    }
+    if(r.visualStyle&&VISUAL_STYLES[r.visualStyle]&&settings.visualStyle!==r.visualStyle){
+      settings.visualStyle=r.visualStyle;presentationChanged=true;
+    }
+    if(presentationChanged){
+      saveSettings();applyPresentation();renderSettings();refreshStaticUi(true);refreshPresentationTerrain();scheduleRender(DRAW_ALL);
     }
     if(r.frontendTarget)q('#frontendTarget').value=r.frontendTarget;
     if(r.requestBatchSize!=null){q('#requestRange').value=r.requestBatchSize;q('#requestValue').textContent=String(r.requestBatchSize);}
@@ -930,7 +961,8 @@
     q('#markerScaleRange').value=settings.markerScale;q('#markerScaleValue').textContent=settings.markerScale+'%';q('#markerDefaultColor').value=settings.markerDefaultColor;q('#markerDefaultSwatch').style.background=settings.markerDefaultColor;q('#markerDefaultColorText').textContent=settings.markerDefaultColor.toUpperCase();
     q('#markerDefaultSize').value=settings.markerDefaultSize;q('#markerDefaultSizeValue').textContent=settings.markerDefaultSize+' px';updateIconSelect(q('#markerDefaultIconSelect'),settings.markerDefaultIcon);
     qa('[data-player-icon]').forEach(el=>el.classList.toggle('active',el.dataset.playerIcon===settings.playerIcon));
-    qa('[data-theme-choice]').forEach(el=>el.classList.toggle('active',el.dataset.themeChoice===settings.frontendTheme));
+    qa('[data-drawing-mode]').forEach(el=>el.classList.toggle('active',el.dataset.drawingMode===settings.drawingMode));
+    qa('[data-visual-style]').forEach(el=>el.classList.toggle('active',el.dataset.visualStyle===settings.visualStyle));
   }
   function updateIconSelect(el,icon){const left=q('.left',el);if(!left)return;left.innerHTML='<svg class="icon"><use href="#'+iconSymbol(icon)+'"/></svg><span>'+escapeHtml(iconLabel(icon))+'</span>';el.dataset.value=icon;}
   function openIconDropdown(anchor,current,onSelect,extraIcons=[]){
@@ -967,8 +999,8 @@
   function patchCopy(){
     const v=q('.about-version');if(v)v.textContent='Cartograph V3.1 · WebUI';
     const n=q('.about-note');if(n)n.textContent='此页面就是正式 WebUI 前端。世界采集、缓存和动作由 Minecraft Java 后端提供，界面由浏览器 HTML / CSS / SVG / Canvas 渲染。';
-    qa('.about-grid .k').forEach(k=>{if(k.textContent.trim()==='缓存策略'&&k.nextElementSibling)k.nextElementSibling.textContent='只持久化地表事实；WebUI 按主题派生成图';});
-    const rgb=qa('.form-row .label').find(el=>el.textContent.trim()==='已渲染 RGB 缓存');if(rgb){rgb.textContent='地表事实缓存';if(rgb.nextElementSibling)rgb.nextElementSibling.textContent='只保存世界事实；卫星成图由 WebUI 临时生成';const sw=rgb.parentElement.querySelector('[data-switch]');if(sw)sw.style.display='none';}
+    qa('.about-grid .k').forEach(k=>{if(k.textContent.trim()==='缓存策略'&&k.nextElementSibling)k.nextElementSibling.textContent='只持久化世界事实；按绘图方式派生地图数据，再由绘图风格成图';});
+    const rgb=qa('.form-row .label').find(el=>el.textContent.trim()==='已渲染 RGB 缓存');if(rgb){rgb.textContent='地表事实缓存';if(rgb.nextElementSibling)rgb.nextElementSibling.textContent='只保存世界事实；地图结构与风格结果均为临时派生';const sw=rgb.parentElement.querySelector('[data-switch]');if(sw)sw.style.display='none';}
     const pre=q('#prewarmRange');if(pre)pre.closest('.performance-row').style.display='none';
     const key=q('[data-shortcut="map"]');if(key){const t=key.closest('.form-row').querySelector('.shortcut span');if(t)t.textContent='在 Minecraft 中按 M 打开 WebUI';}
     qa('[data-marker-pane="trash"]').forEach(el=>el.style.display='none');qa('[data-marker-pane-content="trash"]').forEach(el=>el.style.display='none');q('#homeBtn').style.display='none';
@@ -979,7 +1011,8 @@
     qa('[data-panel-close]').forEach(b=>b.onclick=hidePanels);qa('[data-about-close]').forEach(b=>b.onclick=closeModal);qa('[data-editor-close]').forEach(b=>b.onclick=closeModal);qa('[data-modal-close]').forEach(b=>b.onclick=closeModal);
     qa('.settings-nav-item').forEach(el=>el.onclick=()=>activateSettingsPage(el.dataset.page));qa('.subtab').forEach(tab=>tab.onclick=()=>{qa('.subtab').forEach(x=>x.classList.remove('active'));tab.classList.add('active');qa('[data-subpage]').forEach(x=>x.classList.toggle('hidden',x.dataset.subpage!==tab.dataset.sub));});
     qa('[data-switch][data-setting]').forEach(sw=>sw.onclick=()=>{const k=sw.dataset.setting;if(!Object.prototype.hasOwnProperty.call(settings,k))return;settings[k]=!settings[k];syncSwitches();scheduleRender();saveSettings();});
-    qa('[data-theme-choice]').forEach(card=>card.onclick=()=>selectFrontendTheme(card.dataset.themeChoice));
+    qa('[data-drawing-mode]').forEach(card=>card.onclick=()=>selectDrawingMode(card.dataset.drawingMode));
+    qa('[data-visual-style]').forEach(card=>card.onclick=()=>selectVisualStyle(card.dataset.visualStyle));
     qa('[data-player-icon]').forEach(b=>b.onclick=()=>{settings.playerIcon=b.dataset.playerIcon;saveSettings();renderSettings();scheduleRender();});
     q('#playerSize').oninput=e=>{settings.playerSize=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#playerColor').oninput=e=>{settings.playerColor=e.target.value.toUpperCase();saveSettings();renderSettings();scheduleRender();};
     q('#markerScaleRange').oninput=e=>{settings.markerScale=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#markerDefaultColor').oninput=e=>{settings.markerDefaultColor=e.target.value.toUpperCase();saveSettings();renderSettings();};
@@ -1066,6 +1099,6 @@
   }
 
   new ResizeObserver(resizeCanvas).observe(mapStage);
-  patchCopy();applyFrontendTheme();bind();renderSettings();renderHud();resizeCanvas();setConnection(false);app.dataset.webui='loaded';connectSocket();
+  patchCopy();applyPresentation();bind();renderSettings();renderHud();resizeCanvas();setConnection(false);app.dataset.webui='loaded';connectSocket();
   window.addEventListener('beforeunload',()=>{if(socket)socket.close(1000,'page unload');});
 })();

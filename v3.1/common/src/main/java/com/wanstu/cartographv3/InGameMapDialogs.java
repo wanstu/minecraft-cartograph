@@ -211,7 +211,7 @@ final class InGameMapDialogs {
         ui.text(tab.label, content.x(), content.y() + 2, TEXT);
         int body = content.y() + 18;
         int total = switch (tab) {
-            case GENERAL -> 9;
+            case GENERAL -> 10;
             case DISPLAY -> DISPLAY_ROWS;
             case PERFORMANCE -> 3;
             case MARKER -> 5;
@@ -253,19 +253,25 @@ final class InGameMapDialogs {
             }
             case 1 -> action(ui, row, "WebUI", "在浏览器打开", openWeb);
             case 2 -> {
-                CartographFrontendTheme theme = CartographSettings.frontendTheme();
-                action(ui, row, "前端主题", theme.label(),
-                        () -> CartographSettings.setFrontendTheme(theme.next()));
+                MapDrawingMode mode = CartographSettings.drawingMode();
+                action(ui, row, "绘图方式", mode.label(),
+                        () -> CartographSettings.setDrawingMode(mode.next()));
             }
-            case 3 -> toggle(ui, row, "显示坐标", Flag.COORDS);
-            case 4 -> toggle(ui, row, "玩家定位圆环", Flag.PLAYER_RING);
-            case 5 -> toggle(ui, row, "拖拽地图", Flag.DRAG_MAP);
-            case 6 -> action(ui, row, "玩家图标", preferences.enabled(Flag.CROSS_PLAYER) ? "十字" : "箭头",
+            case 3 -> {
+                MapVisualStyleRegistry.Style style = CartographSettings.visualStyle();
+                action(ui, row, "绘图风格", style.label(),
+                        () -> CartographSettings.setVisualStyle(
+                                MapVisualStyleRegistry.next(style.id()).id()));
+            }
+            case 4 -> toggle(ui, row, "显示坐标", Flag.COORDS);
+            case 5 -> toggle(ui, row, "玩家定位圆环", Flag.PLAYER_RING);
+            case 6 -> toggle(ui, row, "拖拽地图", Flag.DRAG_MAP);
+            case 7 -> action(ui, row, "玩家图标", preferences.enabled(Flag.CROSS_PLAYER) ? "十字" : "箭头",
                     () -> preferences.toggle(Flag.CROSS_PLAYER));
-            case 7 -> color(ui, row, "玩家图标颜色",
+            case 8 -> color(ui, row, "玩家图标颜色",
                     preferences.number("playerColor", 0xffe14e, 0, 0xffffff),
                     value -> preferences.number("playerColor", value));
-            case 8 -> pixelStepper(ui, row, "玩家图标大小", "playerSize", InGameMapScreen.DEFAULT_PLAYER_SIZE, 6, 30);
+            case 9 -> pixelStepper(ui, row, "玩家图标大小", "playerSize", InGameMapScreen.DEFAULT_PLAYER_SIZE, 6, 30);
             default -> { }
         }
     }
@@ -506,16 +512,18 @@ final class InGameMapDialogs {
     }
 
     private void renderAbout(InGameMapUi ui) {
-        Box box = centered(270, 143);
+        Box box = centered(270, 159);
         title(ui, box, "info", "关于", this::close);
         ui.glyph("map", box.x() + 13, box.y() + 36, 29, ACCENT);
         ui.smallText("地图册 · Map Atlas", box.x() + 50, box.y() + 37, box.w() - 60, TEXT);
         ui.smallText("Cartograph V3.1 · 游戏内地图", box.x() + 50, box.y() + 52, box.w() - 60, MUTED);
         ui.divider(box.x() + 12, box.y() + 71, box.w() - 24);
-        ui.text("前端主题", box.x() + 13, box.y() + 83, SOFT);
-        ui.text(CartographSettings.frontendTheme().label(), box.x() + 83, box.y() + 83, TEXT);
-        ui.text("地图数据", box.x() + 13, box.y() + 100, SOFT);
-        ui.smallText("已生成区块的地表数据", box.x() + 83, box.y() + 100, box.w() - 93, TEXT);
+        ui.text("绘图方式", box.x() + 13, box.y() + 83, SOFT);
+        ui.text(CartographSettings.drawingMode().label(), box.x() + 83, box.y() + 83, TEXT);
+        ui.text("绘图风格", box.x() + 13, box.y() + 100, SOFT);
+        ui.text(CartographSettings.visualStyle().label(), box.x() + 83, box.y() + 100, TEXT);
+        ui.text("地图数据", box.x() + 13, box.y() + 117, SOFT);
+        ui.smallText("已生成区块的地表数据", box.x() + 83, box.y() + 117, box.w() - 93, TEXT);
         ui.button(new Box(box.right() - 55, box.bottom() - 25, 43, 17), "关闭", true, this::close);
     }
 

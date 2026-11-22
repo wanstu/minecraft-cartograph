@@ -1,136 +1,220 @@
-# Cartograph V3.1 frontend theme architecture
+# Cartograph V3.1 地图表现架构
 
-## Product definition
+## 目标
 
-A Cartograph theme is a complete frontend presentation package, not a map-style toggle.
+Cartograph 的地图表现拆成两个彼此独立的维度：
 
-The built-in theme identities are:
+1. **绘图方式（DrawingMode）**：决定“世界事实如何组织成地图数据”。
+2. **绘图风格（VisualStyle）**：决定“同一份地图数据如何被画出来，以及前端 UI 如何呈现”。
 
-- `satellite`: 原生 · 卫星
-- `modern`: 手绘 · 现代
-- `ancient`: 手绘 · 古式
+两者必须自由组合。切换任何一个维度都只能重建显示层，不得重新扫描世界，不得改变持久化世界事实。
 
-A theme may own presentation choices such as:
+## 绘图方式：固定只有两种
 
-- layout and spacing
-- controls and panel treatment
-- icon presentation
-- typography
-- marker / structure presentation
-- frontend interaction presentation
-- map composition and map renderer
-- HUD presentation
+`MapDrawingMode` 是封闭枚举，长期只允许：
 
-All themes consume the same `CartographBackendApi` capabilities.
+- `SATELLITE / satellite / 卫星`
+- `HAND_DRAWN / hand_drawn / 手绘`
 
-## Hard boundary
+不得把古式、动漫、水彩、等高线、专题图等塞进 DrawingMode。
 
-Themes must never own or duplicate:
+### 卫星
 
-- chunk scanning
-- Minecraft world access
-- persistent world-fact storage
-- world identity
-- cache invalidation
-- request scheduling
-- WebSocket protocol ownership
-- marker persistence
-- structure discovery
-- teleport semantics
+链路：
 
-Those stay in the backend/runtime layers.
+```
+SurfaceTile
+  -> SatelliteMapData
+  -> VisualStyle.renderSatellite(...)
+```
 
-Switching a theme therefore must not rescan the world, rebuild the facts cache, reconnect transport, or create another backend instance.
+`SatelliteMapData` 保留高精度地表事实。当前基础成图继续使用资源包感知的
+`SatelliteSurfaceRenderer`，因此可以保留较精确的地表颜色、边界与方块级细节。
 
-The CI theme-contract verifier enforces the built-in theme registry, required frontend hooks, renderer registry declaration, dynamic current-theme labels, theme-aware UI icon registry, and the presentation-only boundary of `applyFrontendTheme()`. A headless Chromium smoke test switches all built-in themes through the real settings flow at desktop, narrow, and small-window viewports. It verifies persistence, labels, UI glyph families, density/typography effects, modal bounds, map viewport geometry, and collision-free layers/markers/controls.
+### 手绘
 
-## Current runtime
+链路：
 
-`frontendTheme` is persisted once in Minecraft-owned `CartographSettings` and shared by the in-game settings UI and WebUI. WebUI localStorage keeps only a temporary/fallback copy for startup and disconnected rendering; when connected, the Minecraft runtime value is authoritative.
+```
+SurfaceTile
+  -> HandDrawnMapData
+  -> VisualStyle.renderHandDrawn(...)
+```
 
-The loopback server intentionally remains a thin transport and currently serves the two
-frontend bundles (`index.html` and `app.js`). The existing `runtime_settings` WebSocket
-message carries `frontendTheme` between Minecraft and WebUI; it does not introduce a
-theme-specific backend service. Theme presentation therefore stays inside the frontend
-bundle while theme identity is a shared client/runtime setting. Shared controls consume
-theme surface tokens such as `--theme-control-bg`,
-`--theme-control-border`, `--theme-control-hover` and
-`--theme-surface-muted`, so new controls inherit the active theme by default.
+`HandDrawnMapData` 是独立的数据结构，而不是“卫星图套滤镜”。
 
-`FRONTEND_THEMES` is the theme registry. Each theme declares:
+第一版会把每个 16×16 SurfaceTile 聚合成 4×4 语义单元，每个单元至少包含：
 
-- stable theme id
-- display label
-- layout family
-- icon family
-- control density
-- typography family
-- map renderer id
-- whether that map renderer is ready
+- 聚合地表颜色
+- 水体占比
+- 平均地形高度
+- 地形高度范围
 
-`applyFrontendTheme()` applies only frontend state:
+绘制时再从这些粗粒度数据插值得到连续块面，从源头弱化 Minecraft 方块颗粒。
 
-- `app.dataset.theme` selects the theme identity
-- `themeLayout` selects the layout family
-- `themeIcons` selects the icon family
-- primary frontend UI glyphs are resolved through `THEME_UI_ICON_SYMBOLS` from semantic roles such as `map`, `markers`, `layers`, `settings`, `about`, `locate` and `home`
-- semantic marker/structure icons are resolved separately through `THEME_ICON_SYMBOLS`; persisted marker data keeps semantic names such as `village`, `mountain` and `water`
-- `themeDensity` selects control spacing/density
-- `themeTypography` selects typography semantics and each theme's font stack
-- `app.dataset.mapRenderer` exposes the active map renderer identity; renderer state is intentionally named separately from frontend theme state
-- About/settings UI reports the active theme and renderer state
+以后可以继续给 HandDrawnMapData 增加河网、海岸线、森林区域、山体、道路等派生语义，但不能因此新增第三种 DrawingMode。
 
-`MAP_RENDERERS` is the WebUI renderer registry. `renderTerrain()` is only a dispatcher:
-it resolves the active theme's `mapRenderer` and invokes the registered canvas renderer.
-Minecraft owns the actual themed tile RGB through `FrontendThemeStyle`, so WebUI and the
-native in-game map consume the same theme-rendered SurfaceTile facts.
+## 绘图风格：可扩展注册表
 
-Current state:
+`MapVisualStyleRegistry` 是开放注册表。
 
-| Theme | UI theme | Map renderer |
-| --- | --- | --- |
-| 原生 · 卫星 | ready | satellite / resource-pack-aware surface |
-| 手绘 · 现代 | ready | modern pastel surface + light relief/contour treatment |
-| 手绘 · 古式 | ready | parchment/sepia surface + stronger ink-like relief/contour treatment |
+当前内置：
 
-Changing theme invalidates only presentation caches (native GPU atlases / WebUI region canvases and ETags).
-Persisted SurfaceTile facts are unchanged and no world rescan is performed.
+- `modern / 现代`
+- `ancient / 古式`
+- `anime / 动漫`
 
-## Current UI baselines
+未来可以继续增加水彩、像素、蓝图等，而无需修改 `MapDrawingMode`。
 
-The satellite theme keeps the technical full-width header used by the current production WebUI.
+每个完整风格必须提供两个地图入口：
 
-The modern theme follows the earlier high-fidelity map-first direction in
-`preview/cartograph-map-styles-hifi.html`: the terrain occupies the full viewport,
-the primary navigation becomes a compact floating toolbar at the upper right, and
-markers/layers remain independent floating panels. Responsive rules keep that toolbar
-usable on narrow windows.
+```java
+int[] renderSatellite(SatelliteMapData data, int stride);
+int[] renderHandDrawn(HandDrawnMapData data, int stride);
+```
 
-The ancient theme uses its own atlas composition instead of inheriting the modern
-toolbar: a parchment-like framed header, a separately framed map sheet, serif typography
-and engraved glyph family. Its map renderer is derived from the same factual surface
-tiles as satellite mode, then applies parchment/sepia color treatment and ink-like
-height/contour accents. The native in-game frontend uses the same theme palette and
-renderer identity.
+如果某个新风格只支持其中一种数据结构，不应作为正式完整风格启用，也不允许偷偷 fallback 到其他风格。
 
-Marker and structure icon data stays semantic. The modern and engraved icon families
-provide independent glyphs for common atlas concepts (pin, home, village, mountain and
-water) and safely fall back to the technical symbol set for the rest. Primary frontend
-navigation and location controls use a separate semantic UI-icon registry so frontend
-chrome can genuinely change glyph family without changing button behavior or persisted
-data. Switching themes refreshes existing marker/layer/UI glyphs without mutating marker
-definitions.
+风格还负责前端表现能力：
 
-## Theme renderer contract
+- Palette
+- UI 布局
+- 图标家族
+- 字体
+- 控件密度
+- 面板质感
 
-Modern and ancient map renderers derive from the same facts-only tiles already used by satellite rendering. The first implementation changes color language and relief/contour treatment only; later versions may add derived semantic presentation such as coastline, water hierarchy, forest masses, roads, labels and decorative symbols.
+因此 DrawingMode 只控制地图数据表达，VisualStyle 才控制视觉语言。
 
-Derived presentation must remain frontend-owned and a renderer must never require a second world scan merely because the user changes theme.
+## 当前组合
 
-## Compatibility rule
+| 绘图方式 | 现代 | 古式 | 动漫 |
+| --- | --- | --- | --- |
+| 卫星 | 卫星 · 现代 | 卫星 · 古式 | 卫星 · 动漫 |
+| 手绘 | 手绘 · 现代 | 手绘 · 古式 | 手绘 · 动漫 |
 
-Theme identity is presentation-only but shared across frontends. It may evolve without changing world facts or `CartographBackendApi`; the in-game selector and WebUI both read/write the same `CartographSettings.frontendTheme` value.
+游戏内和 WebUI 都读取同一份：
 
-Backend feature additions should expose semantic capability through `CartographBackendApi`; theme implementations decide how that capability looks.
+- `drawingMode`
+- `visualStyle`
 
-This keeps WebUI, future in-game UI and future themes independent while sharing one map truth.
+旧的 `frontendTheme` 组合状态已经移除，不做兼容迁移。设置 schema 已升级，旧组合主题不再作为运行时概念存在。
+
+## 渲染总链路
+
+```
+真实已生成区块
+        |
+        v
+   SurfaceTile facts
+        |
+        +--------------------+
+        |                    |
+        v                    v
+SatelliteMapData      HandDrawnMapData
+        |                    |
+        +---------+----------+
+                  |
+                  v
+       MapVisualStyleProcessor
+       ├─ Modern
+       ├─ Ancient
+       ├─ Anime
+       └─ future styles...
+                  |
+        +---------+----------+
+        |                    |
+        v                    v
+  游戏内原生地图          WebUI
+```
+
+`MapPresentationRenderer` 只负责：
+
+1. 读取当前 DrawingMode。
+2. 构造对应地图数据结构。
+3. 读取当前 VisualStyle。
+4. 调用该风格对应的数据结构处理入口。
+
+## 数据边界
+
+VisualStyle / DrawingMode 永远不得拥有或复制：
+
+- 区块扫描
+- Minecraft 世界读取
+- 世界身份
+- 持久化 SurfaceTile 世界事实
+- 后端缓存失效策略
+- WebSocket 传输
+- 标点持久化
+- 结构发现
+- 传送语义
+
+主题切换或绘图方式切换只允许失效：
+
+- 游戏内 GPU atlas / 展示纹理
+- WebUI region/tile 绘制缓存
+- 与表现相关的 ETag/signature
+
+不得触发第二次世界扫描。
+
+## UI 设置
+
+游戏内和 WebUI 都提供两个独立设置：
+
+### 绘图方式
+
+- 卫星
+- 手绘
+
+这个集合是固定的。
+
+### 绘图风格
+
+- 现代
+- 古式
+- 动漫
+- future...
+
+这个集合来自 VisualStyleRegistry，可继续增加。
+
+顶部和关于页只显示当前组合，例如：
+
+`手绘 · 古式`
+
+但这个组合只是两个独立设置的显示结果，不再拥有独立的“主题 ID”。
+
+## 动态覆盖层：未来项，不在本轮实现
+
+未来可在手绘地图上增加 `HandDrawnDetailOverlay`，用于让抽象底图体现玩家建设和明显人工变化，但它不是第三种 DrawingMode。
+
+预期来源是**方块模式穷举 + 连续性 / 连通区域识别**，例如：
+
+- 连续草径、道路类方块 -> 道路
+- 连续铁轨 -> 铁路
+- 石砖 / 石头 / 木头等人工材料的大型连通混合区 -> 建筑或人工区域
+- 大片耕地 -> 农田
+- 桥梁、码头、人工岸线等明显人工变化
+
+第一阶段如果未来实现，应优先识别“人工区域 / 道路网络”，而不是强行判断“这是一栋住宅/仓库/工厂”。
+
+性能边界：
+
+- 只处理 dirty chunk / dirty region
+- 不定时全图重扫
+- 小尺度变化可忽略
+- Overlay 作为派生层，不写回 SurfaceTile 世界事实
+
+这项能力当前仅预留设计，不进入本轮代码路径。
+
+## 验收
+
+CI 需要验证：
+
+- DrawingMode 只有 satellite / hand_drawn。
+- VisualStyleRegistry 当前至少有 modern / ancient / anime。
+- 每个内置 VisualStyle 同时实现 satellite / hand-drawn 两个入口。
+- SatelliteMapData 与 HandDrawnMapData 是不同数据结构。
+- 游戏内和 WebUI 使用相同 drawingMode / visualStyle 设置。
+- WebUI 能切换当前 2×3 六种组合。
+- 切换表现不触发世界扫描或持久化数据重建。
+- 原生 UI 和 WebUI 的视觉样式由 VisualStyle 驱动，而地图数据表达由 DrawingMode 驱动。

@@ -88,7 +88,8 @@ final class CartographWebUiServer implements AutoCloseable {
             Integer requestBatchSize,
             Integer liveScanIntervalTicks,
             String frontendTarget,
-            String frontendTheme) {}
+            String drawingMode,
+            String visualStyle) {}
 
     private static final String FRONTEND_SESSION = "web";
 
@@ -372,7 +373,8 @@ final class CartographWebUiServer implements AutoCloseable {
                 "requestBatchSize", CartographSettings.requestBatchSize(),
                 "liveScanIntervalTicks", CartographSettings.liveScanIntervalTicks(),
                 "frontendTarget", CartographSettings.frontendTarget().id(),
-                "frontendTheme", CartographSettings.frontendTheme().id()));
+                "drawingMode", CartographSettings.drawingMode().id(),
+                "visualStyle", CartographSettings.visualStyle().id()));
         return result;
     }
 
@@ -406,7 +408,8 @@ final class CartographWebUiServer implements AutoCloseable {
                 "requestBatchSize", CartographSettings.requestBatchSize(),
                 "liveScanIntervalTicks", CartographSettings.liveScanIntervalTicks(),
                 "frontendTarget", CartographSettings.frontendTarget().id(),
-                "frontendTheme", CartographSettings.frontendTheme().id()));
+                "drawingMode", CartographSettings.drawingMode().id(),
+                "visualStyle", CartographSettings.visualStyle().id()));
         return result;
     }
 
@@ -486,12 +489,12 @@ final class CartographWebUiServer implements AutoCloseable {
         if (facts == null || !facts.hasSurfaceFacts()) return null;
 
         long fingerprint = facts.fingerprint64();
-        long signature = FrontendThemeStyle.renderSignature();
+        long signature = MapPresentationRenderer.renderSignature();
         CachedTile cached = renderedTiles.get(key);
         if (cached == null
                 || cached.fingerprint() != fingerprint
                 || cached.styleSignature() != signature) {
-            int[] rgb = FrontendThemeStyle.render(facts).rgb();
+            int[] rgb = MapPresentationRenderer.render(facts).rgb();
             byte[] body = new byte[SurfaceTile.PIXELS * 3];
             for (int i = 0; i < SurfaceTile.PIXELS; i++) {
                 int color = rgb[i];
@@ -781,9 +784,12 @@ final class CartographWebUiServer implements AutoCloseable {
                                 CartographSettings.setFrontendTarget(
                                         CartographFrontendTarget.parse(settings.frontendTarget()));
                             }
-                            if (settings.frontendTheme() != null) {
-                                CartographSettings.setFrontendTheme(
-                                        CartographFrontendTheme.parse(settings.frontendTheme()));
+                            if (settings.drawingMode() != null) {
+                                CartographSettings.setDrawingMode(
+                                        MapDrawingMode.parse(settings.drawingMode()));
+                            }
+                            if (settings.visualStyle() != null) {
+                                CartographSettings.setVisualStyle(settings.visualStyle());
                             }
                             return null;
                         });

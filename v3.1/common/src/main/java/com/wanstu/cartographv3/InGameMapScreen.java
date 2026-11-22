@@ -257,7 +257,8 @@ final class InGameMapScreen extends AtlasScreenBase {
         if (left > 350) {
             draw.fill(new Box(152, 9, 1, 13), LINE);
             draw.glyph("map", 164, 10, 10, MUTED);
-            draw.smallText(CartographSettings.frontendTheme().label(), 178, 12, 62, TEXT, SMALL_TEXT);
+            String presentation = CartographSettings.drawingMode().label() + " · " + CartographSettings.visualStyle().label();
+            draw.smallText(presentation, 178, 12, 62, TEXT, SMALL_TEXT);
             draw.fill(new Box(244, 9, 1, 13), LINE);
             String status = "结构 " + (markerLabels.size() - customMarkers.size()) + " · 标点 "
                     + customMarkers.size() + " · 缓存 " + backend.cachedCount();

@@ -15,9 +15,7 @@ function Find-Chromium {
     'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
     'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
     'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser'
+    '/usr/bin/google-chrome','/usr/bin/chromium','/usr/bin/chromium-browser'
   )) {
     if (Test-Path $path) { return $path }
   }
@@ -30,185 +28,157 @@ $app = Get-Content -Raw -Encoding UTF8 $appPath
 $browserTest = @'
 (() => {
   const failures = [];
-  const approx = (actual, expected, tolerance, label) => {
-    if (Math.abs(actual - expected) > tolerance) {
-      failures.push(label + ': expected ' + expected + '±' + tolerance + ', got ' + actual);
-    }
+  const assert = (condition,message) => { if(!condition) failures.push(message); };
+  const approx = (actual,expected,tolerance,label) => {
+    if(Math.abs(actual-expected)>tolerance)failures.push(label+': expected '+expected+'±'+tolerance+', got '+actual);
   };
-  const assert = (condition, message) => { if (!condition) failures.push(message); };
   const overlaps = (a,b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
   const rect = el => {
-    const r = el.getBoundingClientRect();
-    return {left:r.left, top:r.top, right:r.right, bottom:r.bottom, width:r.width, height:r.height};
+    const r=el.getBoundingClientRect();
+    return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height};
   };
-  const choose = id => {
-    const settingsButton = document.querySelector('[data-nav="settings"]');
-    settingsButton.click();
-    const themeTab = document.querySelector('[data-sub="theme"]');
-    themeTab.click();
+  const labels={satellite:'卫星',hand_drawn:'手绘'};
+  const styleLabels={modern:'现代',ancient:'古式',anime:'动漫'};
 
-    const card = document.querySelector('[data-theme-choice="' + id + '"]');
-    assert(!!card, 'missing theme card: ' + id);
-    assert(card && !card.closest('[data-subpage="theme"]').classList.contains('hidden'), id + ': theme card is not visible in settings flow');
-    if (card) card.click();
+  const choose = (mode,style) => {
+    document.querySelector('[data-nav="settings"]').click();
+    document.querySelector('[data-sub="theme"]').click();
 
-    const settingsModal = document.querySelector('#settingsModal');
-    const settingsRect = rect(settingsModal);
-    const footerBg = getComputedStyle(settingsModal.querySelector('.settings-footer')).backgroundColor;
-    assert(getComputedStyle(settingsModal).display !== 'none', id + ': settings modal closed during theme switch');
-    assert(settingsRect.left >= -0.5 && settingsRect.top >= -0.5, id + ': settings modal starts outside viewport');
-    assert(settingsRect.right <= innerWidth + 0.5 && settingsRect.bottom <= innerHeight + 0.5, id + ': settings modal extends outside viewport');
+    const modeCard=document.querySelector('[data-drawing-mode="'+mode+'"]');
+    const styleCard=document.querySelector('[data-visual-style="'+style+'"]');
+    assert(!!modeCard,'missing drawing mode card: '+mode);
+    assert(!!styleCard,'missing visual style card: '+style);
+    if(modeCard)modeCard.click();
+    if(styleCard)styleCard.click();
 
-    settingsModal.querySelector('[data-modal-close]').click();
+    const modal=document.querySelector('#settingsModal');
+    const modalRect=rect(modal);
+    assert(getComputedStyle(modal).display!=='none',mode+'+'+style+': settings modal closed during switch');
+    assert(modalRect.left>=-.5&&modalRect.top>=-.5,mode+'+'+style+': modal starts outside viewport');
+    assert(modalRect.right<=innerWidth+.5&&modalRect.bottom<=innerHeight+.5,mode+'+'+style+': modal extends outside viewport');
 
-    const layersNav = document.querySelector('[data-nav="layers"]');
-    const layersPanel = document.querySelector('#layersPanel');
-    if (getComputedStyle(layersPanel).display === 'none') layersNav.click();
-
-    const app = document.querySelector('#app');
-    const stage = document.querySelector('#mapStage');
-    const topbar = document.querySelector('.topbar');
-    const panel = document.querySelector('#layersPanel');
-    const rightControls = document.querySelector('.right-controls');
-    const coordBox = document.querySelector('.coord-box');
-    const scaleBox = document.querySelector('.scale-box');
-    const activeCard = document.querySelector('[data-theme-choice="' + id + '"]');
-    const stored = (() => {
-      try { return JSON.parse(localStorage.getItem('cartograph-v31-webui-settings-v1') || '{}').frontendTheme || ''; }
-      catch (_) { return '__storage_error__'; }
+    const footerBg=getComputedStyle(modal.querySelector('.settings-footer')).backgroundColor;
+    const stored=(()=>{
+      try{return JSON.parse(localStorage.getItem('cartograph-v31-webui-settings-v1')||'{}');}
+      catch(_){return {storageError:true};}
     })();
-    const result = {
-      id,
-      theme: app.dataset.theme,
-      layout: app.dataset.themeLayout,
-      icons: app.dataset.themeIcons,
-      density: app.dataset.themeDensity,
-      typography: app.dataset.themeTypography,
-      renderer: app.dataset.mapRenderer,
-      uiIcons: {
-        map: document.querySelector('[data-nav="map"] [data-theme-ui-icon]').getAttribute('href'),
-        markers: document.querySelector('[data-nav="markers"] [data-theme-ui-icon]').getAttribute('href'),
-        layers: document.querySelector('[data-nav="layers"] [data-theme-ui-icon]').getAttribute('href'),
-        settings: document.querySelector('[data-nav="settings"] [data-theme-ui-icon]').getAttribute('href'),
-        about: document.querySelector('[data-nav="about"] [data-theme-ui-icon]').getAttribute('href'),
-        locate: document.querySelector('#locateBtn [data-theme-ui-icon]').getAttribute('href'),
-        home: document.querySelector('#homeBtn [data-theme-ui-icon]').getAttribute('href')
-      },
-      activeLabel: document.querySelector('#activeThemeLabel').textContent.trim(),
-      settingsLabel: document.querySelector('#interfaceThemeValue').textContent.trim(),
-      aboutLabel: document.querySelector('#aboutThemeValue').textContent.trim(),
-      stored,
-      settingsModal: settingsRect,
+
+    const app=document.querySelector('#app');
+    const combination=labels[mode]+' · '+styleLabels[style];
+    const result={
+      key:mode+'_'+style,
+      mode,
+      style,
+      theme:app.dataset.theme,
+      renderer:app.dataset.mapRenderer,
+      drawingDataset:app.dataset.drawingMode,
+      styleDataset:app.dataset.visualStyle,
+      layout:app.dataset.themeLayout,
+      icons:app.dataset.themeIcons,
+      density:app.dataset.themeDensity,
+      typography:app.dataset.themeTypography,
+      activeLabel:document.querySelector('#activeThemeLabel').textContent.trim(),
+      settingsLabel:document.querySelector('#interfaceThemeValue').textContent.trim(),
+      aboutLabel:document.querySelector('#aboutThemeValue').textContent.trim(),
+      storedMode:stored.drawingMode,
+      storedStyle:stored.visualStyle,
+      modeActive:modeCard&&modeCard.classList.contains('active'),
+      styleActive:styleCard&&styleCard.classList.contains('active'),
       footerBg,
-      stage: rect(stage),
-      topbar: rect(topbar),
-      panel: rect(panel),
-      panelHeadHeight: rect(panel.querySelector('.panel-head')).height,
-      rightControls: rect(rightControls),
-      coordBox: rect(coordBox),
-      scaleBox: rect(scaleBox),
-      panelDisplay: getComputedStyle(panel).display,
-      panelMaxHeight: parseFloat(getComputedStyle(panel).maxHeight) || 0,
-      cardActive: activeCard.classList.contains('active'),
-      fontFamily: getComputedStyle(app).fontFamily
+      fontFamily:getComputedStyle(app).fontFamily,
+      topbar:rect(document.querySelector('.topbar')),
+      stage:rect(document.querySelector('#mapStage'))
     };
 
-    assert(result.theme === id, id + ': data-theme mismatch');
-    assert(result.renderer === id, id + ': active map renderer does not match theme: ' + result.renderer);
-    assert(result.stored === id, id + ': theme was not persisted');
-    assert(result.cardActive, id + ': selected card is not active');
-    assert(result.panelDisplay !== 'none', id + ': layers panel did not open');
-    assert(result.panel.top >= result.stage.top - 0.5, id + ': panel starts above map viewport');
-    assert(result.panel.bottom <= result.stage.bottom + 0.5, id + ': panel extends below map viewport');
-    const appStyle = getComputedStyle(app);
-    const floatTop = parseFloat(appStyle.getPropertyValue('--theme-float-top')) || 0;
-    const floatBottom = parseFloat(appStyle.getPropertyValue('--theme-float-bottom')) || 0;
-    approx(result.panelMaxHeight, result.stage.height - floatTop - floatBottom, 1.5, id + ' panel max-height');
-    assert(!overlaps(result.panel, result.rightControls), id + ': panel overlaps zoom/player controls');
-    assert(!overlaps(result.panel, result.coordBox), id + ': panel overlaps coordinate box');
-    assert(!overlaps(result.panel, result.scaleBox), id + ': panel overlaps scale box');
+    assert(result.theme===style,result.key+': CSS style identity mismatch');
+    assert(result.renderer===mode,result.key+': map renderer identity mismatch');
+    assert(result.drawingDataset===mode,result.key+': drawing-mode dataset mismatch');
+    assert(result.styleDataset===style,result.key+': visual-style dataset mismatch');
+    assert(result.storedMode===mode,result.key+': drawing mode not persisted');
+    assert(result.storedStyle===style,result.key+': visual style not persisted');
+    assert(result.modeActive,result.key+': drawing mode card not active');
+    assert(result.styleActive,result.key+': visual style card not active');
+    for(const label of [result.activeLabel,result.settingsLabel,result.aboutLabel]){
+      assert(label===combination,result.key+': combination label mismatch: '+label);
+    }
 
-    const markersNav = document.querySelector('[data-nav="markers"]');
-    const markersPanel = document.querySelector('#markersPanel');
-    if (getComputedStyle(markersPanel).display === 'none') markersNav.click();
-    const markerRect = rect(markersPanel);
-    const markerMaxHeight = parseFloat(getComputedStyle(markersPanel).maxHeight) || 0;
-    assert(getComputedStyle(markersPanel).display !== 'none', id + ': markers panel did not open');
-    assert(markerRect.top >= result.stage.top - 0.5, id + ': markers panel starts above map viewport');
-    assert(markerRect.bottom <= result.stage.bottom + 0.5, id + ': markers panel extends below map viewport');
-    approx(markerMaxHeight, result.stage.height - floatTop - floatBottom, 1.5, id + ' markers panel max-height');
-    assert(!overlaps(markerRect, result.rightControls), id + ': markers panel overlaps zoom/player controls');
-    assert(!overlaps(markerRect, result.coordBox), id + ': markers panel overlaps coordinate box');
-    assert(!overlaps(markerRect, result.scaleBox), id + ': markers panel overlaps scale box');
-    result.markersPanel = markerRect;
-    result.markersPanelMaxHeight = markerMaxHeight;
+    modal.querySelector('[data-modal-close]').click();
+    const layersNav=document.querySelector('[data-nav="layers"]');
+    const layers=document.querySelector('#layersPanel');
+    if(getComputedStyle(layers).display==='none')layersNav.click();
+    result.panel=rect(layers);
+    result.panelMaxHeight=parseFloat(getComputedStyle(layers).maxHeight)||0;
+    result.panelHeadHeight=rect(layers.querySelector('.panel-head')).height;
+    const controls=rect(document.querySelector('.right-controls'));
+    const coord=rect(document.querySelector('.coord-box'));
+    const scale=rect(document.querySelector('.scale-box'));
+    assert(result.panel.top>=result.stage.top-.5,result.key+': layers panel above map stage');
+    assert(result.panel.bottom<=result.stage.bottom+.5,result.key+': layers panel below map stage');
+    assert(!overlaps(result.panel,controls),result.key+': layers overlaps controls');
+    assert(!overlaps(result.panel,coord),result.key+': layers overlaps coordinate box');
+    assert(!overlaps(result.panel,scale),result.key+': layers overlaps scale box');
+
+    const appStyle=getComputedStyle(app);
+    const floatTop=parseFloat(appStyle.getPropertyValue('--theme-float-top'))||0;
+    const floatBottom=parseFloat(appStyle.getPropertyValue('--theme-float-bottom'))||0;
+    approx(result.panelMaxHeight,result.stage.height-floatTop-floatBottom,1.5,result.key+' panel max-height');
+
+    const markersNav=document.querySelector('[data-nav="markers"]');
+    const markers=document.querySelector('#markersPanel');
+    if(getComputedStyle(markers).display==='none')markersNav.click();
+    const markerRect=rect(markers);
+    assert(markerRect.top>=result.stage.top-.5,result.key+': markers panel above map stage');
+    assert(markerRect.bottom<=result.stage.bottom+.5,result.key+': markers panel below map stage');
+    assert(!overlaps(markerRect,controls),result.key+': markers overlaps controls');
+    result.markersPanel=markerRect;
 
     return result;
   };
 
-  try {
-    const satellite = choose('satellite');
-    approx(satellite.stage.top, 62, 1.5, 'satellite stage top');
-    approx(satellite.stage.left, 0, 1, 'satellite stage left');
-    assert(satellite.layout === 'technical', 'satellite layout mismatch');
-    assert(satellite.density === 'compact', 'satellite density mismatch');
+  try{
+    const combinations={};
+    for(const style of ['modern','ancient','anime']){
+      for(const mode of ['satellite','hand_drawn']){
+        const item=choose(mode,style);
+        combinations[item.key]=item;
 
-    const modern = choose('modern');
-    approx(modern.stage.top, 0, 1, 'modern stage top');
-    approx(modern.stage.left, 0, 1, 'modern stage left');
-    assert(modern.layout === 'modern-atlas', 'modern layout mismatch');
-    assert(modern.icons === 'modern', 'modern icon family mismatch');
-    assert(!overlaps(modern.topbar, modern.panel), 'modern floating toolbar overlaps left panel');
-    const expectedModernTop = innerWidth <= 520 ? 6 : innerWidth <= 900 ? 10 : 20;
-    approx(modern.topbar.top, expectedModernTop, 1.5, 'modern toolbar vertical position');
-
-    const ancient = choose('ancient');
-    const ancientInsets = innerWidth <= 520 ? {top:66,side:6,bottom:6} : innerWidth <= 900 ? {top:78,side:10,bottom:10} : {top:88,side:18,bottom:18};
-    approx(ancient.stage.top, ancientInsets.top, 1.5, 'ancient stage top');
-    approx(ancient.stage.left, ancientInsets.side, 1.5, 'ancient stage left');
-    approx(innerWidth - ancient.stage.right, ancientInsets.side, 1.5, 'ancient stage right inset');
-    approx(innerHeight - ancient.stage.bottom, ancientInsets.bottom, 1.5, 'ancient stage bottom inset');
-    assert(ancient.layout === 'ancient-atlas', 'ancient layout mismatch');
-    assert(ancient.icons === 'engraved', 'ancient icon family mismatch');
-    assert(ancient.typography === 'serif', 'ancient typography mismatch');
-    assert(/Georgia|serif/i.test(ancient.fontFamily), 'ancient serif font stack is not active');
-    assert(ancient.topbar.bottom < ancient.stage.top, 'ancient topbar overlaps framed map viewport');
-
-    const expectedLabels = {
-      satellite: '原生 · 卫星',
-      modern: '手绘 · 现代',
-      ancient: '手绘 · 古式'
-    };
-    const expectedUiIcons = {
-      satellite:{map:'#i-map',markers:'#i-pin',layers:'#i-layers',settings:'#i-settings',about:'#i-info',locate:'#i-locate',home:'#i-home'},
-      modern:{map:'#i-theme-modern-map',markers:'#i-theme-modern-pin',layers:'#i-theme-modern-layers',settings:'#i-theme-modern-settings',about:'#i-theme-modern-info',locate:'#i-theme-modern-locate',home:'#i-theme-modern-home'},
-      ancient:{map:'#i-theme-engraved-map',markers:'#i-theme-engraved-pin',layers:'#i-theme-engraved-layers',settings:'#i-theme-engraved-settings',about:'#i-theme-engraved-info',locate:'#i-theme-engraved-locate',home:'#i-theme-engraved-home'}
-    };
-    for (const item of [satellite, modern, ancient]) {
-      for (const label of [item.activeLabel, item.settingsLabel, item.aboutLabel]) {
-        assert(label === expectedLabels[item.id], item.id + ': dynamic theme label mismatch: ' + label);
-      }
-      for (const [semantic,href] of Object.entries(expectedUiIcons[item.id])) {
-        assert(item.uiIcons[semantic] === href, item.id + ': UI icon family mismatch for ' + semantic + ': ' + item.uiIcons[semantic]);
+        if(style==='ancient'){
+          const inset=innerWidth<=520?{top:66,side:6,bottom:6}:innerWidth<=900?{top:78,side:10,bottom:10}:{top:88,side:18,bottom:18};
+          approx(item.stage.top,inset.top,1.5,item.key+' ancient stage top');
+          approx(item.stage.left,inset.side,1.5,item.key+' ancient stage left');
+          approx(innerWidth-item.stage.right,inset.side,1.5,item.key+' ancient right inset');
+          approx(innerHeight-item.stage.bottom,inset.bottom,1.5,item.key+' ancient bottom inset');
+          assert(item.layout==='ancient-atlas',item.key+': ancient layout mismatch');
+          assert(item.icons==='engraved',item.key+': ancient icon family mismatch');
+          assert(item.typography==='serif',item.key+': ancient typography mismatch');
+          assert(/Georgia|serif/i.test(item.fontFamily),item.key+': ancient font stack missing');
+          assert(item.topbar.bottom<item.stage.top,item.key+': ancient toolbar overlaps map frame');
+        }else{
+          approx(item.stage.top,0,1,item.key+' map stage top');
+          approx(item.stage.left,0,1,item.key+' map stage left');
+          assert(item.layout==='modern-atlas',item.key+': floating layout mismatch');
+          assert(item.icons==='modern',item.key+': modern icon family mismatch');
+          const expectedTop=innerWidth<=520?6:innerWidth<=900?10:20;
+          approx(item.topbar.top,expectedTop,1.5,item.key+' toolbar vertical position');
+          assert(!overlaps(item.topbar,item.panel),item.key+': floating toolbar overlaps left panel');
+        }
       }
     }
-    assert(modern.panelHeadHeight >= satellite.panelHeadHeight + 1.5, 'modern comfortable density is not applied to panel headers');
-    assert(ancient.panelHeadHeight >= satellite.panelHeadHeight + 1.5, 'ancient comfortable density is not applied to panel headers');
-    assert(/Segoe UI|sans-serif/i.test(modern.fontFamily), 'modern UI font stack is not active');
-    assert(satellite.footerBg !== modern.footerBg, 'modern settings footer still uses satellite surface');
-    assert(satellite.footerBg !== ancient.footerBg, 'ancient settings footer still uses satellite surface');
-    assert(modern.footerBg !== ancient.footerBg, 'modern and ancient settings footer surfaces collapsed together');
 
-    document.body.dataset.themeBrowserTest = encodeURIComponent(JSON.stringify({
-      ok: failures.length === 0,
+    const m=combinations.satellite_modern,a=combinations.satellite_ancient,n=combinations.satellite_anime;
+    assert(m.footerBg!==a.footerBg,'modern and ancient footer surfaces collapsed together');
+    assert(m.footerBg!==n.footerBg,'modern and anime footer surfaces collapsed together');
+    assert(a.footerBg!==n.footerBg,'ancient and anime footer surfaces collapsed together');
+
+    document.body.dataset.themeBrowserTest=encodeURIComponent(JSON.stringify({
+      ok:failures.length===0,
       failures,
-      viewport: {width:innerWidth,height:innerHeight},
-      themes: {satellite,modern,ancient}
+      viewport:{width:innerWidth,height:innerHeight},
+      combinations
     }));
-  } catch (error) {
-    document.body.dataset.themeBrowserTest = encodeURIComponent(JSON.stringify({
-      ok:false,
-      failures:[String(error && error.stack || error)]
+  }catch(error){
+    document.body.dataset.themeBrowserTest=encodeURIComponent(JSON.stringify({
+      ok:false,failures:[String(error&&error.stack||error)]
     }));
   }
 })();
@@ -220,7 +190,7 @@ $nl = [Environment]::NewLine
 $replacement = '<script>' + $nl + $app + $nl + '</script>' + $nl + '<script>' + $nl + $browserTest + $nl + '</script>'
 $harness = $html.Replace($needle, $replacement)
 
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ('cartograph-v31-theme-browser-' + [guid]::NewGuid().ToString('N'))
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ('cartograph-v31-presentation-browser-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   $harnessPath = Join-Path $tmp 'index.html'
@@ -237,16 +207,10 @@ try {
     $profile = Join-Path $tmp ('profile-' + $viewport.Width + 'x' + $viewport.Height)
     New-Item -ItemType Directory -Path $profile | Out-Null
     $args = @(
-      '--headless=new',
-      '--no-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--no-first-run',
-      '--disable-background-networking',
+      '--headless=new','--no-sandbox','--disable-gpu','--disable-dev-shm-usage',
+      '--no-first-run','--disable-background-networking',
       ('--window-size=' + $viewport.Width + ',' + $viewport.Height),
-      "--user-data-dir=$profile",
-      '--dump-dom',
-      $uri
+      "--user-data-dir=$profile",'--dump-dom',$uri
     )
     $dump = & $browser @args 2>$null | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Headless browser exited with code $LASTEXITCODE" }
@@ -265,12 +229,12 @@ try {
       exit 1
     }
 
-    Write-Host ("Cartograph V3.1 theme browser smoke: OK ({0}x{1})" -f $result.viewport.width,$result.viewport.height)
-    foreach ($id in @('satellite','modern','ancient')) {
-      $t = $result.themes.$id
-      Write-Host ("  {0}: layout={1}, stage=({2},{3}) {4}x{5}, panelMax={6}" -f
-        $id,$t.layout,[math]::Round($t.stage.left),[math]::Round($t.stage.top),
-        [math]::Round($t.stage.width),[math]::Round($t.stage.height),[math]::Round($t.panelMaxHeight))
+    Write-Host ("Cartograph V3.1 presentation browser smoke: OK ({0}x{1})" -f $result.viewport.width,$result.viewport.height)
+    foreach ($key in @('satellite_modern','hand_drawn_modern','satellite_ancient','hand_drawn_ancient','satellite_anime','hand_drawn_anime')) {
+      $item = $result.combinations.$key
+      Write-Host ("  {0}: layout={1}, stage=({2},{3}) {4}x{5}" -f
+        $key,$item.layout,[math]::Round($item.stage.left),[math]::Round($item.stage.top),
+        [math]::Round($item.stage.width),[math]::Round($item.stage.height))
     }
   }
 }

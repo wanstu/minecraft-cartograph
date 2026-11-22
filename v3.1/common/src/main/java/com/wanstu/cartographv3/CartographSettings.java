@@ -15,7 +15,7 @@ import java.util.Properties;
 
 /** Settings shared by all frontends. */
 final class CartographSettings {
-    private static final int SCHEMA = 2;
+    private static final int SCHEMA = 3;
     private static final int DEFAULT_REQUEST_BATCH = 64;
     private static final int DEFAULT_LIVE_SCAN_INTERVAL = 10;
 
@@ -23,7 +23,8 @@ final class CartographSettings {
     private static int requestBatchSize = DEFAULT_REQUEST_BATCH;
     private static int liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
     private static CartographFrontendTarget frontendTarget = CartographFrontendTarget.IN_GAME;
-    private static CartographFrontendTheme frontendTheme = CartographFrontendTheme.SATELLITE;
+    private static MapDrawingMode drawingMode = MapDrawingMode.SATELLITE;
+    private static String visualStyleId = MapVisualStyleRegistry.defaultStyle().id();
     private static final Map<MapMarkerStore.StructurePreset, StructureAppearance> STRUCTURE_PRESETS =
             new EnumMap<>(MapMarkerStore.StructurePreset.class);
     private static long structurePresetRevision;
@@ -47,9 +48,14 @@ final class CartographSettings {
         return frontendTarget;
     }
 
-    static synchronized CartographFrontendTheme frontendTheme() {
+    static synchronized MapDrawingMode drawingMode() {
         ensureLoaded();
-        return frontendTheme;
+        return drawingMode;
+    }
+
+    static synchronized MapVisualStyleRegistry.Style visualStyle() {
+        ensureLoaded();
+        return MapVisualStyleRegistry.find(visualStyleId);
     }
 
     static synchronized void setRequestBatchSize(int value) {
@@ -70,9 +76,15 @@ final class CartographSettings {
         save();
     }
 
-    static synchronized void setFrontendTheme(CartographFrontendTheme value) {
+    static synchronized void setDrawingMode(MapDrawingMode value) {
         ensureLoaded();
-        frontendTheme = value == null ? CartographFrontendTheme.SATELLITE : value;
+        drawingMode = value == null ? MapDrawingMode.SATELLITE : value;
+        save();
+    }
+
+    static synchronized void setVisualStyle(String id) {
+        ensureLoaded();
+        visualStyleId = MapVisualStyleRegistry.find(id).id();
         save();
     }
 
@@ -126,8 +138,10 @@ final class CartographSettings {
                             "liveScanIntervalTicks", Integer.toString(DEFAULT_LIVE_SCAN_INTERVAL)))));
             frontendTarget = CartographFrontendTarget.parse(
                     p.getProperty("mapFrontend", CartographFrontendTarget.IN_GAME.id()));
-            frontendTheme = CartographFrontendTheme.parse(
-                    p.getProperty("frontendTheme", CartographFrontendTheme.SATELLITE.id()));
+            drawingMode = MapDrawingMode.parse(
+                    p.getProperty("drawingMode", MapDrawingMode.SATELLITE.id()));
+            visualStyleId = MapVisualStyleRegistry.find(
+                    p.getProperty("visualStyle", MapVisualStyleRegistry.defaultStyle().id())).id();
             for (var preset : MapMarkerStore.StructurePreset.values()) {
                 String key = "structurePreset." + preset.name();
                 String icon = p.getProperty(key + ".icon");
@@ -147,7 +161,8 @@ final class CartographSettings {
             requestBatchSize = DEFAULT_REQUEST_BATCH;
             liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
             frontendTarget = CartographFrontendTarget.IN_GAME;
-            frontendTheme = CartographFrontendTheme.SATELLITE;
+            drawingMode = MapDrawingMode.SATELLITE;
+            visualStyleId = MapVisualStyleRegistry.defaultStyle().id();
         }
     }
 
@@ -164,7 +179,8 @@ final class CartographSettings {
         p.setProperty("requestBatchSize", Integer.toString(requestBatchSize));
         p.setProperty("liveScanIntervalTicks", Integer.toString(liveScanIntervalTicks));
         p.setProperty("mapFrontend", frontendTarget.id());
-        p.setProperty("frontendTheme", frontendTheme.id());
+        p.setProperty("drawingMode", drawingMode.id());
+        p.setProperty("visualStyle", visualStyleId);
         presets.forEach((preset, appearance) -> {
             String key = "structurePreset." + preset.name();
             p.setProperty(key + ".icon", appearance.icon().name());

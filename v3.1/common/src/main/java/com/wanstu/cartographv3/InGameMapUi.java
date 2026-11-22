@@ -71,7 +71,7 @@ final class InGameMapUi {
 
 
     private static void applyTheme() {
-        FrontendThemeStyle.Palette palette = FrontendThemeStyle.palette();
+        MapVisualStyleProcessor.Palette palette = MapPresentationRenderer.palette();
         BACKGROUND = palette.background();
         TOP = palette.top();
         PANEL = palette.panel();

@@ -1,157 +1,161 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$appPath = Join-Path $root 'v3.1/common/src/main/resources/webui/app.js'
-$htmlPath = Join-Path $root 'v3.1/common/src/main/resources/webui/index.html'
-$settingsPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/CartographSettings.java'
-$themePath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/CartographFrontendTheme.java'
-$serverPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/CartographWebUiServer.java'
-$dialogsPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/InGameMapDialogs.java'
-$nativeUiPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/InGameMapUi.java'
-$nativeTilesPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/InGameMapTiles.java'
-$themeStylePath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/FrontendThemeStyle.java'
-
-$app = Get-Content -Raw -Encoding UTF8 $appPath
-$html = Get-Content -Raw -Encoding UTF8 $htmlPath
-$sharedSettings = Get-Content -Raw -Encoding UTF8 $settingsPath
-$sharedTheme = Get-Content -Raw -Encoding UTF8 $themePath
-$server = Get-Content -Raw -Encoding UTF8 $serverPath
-$dialogs = Get-Content -Raw -Encoding UTF8 $dialogsPath
-$nativeUi = Get-Content -Raw -Encoding UTF8 $nativeUiPath
-$nativeTiles = Get-Content -Raw -Encoding UTF8 $nativeTilesPath
-$themeStyle = Get-Content -Raw -Encoding UTF8 $themeStylePath
+$javaRoot = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3'
+$app = Get-Content -Raw -Encoding UTF8 (Join-Path $root 'v3.1/common/src/main/resources/webui/app.js')
+$html = Get-Content -Raw -Encoding UTF8 (Join-Path $root 'v3.1/common/src/main/resources/webui/index.html')
+$settings = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'CartographSettings.java')
+$mode = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'MapDrawingMode.java')
+$registry = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'MapVisualStyleRegistry.java')
+$processor = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'MapVisualStyleProcessor.java')
+$processors = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'MapVisualStyleProcessors.java')
+$satelliteData = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'SatelliteMapData.java')
+$handData = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'HandDrawnMapData.java')
+$renderer = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'MapPresentationRenderer.java')
+$server = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'CartographWebUiServer.java')
+$dialogs = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'InGameMapDialogs.java')
+$nativeUi = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'InGameMapUi.java')
+$nativeTiles = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'InGameMapTiles.java')
 $errors = [System.Collections.Generic.List[string]]::new()
 
 function Require-Contains([string]$text,[string]$needle,[string]$message) {
   if (-not $text.Contains($needle)) { $script:errors.Add($message) }
 }
-
-$themeRows = @(
-  "satellite:{id:'satellite',label:'原生 · 卫星',layout:'technical',iconFamily:'technical',density:'compact',typography:'sans',mapRenderer:'satellite',mapReady:true}",
-  "modern:{id:'modern',label:'手绘 · 现代',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans',mapRenderer:'modern',mapReady:true}",
-  "ancient:{id:'ancient',label:'手绘 · 古式',layout:'ancient-atlas',iconFamily:'engraved',density:'comfortable',typography:'serif',mapRenderer:'ancient',mapReady:true}"
-)
-foreach ($row in $themeRows) { Require-Contains $app $row "theme registry contract missing or changed: $row" }
-
-foreach ($id in 'satellite','modern','ancient') {
-  $needle = 'data-theme-choice="' + $id + '"'
-  Require-Contains $html $needle "theme selector card missing: $id"
+function Require-Absent([string]$text,[string]$needle,[string]$message) {
+  if ($text.Contains($needle)) { $script:errors.Add($message) }
 }
-foreach ($hook in @(
-  'data-theme-layout="modern-atlas"',
-  'data-theme-layout="ancient-atlas"',
-  'data-theme-icons="modern"',
-  'data-theme-icons="engraved"',
-  '--theme-switch-off:',
-  '--theme-switch-on:',
-  '--theme-warning-bg:',
-  '--theme-warning-text:',
-  '--theme-scroll-track:',
-  '--theme-scroll-thumb:',
-  '--theme-dirty:',
-  '--theme-offline-bg:',
-  '--theme-offline-border:',
-  '--theme-offline-text:',
-  'theme-preview-toolbar',
-  'theme-preview-panel',
-  'theme-preview-controls',
-  '--theme-map-vertical-inset:',
-  '--theme-float-top:',
-  '--theme-float-bottom:',
-  '--theme-panel-head-height:',
-  '--theme-marker-chrome-height:',
-  '--theme-close-color:',
-  '--theme-close-hover:',
-  '--theme-overlay-bg:',
-  '--theme-focus:',
-  '--theme-footer-bg:'
-)) { Require-Contains $html $hook "theme CSS hook missing: $hook" }
-
-foreach ($hook in @(
-  'app.dataset.theme=',
-  'app.dataset.themeLayout=',
-  'app.dataset.themeIcons=',
-  'app.dataset.themeDensity=',
-  'app.dataset.themeTypography=',
-  'app.dataset.mapRenderer='
-)) { Require-Contains $app $hook "applyFrontendTheme hook missing: $hook" }
-
-Require-Contains $app 'const THEME_UI_ICON_SYMBOLS = Object.freeze({' 'theme UI icon registry missing'
-Require-Contains $app 'function applyThemeUiIcons()' 'theme UI icon application hook missing'
-Require-Contains $html 'data-theme-ui-icon="map"' 'theme-aware UI icon markup missing'
-Require-Contains $app 'const MAP_RENDERERS = Object.freeze({' 'map renderer registry missing'
-Require-Contains $app 'satellite:renderThemeTerrain' 'satellite renderer registry entry missing'
-Require-Contains $app 'modern:renderThemeTerrain' 'modern renderer registry entry missing'
-Require-Contains $app 'ancient:renderThemeTerrain' 'ancient renderer registry entry missing'
-Require-Contains $app 'function refreshThemeTerrain()' 'theme terrain refresh hook missing'
-Require-Contains $html 'id="interfaceThemeValue"' 'dynamic current-theme field missing'
-Require-Contains $app "interfaceThemeValue.textContent=theme.label" 'dynamic current-theme field is not wired'
 
 foreach ($token in @(
-  'SATELLITE("satellite", "原生 · 卫星")',
-  'MODERN("modern", "手绘 · 现代")',
-  'ANCIENT("ancient", "手绘 · 古式")',
-  'CartographFrontendTheme next()',
-  'static CartographFrontendTheme parse(String raw)'
-)) { Require-Contains $sharedTheme $token "shared frontend-theme enum is incomplete: $token" }
-foreach ($token in @(
-  'private static CartographFrontendTheme frontendTheme = CartographFrontendTheme.SATELLITE;',
-  'static synchronized CartographFrontendTheme frontendTheme()',
-  'static synchronized void setFrontendTheme(CartographFrontendTheme value)',
-  'p.setProperty("frontendTheme", frontendTheme.id())'
-)) { Require-Contains $sharedSettings $token "shared frontend-theme persistence is incomplete: $token" }
-foreach ($token in @(
-  'String frontendTheme) {}',
-  '"frontendTheme", CartographSettings.frontendTheme().id()',
-  'CartographSettings.setFrontendTheme(',
-  'CartographFrontendTheme.parse(settings.frontendTheme())'
-)) { Require-Contains $server $token "WebUI runtime theme bridge is incomplete: $token" }
-foreach ($token in @(
-  'action(ui, row, "前端主题", theme.label()',
-  'CartographSettings.setFrontendTheme(theme.next())',
-  'CartographSettings.frontendTheme().label()'
-)) { Require-Contains $dialogs $token "native theme selector is incomplete: $token" }
-foreach ($token in @(
-  "wsRequest('runtime_settings',{payload:{frontendTheme:id}})",
-  'r.frontendTheme&&FRONTEND_THEMES[r.frontendTheme]',
-  'settings.frontendTheme=r.frontendTheme',
-  'refreshThemeTerrain()'
-)) { Require-Contains $app $token "WebUI shared-theme synchronization is incomplete: $token" }
+  'SATELLITE("satellite", "卫星")',
+  'HAND_DRAWN("hand_drawn", "手绘")',
+  'return this == SATELLITE ? HAND_DRAWN : SATELLITE;'
+)) { Require-Contains $mode $token "drawing-mode contract missing: $token" }
+Require-Absent $mode 'ANCIENT' 'drawing mode must stay closed to satellite/hand-drawn'
+Require-Absent $mode 'ANIME' 'drawing mode must stay closed to satellite/hand-drawn'
+Require-Absent $mode 'MODERN' 'drawing mode must stay closed to satellite/hand-drawn'
 
 foreach ($token in @(
-  'record Palette(',
-  'case SATELLITE -> SATELLITE;',
-  'case MODERN -> MODERN;',
-  'case ANCIENT -> ANCIENT;',
-  'static long renderSignature()',
-  'static int[] renderPixels(SurfaceTile tile, int stride)',
-  'CartographSettings.frontendTheme()',
-  'SatelliteSurfaceRenderer.renderPixels(tile, stride)'
-)) { Require-Contains $themeStyle $token "shared native/map theme style is incomplete: $token" }
-foreach ($token in @(
-  'FrontendThemeStyle.Palette palette = FrontendThemeStyle.palette();',
-  'BACKGROUND = palette.background();',
-  'PANEL = palette.panel();',
-  'MARKER_LABEL = palette.markerLabel();'
-)) { Require-Contains $nativeUi $token "native UI theme palette is incomplete: $token" }
-foreach ($token in @(
-  'FrontendThemeStyle.renderSignature()',
-  'FrontendThemeStyle.renderPixels(tile, stride)'
-)) { Require-Contains $nativeTiles $token "native themed terrain renderer is incomplete: $token" }
-foreach ($token in @(
-  'FrontendThemeStyle.renderSignature()',
-  'FrontendThemeStyle.render(facts).rgb()'
-)) { Require-Contains $server $token "WebUI themed tile renderer is incomplete: $token" }
+  '"modern", "现代"',
+  '"ancient", "古式"',
+  '"anime", "动漫"',
+  'MapVisualStyleProcessors.MODERN',
+  'MapVisualStyleProcessors.ANCIENT',
+  'MapVisualStyleProcessors.ANIME',
+  'private static void register(Style style)'
+)) { Require-Contains $registry $token "visual-style registry contract missing: $token" }
 
-if ($html.Contains('深色（当前唯一主题）')) { $errors.Add('stale single-theme copy remains in WebUI') }
+foreach ($token in @(
+  'int[] renderSatellite(SatelliteMapData data, int stride);',
+  'int[] renderHandDrawn(HandDrawnMapData data, int stride);'
+)) { Require-Contains $processor $token "visual-style processor dual-entry contract missing: $token" }
 
-$match = [regex]::Match($app, 'function applyFrontendTheme\(\)\{(?<body>[\s\S]*?)function selectFrontendTheme')
+foreach ($token in @(
+  'class Modern implements MapVisualStyleProcessor',
+  'class Ancient implements MapVisualStyleProcessor',
+  'class Anime implements MapVisualStyleProcessor',
+  'renderSatellite(SatelliteMapData data, int stride)',
+  'renderHandDrawn(HandDrawnMapData data, int stride)'
+)) { Require-Contains $processors $token "built-in visual-style processor incomplete: $token" }
+
+foreach ($token in @(
+  'record SatelliteMapData(SurfaceTile facts)',
+  'SatelliteSurfaceRenderer.renderPixels(facts, stride)'
+)) { Require-Contains $satelliteData $token "satellite data wrapper incomplete: $token" }
+
+foreach ($token in @(
+  'record HandDrawnMapData(',
+  'static final int CELL_SIZE = 4;',
+  'static final int GRID = SurfaceTile.SIZE / CELL_SIZE;',
+  'static HandDrawnMapData from(SurfaceTile tile)',
+  'int[] abstractPixels(int stride)',
+  'interpolateColor(localX, localZ)'
+)) { Require-Contains $handData $token "hand-drawn data wrapper incomplete: $token" }
+
+foreach ($token in @(
+  'MapVisualStyleProcessor processor = CartographSettings.visualStyle().processor();',
+  'switch (CartographSettings.drawingMode())',
+  'case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);',
+  'case HAND_DRAWN -> processor.renderHandDrawn(HandDrawnMapData.from(tile), stride);'
+)) { Require-Contains $renderer $token "presentation renderer composition missing: $token" }
+
+foreach ($token in @(
+  'private static final int SCHEMA = 3;',
+  'private static MapDrawingMode drawingMode = MapDrawingMode.SATELLITE;',
+  'private static String visualStyleId = MapVisualStyleRegistry.defaultStyle().id();',
+  'static synchronized MapDrawingMode drawingMode()',
+  'static synchronized MapVisualStyleRegistry.Style visualStyle()',
+  'p.setProperty("drawingMode", drawingMode.id())',
+  'p.setProperty("visualStyle", visualStyleId)'
+)) { Require-Contains $settings $token "shared presentation persistence incomplete: $token" }
+Require-Absent $settings 'frontendTheme' 'legacy frontendTheme persistence must be removed'
+
+foreach ($token in @(
+  'String drawingMode,',
+  'String visualStyle) {}',
+  '"drawingMode", CartographSettings.drawingMode().id()',
+  '"visualStyle", CartographSettings.visualStyle().id()',
+  'CartographSettings.setDrawingMode(',
+  'MapDrawingMode.parse(settings.drawingMode())',
+  'CartographSettings.setVisualStyle(settings.visualStyle())',
+  'MapPresentationRenderer.renderSignature()',
+  'MapPresentationRenderer.render(facts).rgb()'
+)) { Require-Contains $server $token "runtime presentation bridge incomplete: $token" }
+
+foreach ($token in @(
+  'action(ui, row, "绘图方式", mode.label()',
+  'CartographSettings.setDrawingMode(mode.next())',
+  'action(ui, row, "绘图风格", style.label()',
+  'MapVisualStyleRegistry.next(style.id()).id()'
+)) { Require-Contains $dialogs $token "native drawing/style selector incomplete: $token" }
+
+foreach ($token in @(
+  'MapVisualStyleProcessor.Palette palette = MapPresentationRenderer.palette();',
+  'MapPresentationRenderer.renderSignature()',
+  'MapPresentationRenderer.renderPixels(tile, stride)'
+)) {
+  if (-not ($nativeUi.Contains($token) -or $nativeTiles.Contains($token))) {
+    $errors.Add("native presentation integration missing: $token")
+  }
+}
+
+foreach ($token in @(
+  "const DRAWING_MODES = Object.freeze({",
+  "satellite:{id:'satellite',label:'卫星'}",
+  "hand_drawn:{id:'hand_drawn',label:'手绘'}",
+  "const VISUAL_STYLES = Object.freeze({",
+  "modern:{id:'modern',label:'现代'",
+  "ancient:{id:'ancient',label:'古式'",
+  "anime:{id:'anime',label:'动漫'",
+  "drawingMode:'satellite', visualStyle:'modern'",
+  'function applyPresentation()',
+  'async function selectDrawingMode(id)',
+  'async function selectVisualStyle(id)',
+  'function refreshPresentationTerrain()',
+  "wsRequest('runtime_settings',{payload:{drawingMode:id}})",
+  "wsRequest('runtime_settings',{payload:{visualStyle:id}})",
+  'app.dataset.mapRenderer=mode.id'
+)) { Require-Contains $app $token "WebUI drawing/style runtime incomplete: $token" }
+
+foreach ($id in 'satellite','hand_drawn') {
+  Require-Contains $html ('data-drawing-mode="' + $id + '"') "drawing-mode card missing: $id"
+}
+foreach ($id in 'modern','ancient','anime') {
+  Require-Contains $html ('data-visual-style="' + $id + '"') "visual-style card missing: $id"
+  Require-Contains $html ('.app[data-theme="' + $id + '"]') "visual-style CSS missing: $id"
+}
+
+foreach ($token in @('data-theme-choice','frontendTheme','CartographFrontendTheme','FrontendThemeStyle')) {
+  Require-Absent $app $token "legacy combined-theme token remains in app.js: $token"
+}
+Require-Absent $html 'data-theme-choice' 'legacy combined-theme selector remains in WebUI'
+
+$match = [regex]::Match($app, 'function applyPresentation\(\)\{(?<body>[\s\S]*?)async function selectDrawingMode')
 if (-not $match.Success) {
-  $errors.Add('cannot locate applyFrontendTheme boundary')
+  $errors.Add('cannot locate applyPresentation boundary')
 } else {
   $body = $match.Groups['body'].Value
   foreach ($token in @('connectSocket(','wsRequest(','tileCache.clear(','regionCache.clear(')) {
-    if ($body.Contains($token)) { $errors.Add("theme application must remain presentation-only: found $token") }
+    if ($body.Contains($token)) { $errors.Add("presentation application must remain side-effect-light: found $token") }
   }
 }
 
@@ -160,4 +164,4 @@ if ($errors.Count -gt 0) {
   exit 1
 }
 
-Write-Host 'Cartograph V3.1 frontend theme contract: OK'
+Write-Host 'Cartograph V3.1 drawing-mode / visual-style contract: OK'

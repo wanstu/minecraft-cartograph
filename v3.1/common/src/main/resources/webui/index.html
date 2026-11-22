@@ -50,6 +50,21 @@
   --theme-map-vertical-inset:106px;--theme-float-top:14px;--theme-float-bottom:14px;--theme-panel-head-height:52px;--theme-marker-chrome-height:67px;
   --theme-close-color:#5e3d28;--theme-close-hover:#8d49331a;--theme-overlay-bg:#2b1b126e;--theme-focus:#7c4d2d;--theme-footer-bg:#c8aa72f4;
 }
+.app[data-theme="anime"]{
+  --bg:#dcecf2;--top:#f7fbfdf2;--panel:#fffefef2;--panel2:#edf7fbf2;--panel3:#d8edf6;
+  --line:#7998a7;--line2:#607f8f;--text:#24313d;--muted:#607381;--soft:#7c91a0;
+  --accent:#e06f8b;--accent2:#c95575;--blue:#5fa9e6;--danger:#d95462;--good:#58a779;
+  --shadow:0 18px 48px #34586a30;--header:58px;--theme-font:"Segoe UI","Microsoft YaHei","Noto Sans SC",Arial,sans-serif;
+  --theme-panel-filter:blur(12px);--theme-panel-radius:14px;--theme-control-radius:12px;
+  --theme-control-bg:#f8fcfe;--theme-control-border:#9ab7c5;--theme-control-hover:#e06f8b12;
+  --theme-row-border:#4568791c;--theme-surface-muted:#657c89;--theme-toast-bg:#f9fdfff7;
+  --theme-switch-off:#a9c2cd;--theme-switch-on:#5fa9e6;--theme-switch-knob:#fff;
+  --theme-warning-border:#d5ad67;--theme-warning-bg:#fff5dc;--theme-warning-text:#705326;
+  --theme-scroll-track:#d8edf6;--theme-scroll-thumb:#82a8b9;--theme-dirty:#9b672d;
+  --theme-offline-bg:#f9e7ebf5;--theme-offline-border:#d59aa7;--theme-offline-text:#8c4051;
+  --theme-map-vertical-inset:0px;--theme-float-top:20px;--theme-float-bottom:20px;--theme-panel-head-height:52px;--theme-marker-chrome-height:67px;
+  --theme-close-color:#536d79;--theme-close-hover:#e06f8b14;--theme-overlay-bg:#3653624d;--theme-focus:#5fa9e6;--theme-footer-bg:#edf7fbf2;
+}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1013;color:var(--text);font-family:var(--theme-font)}
 button,input,select,textarea{font:inherit;color:inherit}
@@ -72,11 +87,9 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .world-wrap{position:absolute;left:50%;top:50%;width:1800px;height:1100px;transform-origin:50% 50%;transform:translate(-50%,-50%) scale(1)}
 .world{width:100%;height:100%;display:block}
 .world .satellite{display:inline}
-.app[data-map-renderer="satellite"] .map-stage{background:#17383c}
+.map-stage{background:var(--bg)}
 .map-shade{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 58%,#0610153f 100%)}
 .app[data-theme="modern"] .map-shade{background:radial-gradient(circle at center,transparent 66%,#334d3b18 100%)}
-.app[data-map-renderer="modern"] .map-stage{background:#e7ece8}
-.app[data-map-renderer="ancient"] .map-stage{background:#bca06f}
 
 .marker-layer{position:absolute;inset:0;pointer-events:none}
 .map-marker{position:absolute;left:0;top:0;z-index:12;display:flex;align-items:center;pointer-events:auto;cursor:pointer;color:white;will-change:transform;contain:layout style}
@@ -162,6 +175,16 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .style-preview.old .theme-preview-toolbar{left:7px;right:7px;top:6px;height:18px;background:#e0c995e8;border:1px double #705438}
 .style-preview.old .theme-preview-panel{right:9px;top:31px;width:38px;height:47px;background:#d8bd84e8;border:2px double #765938;border-radius:1px}
 .style-preview.old .theme-preview-controls{left:9px;bottom:7px;width:52px;height:14px;background:#d8be88e8;border:1px solid #765938;border-radius:1px}
+.drawing-mode-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+.style-preview.hand{background:linear-gradient(145deg,#dfe7d3,#d8d1ae)}
+.style-preview.hand:before{content:"";position:absolute;inset:12px;background:linear-gradient(155deg,#87a66f 0 33%,#7db3c4 34% 48%,#d9c796 49% 70%,#91a977 71%);clip-path:polygon(0 12%,25% 4%,48% 19%,71% 8%,100% 20%,94% 78%,70% 91%,44% 79%,21% 95%,4% 76%)}
+.style-preview.hand:after{content:"▲  ♧♧  ≈  ▱";position:absolute;left:22px;top:36px;color:#526354;font-family:serif;letter-spacing:7px;font-size:15px}
+.style-preview.anime{background:linear-gradient(145deg,#c9ebf7,#f7e4a9)}
+.style-preview.anime:before{content:"";position:absolute;inset:10px;border:2px solid #4f7184;border-radius:18px;background:linear-gradient(150deg,#9cd47d 0 42%,#63bce5 43% 60%,#f1cf82 61% 100%)}
+.style-preview.anime:after{content:"▲ ★ ♧ ≈";position:absolute;left:22px;top:35px;color:#34596c;font-weight:800;letter-spacing:8px;font-size:15px}
+.style-preview.hand .theme-preview-toolbar,.style-preview.anime .theme-preview-toolbar{right:7px;top:7px;width:88px;height:18px;background:#f7fbfced;border:1px solid #91acb9;border-radius:9px}
+.style-preview.hand .theme-preview-panel,.style-preview.anime .theme-preview-panel{left:8px;top:31px;width:38px;height:48px;background:#ffffffdc;border:1px solid #9db7c3;border-radius:9px}
+.style-preview.hand .theme-preview-controls,.style-preview.anime .theme-preview-controls{right:8px;bottom:7px;width:52px;height:14px;background:#f9fdffed;border:1px solid #93aeba;border-radius:9px}
 .style-info{padding:9px 10px}.style-name{font-size:13px;font-weight:700}.style-sub{font-size:11px;color:var(--theme-surface-muted);margin-top:3px}
 .performance-row{padding:13px 0;border-bottom:1px solid var(--theme-row-border)}.performance-line{display:grid;grid-template-columns:165px 1fr 100px;gap:14px;align-items:center}.performance-help{margin:7px 0 0 179px;font-size:12px;line-height:1.6;color:var(--theme-surface-muted)}
 .structure-table{display:grid;grid-template-rows:auto 1fr;min-height:0;flex:1;border:1px solid var(--theme-control-border);border-radius:7px;overflow:hidden}.structure-head,.structure-row{display:grid;grid-template-columns:165px 1fr 90px;align-items:center;gap:12px}.structure-head{height:38px;padding:0 12px;background:var(--theme-control-bg);color:var(--theme-surface-muted);font-size:12px;border-bottom:1px solid var(--theme-control-border)}.structure-scroll{overflow:auto}.structure-row{min-height:46px;padding:0 12px;border-bottom:1px solid var(--theme-row-border)}.structure-row:nth-child(2n){background:var(--theme-control-hover)}.structure-select{height:32px;border:1px solid var(--theme-control-border);background:var(--theme-control-bg);border-radius:5px;display:flex;align-items:center;justify-content:space-between;padding:0 9px;cursor:pointer}.structure-select .left{display:flex;align-items:center;gap:8px}.structure-select .icon{width:19px;height:19px}.structure-select:hover{background:var(--theme-control-hover)}.structure-select:disabled,.settings-footer .btn:disabled{cursor:default;opacity:.55}.structure-color{display:flex;justify-content:flex-end}.structure-color .swatch{position:relative;display:block;overflow:hidden;width:24px;height:24px;cursor:pointer}
@@ -230,6 +253,21 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .app[data-theme="ancient"] .square-btn,.app[data-theme="ancient"] .zoom-control,.app[data-theme="ancient"] .scale-box,.app[data-theme="ancient"] .coord-box{background:#d8be88ed;border-color:#765938;color:#342616;box-shadow:0 8px 22px #39251866}
 .app[data-theme="ancient"] .marker-label{background:#e4cf9eea;border-color:#75583a;color:#382818;box-shadow:0 3px 10px #3b281a66}
 .app[data-theme="ancient"] .style-name,.app[data-theme="ancient"] .settings-title,.app[data-theme="ancient"] .card-title{letter-spacing:.03em}
+.app[data-theme="anime"]{background:#dcecf2}
+.app[data-theme="anime"] .topbar{background:linear-gradient(180deg,#fffdfef5,#edf8fcf5);border-bottom-color:#9bb9c7;box-shadow:0 5px 24px #355c7026}
+.app[data-theme="anime"] .brand,.app[data-theme="anime"] .nav-btn,.app[data-theme="anime"] .window-close{color:#2d4350}
+.app[data-theme="anime"] .brand small,.app[data-theme="anime"] .location-info,.app[data-theme="anime"] .settings-desc,.app[data-theme="anime"] .card-note,.app[data-theme="anime"] .small{color:#667f8c}
+.app[data-theme="anime"] .nav-btn:hover,.app[data-theme="anime"] .nav-btn.active{background:#e06f8b12;color:#263e4b}
+.app[data-theme="anime"] .floating-panel,.app[data-theme="anime"] .modal,.app[data-theme="anime"] .context-menu{background:linear-gradient(180deg,#fffefef8,#edf8fcf5);border-color:#9bb8c5;color:#24313d}
+.app[data-theme="anime"] .panel-head,.app[data-theme="anime"] .modal-head,.app[data-theme="anime"] .settings-footer{background:#edf7fbf2;border-color:#a0bac6}
+.app[data-theme="anime"] .settings-nav{background:#e1f1f7e8;border-color:#a0bac6}
+.app[data-theme="anime"] .settings-nav-item{color:#45606d}.app[data-theme="anime"] .settings-nav-item.active{background:#cdeaf4;color:#233e4b;border-left-color:#e06f8b}
+.app[data-theme="anime"] .subtabs{border-color:#a2bbc6}.app[data-theme="anime"] .subtab{color:#58717d}.app[data-theme="anime"] .subtab.active{color:#294653;border-bottom-color:#e06f8b;background:#e06f8b0d}
+.app[data-theme="anime"] .card,.app[data-theme="anime"] .field,.app[data-theme="anime"] .choice,.app[data-theme="anime"] .select,.app[data-theme="anime"] .color-field{background:#f8fcfe;border-color:#a2bdc9;color:#263b46}
+.app[data-theme="anime"] .style-card{background:#f9fdff;border-color:#a2bdc9;color:#263b46}.app[data-theme="anime"] .style-card.active{border-color:#e06f8b;box-shadow:0 0 0 1px #e06f8b inset}
+.app[data-theme="anime"] .square-btn,.app[data-theme="anime"] .zoom-control,.app[data-theme="anime"] .scale-box,.app[data-theme="anime"] .coord-box{background:#f9fdfff0;border-color:#9db8c5;color:#2b4350;box-shadow:0 8px 22px #355c7026}
+.app[data-theme="anime"] .marker-label{background:#fffdfef0;border-color:#9bb7c4;color:#263d49;box-shadow:0 3px 10px #355c7026}
+.app[data-theme="anime"] .map-shade{background:radial-gradient(circle at center,transparent 68%,#355c7018 100%)}
 
 @media(max-width:900px){
   .app[data-theme="ancient"]{--theme-map-vertical-inset:88px}
@@ -243,7 +281,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
   .app[data-theme-layout="ancient-atlas"] .webui-offline{top:80px}
 }
 @media(max-width:520px){
-  .app[data-theme="modern"]{--theme-float-top:64px}
+  .app[data-theme="modern"],.app[data-theme="anime"]{--theme-float-top:64px}
   .app[data-theme="ancient"]{--theme-map-vertical-inset:72px}
   .app[data-theme-layout="modern-atlas"] .topbar{right:6px;top:6px;height:50px;gap:1px}
   .app[data-theme-layout="modern-atlas"] .nav{height:42px;gap:1px}.app[data-theme-layout="modern-atlas"] .nav-btn{min-width:40px;height:42px;padding:3px}
@@ -495,7 +533,7 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
   <header class="topbar">
     <div class="brand"><svg class="icon"><use data-theme-ui-icon="map" href="#i-map"/></svg><span>地图册</span><small>Map Atlas · V3.1 WebUI</small></div>
     <div class="sep-v"></div>
-    <div class="location-info"><svg class="icon"><use data-theme-ui-icon="map" href="#i-map"/></svg><span id="activeThemeLabel">原生 · 卫星</span><div class="sep-v" style="margin:0 4px;height:18px"></div><span id="mapDataStatus">结构 0 · 标点 0</span></div>
+    <div class="location-info"><svg class="icon"><use data-theme-ui-icon="map" href="#i-map"/></svg><span id="activeThemeLabel">卫星 · 现代</span><div class="sep-v" style="margin:0 4px;height:18px"></div><span id="mapDataStatus">结构 0 · 标点 0</span></div>
     <div class="top-spacer"></div>
     <nav class="nav">
       <button class="nav-btn active" data-nav="map"><svg class="icon"><use data-theme-ui-icon="map" href="#i-map"/></svg><span>地图</span></button>
@@ -591,15 +629,15 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
       </aside>
       <section class="settings-main">
         <div class="setting-page active" data-setting-page="general">
-          <div class="settings-title-row"><div class="settings-title">通用</div><div class="settings-desc">常用设置与前端主题</div></div>
-          <div class="subtabs"><button class="subtab active" data-sub="interface"><svg class="icon"><use href="#i-display"/></svg>界面</button><button class="subtab" data-sub="theme"><svg class="icon"><use href="#i-map"/></svg>前端主题</button><button class="subtab" data-sub="function"><svg class="icon"><use href="#i-settings"/></svg>功能</button></div>
+          <div class="settings-title-row"><div class="settings-title">通用</div><div class="settings-desc">常用设置与地图外观</div></div>
+          <div class="subtabs"><button class="subtab active" data-sub="interface"><svg class="icon"><use href="#i-display"/></svg>界面</button><button class="subtab" data-sub="theme"><svg class="icon"><use href="#i-map"/></svg>地图外观</button><button class="subtab" data-sub="function"><svg class="icon"><use href="#i-settings"/></svg>功能</button></div>
           <div class="subpage" data-subpage="interface">
             <div class="card">
               <div class="card-title">界面</div>
               <div class="form-row"><div class="label">显示坐标与生物群系</div><div></div><div class="switch on" data-switch data-setting="showCoords"></div></div>
               <div class="form-row"><div class="label">显示玩家位置环</div><div></div><div class="switch on" data-switch data-setting="playerRing"></div></div>
               <div class="form-row"><div class="label">显示名称标签</div><div></div><div class="switch on" data-switch data-setting="labels"></div></div>
-              <div class="form-row"><div class="label">当前前端主题</div><div class="field readonly-field" id="interfaceThemeValue">原生 · 卫星</div><div></div></div>
+              <div class="form-row"><div class="label">当前地图外观</div><div class="field readonly-field" id="interfaceThemeValue">卫星 · 现代</div><div></div></div>
             </div>
             <div class="card">
               <div class="card-title">玩家图标</div>
@@ -609,14 +647,20 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
             </div>
           </div>
           <div class="subpage hidden" data-subpage="theme">
-            <div class="card"><div class="card-title">前端主题</div><div class="card-note">主题控制整套前端的布局、控件、图标、字体、面板质感和地图画法；三套主题共享同一份真实世界事实与后端 API。</div>
-              <div class="style-cards">
-                <div class="style-card active" data-theme-choice="satellite"><span class="coming-badge">完整</span><div class="style-preview sat"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">原生 · 卫星</div><div class="style-sub">技术型顶栏 + 真实地表直接成图</div></div></div>
-                <div class="style-card" data-theme-choice="modern"><span class="coming-badge">完整</span><div class="style-preview mod"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">手绘 · 现代</div><div class="style-sub">现代浅色控件 + 柔和地表色 + 轻量地形线</div></div></div>
-                <div class="style-card" data-theme-choice="ancient"><span class="coming-badge">完整</span><div class="style-preview old"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">手绘 · 古式</div><div class="style-sub">羊皮纸控件 + 古地图配色 + 墨线地形表达</div></div></div>
+            <div class="card"><div class="card-title">绘图方式</div><div class="card-note">绘图方式固定只有两种：卫星保留高精度地表细节；手绘先把世界事实聚合成区域数据，再交给绘图风格处理。</div>
+              <div class="style-cards drawing-mode-cards">
+                <div class="style-card active" data-drawing-mode="satellite"><span class="coming-badge">固定</span><div class="style-preview sat"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">卫星</div><div class="style-sub">高精度、保留方块级地表事实与真实边界</div></div></div>
+                <div class="style-card" data-drawing-mode="hand_drawn"><span class="coming-badge">固定</span><div class="style-preview hand"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">手绘</div><div class="style-sub">区域聚合、平滑边界、弱化方块颗粒</div></div></div>
               </div>
             </div>
-            <div class="card"><div class="card-title">主题边界</div><div class="form-row"><div class="label">共享能力</div><div class="field readonly-field">真实地表 / 缓存 / 标点 / 结构 / 传送 / WebSocket API</div><div></div></div><div class="notice-inline"><svg class="icon"><use href="#i-info"/></svg>现代与古式主题已同时接入 WebUI 与游戏内原生 UI；地图 renderer 基于同一份真实 SurfaceTile 事实重绘，不会重新扫描世界。</div></div>
+            <div class="card"><div class="card-title">绘图风格</div><div class="card-note">风格是可扩展注册表。每个风格都必须同时处理卫星数据结构与手绘数据结构，未来可以继续增加新的风格。</div>
+              <div class="style-cards">
+                <div class="style-card active" data-visual-style="modern"><span class="coming-badge">完整</span><div class="style-preview mod"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">现代</div><div class="style-sub">清晰、柔和、现代地图与界面语言</div></div></div>
+                <div class="style-card" data-visual-style="ancient"><span class="coming-badge">完整</span><div class="style-preview old"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">古式</div><div class="style-sub">羊皮纸、墨线、复古地图表达</div></div></div>
+                <div class="style-card" data-visual-style="anime"><span class="coming-badge">新增</span><div class="style-preview anime"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">动漫</div><div class="style-sub">鲜明色块、描边感与更活泼的界面</div></div></div>
+              </div>
+            </div>
+            <div class="card"><div class="card-title">架构边界</div><div class="form-row"><div class="label">共享底层</div><div class="field readonly-field">真实地表事实 / 缓存 / 标点 / 结构 / 传送 / WebSocket API</div><div></div></div><div class="notice-inline"><svg class="icon"><use href="#i-info"/></svg>绘图方式与绘图风格自由组合；切换只重建显示缓存，不重新扫描世界。动态覆盖层（道路、建筑区等）已预留为未来手绘扩展，本轮不启用。</div></div>
           </div>
           <div class="subpage hidden" data-subpage="function">
             <div class="card"><div class="card-title">地图行为</div><div class="form-row"><div class="label">M 打开的位置</div><select class="field" id="frontendTarget"><option value="in_game">游戏内</option><option value="web">WebUI</option></select><div></div></div><div class="form-row"><div class="label">右键地图</div><div class="field readonly-field">添加标点 / 传送 / 复制坐标</div><div></div></div><div class="form-row"><div class="label">右键标点</div><div class="field readonly-field">传送 / 编辑 / 删除或重置</div><div></div></div><div class="form-row"><div class="label">拖拽地图</div><div></div><div class="switch on" data-switch data-setting="dragMap"></div></div></div>
@@ -643,7 +687,7 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
             <div class="performance-row"><div class="performance-line"><div>实时扫描间隔</div><input id="scanRange" class="slider" type="range" min="5" max="100" step="5" value="10"><div class="value" id="scanValue">10 tick / 0.50 s</div></div><div class="performance-help">决定地表变化检查的平均频率；扫描会平摊到多个 server tick，避免实体 AI / TNT 周期性变慢。</div></div>
             <div class="performance-row"><div class="performance-line"><div>缓存预热范围</div><input id="prewarmRange" class="slider" type="range" min="128" max="2048" step="128" value="1024"><div class="value" id="prewarmValue">1024 区块</div></div><div class="performance-help">进入存档后主动恢复玩家附近已经绘制的地图，打开地图时尽量直接显示。</div></div>
           </div>
-          <div class="card"><div class="card-title">缓存</div><div class="form-row"><div class="label">地表事实缓存</div><div class="small">只保存世界事实；卫星成图由 WebUI 临时生成</div><div class="switch on" data-switch data-setting="rgbCache"></div></div><div class="form-row"><div class="label">刷新全部已覆盖地图</div><button class="btn" id="refreshAll">立即刷新</button><div></div></div></div>
+          <div class="card"><div class="card-title">缓存</div><div class="form-row"><div class="label">地表事实缓存</div><div class="small">只保存世界事实；地图结构与风格结果均为临时派生</div><div class="switch on" data-switch data-setting="rgbCache"></div></div><div class="form-row"><div class="label">刷新全部已覆盖地图</div><button class="btn" id="refreshAll">立即刷新</button><div></div></div></div>
           <div class="settings-footer"><button class="btn"><svg class="icon" style="display:inline-block;vertical-align:middle;width:15px"><use href="#i-reset"/></svg> 恢复默认</button><div class="spacer"></div><button class="btn" data-modal-close>取消</button><button class="btn primary" data-modal-close>应用</button></div>
         </div>
 
@@ -699,7 +743,7 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
     <div class="modal-head"><svg class="icon"><use href="#i-info"/></svg>关于<div class="spacer"></div><button class="close-btn" data-about-close><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div class="about-body">
       <div class="about-brand"><svg class="icon"><use href="#i-map"/></svg><div><div class="about-name">地图册 · Map Atlas</div><div class="about-version">Cartograph V3.1 · WebUI</div></div></div>
-      <div class="about-grid"><div class="k">地图事实</div><div>仅使用真实已生成区块</div><div class="k">当前前端主题</div><div id="aboutThemeValue">原生 · 卫星</div><div class="k">主题地图渲染</div><div id="aboutThemeRenderer">卫星 renderer 已启用</div><div class="k">缓存策略</div><div>仅持久化地表事实；成图由主题前端派生</div></div>
+      <div class="about-grid"><div class="k">地图事实</div><div>仅使用真实已生成区块</div><div class="k">当前地图外观</div><div id="aboutThemeValue">卫星 · 现代</div><div class="k">绘制链路</div><div id="aboutThemeRenderer">卫星数据 · 现代风格</div><div class="k">缓存策略</div><div>只持久化世界事实；地图数据结构与风格结果均为派生</div></div>
       <div class="about-note">正式 WebUI 前端：Minecraft Java 负责世界事实、缓存与动作，浏览器负责 HTML / CSS / SVG / Canvas 界面。</div>
     </div>
   </div>
