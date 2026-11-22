@@ -185,6 +185,15 @@ tasks.register('verifyV31FrontendThemes') {
             }
         }
 
+        ['app.dataset.themeLayout=theme.layout',
+         'app.dataset.themeIcons=theme.iconFamily',
+         'app.dataset.themeDensity=theme.density',
+         'app.dataset.themeTypography=theme.typography'].each { token ->
+            if (!app.contains(token)) {
+                throw new GradleException('Theme capability is not applied: ' + token)
+            }
+        }
+
         def renderDispatch = app.indexOf('const renderer=MAP_RENDERERS[theme.mapRenderer]||MAP_RENDERERS.satellite')
         if (renderDispatch < 0) {
             throw new GradleException('Terrain rendering must dispatch through the theme renderer registry')

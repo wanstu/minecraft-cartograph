@@ -17,13 +17,13 @@
   --bg:#e7ece8;--top:#f4f7f4f2;--panel:#f7faf7f2;--panel2:#edf3eef2;--panel3:#dfe8e2;
   --line:#9baaa0;--line2:#7f9186;--text:#24322a;--muted:#617067;--soft:#7d8c83;
   --accent:#547f62;--accent2:#426a50;--blue:#4b7d94;--danger:#a75450;--good:#4f8b62;
-  --shadow:0 18px 48px #23372a2b;--theme-panel-filter:blur(12px);--theme-panel-radius:12px;--theme-control-radius:10px;
+  --shadow:0 18px 48px #23372a2b;--header:58px;--theme-panel-filter:blur(12px);--theme-panel-radius:12px;--theme-control-radius:10px;
 }
 .app[data-theme="ancient"]{
   --bg:#bca06f;--top:#3e2e20f2;--panel:#e0c995f2;--panel2:#d3b77ff2;--panel3:#c5a56b;
   --line:#7b613f;--line2:#60492f;--text:#342616;--muted:#69543a;--soft:#81694a;
   --accent:#8f572f;--accent2:#6f4024;--blue:#765a35;--danger:#8f4036;--good:#52734d;
-  --shadow:0 18px 48px #3b281a61;--theme-font:Georgia,"Noto Serif SC","Songti SC","Microsoft YaHei",serif;
+  --shadow:0 18px 48px #3b281a61;--header:66px;--theme-font:Georgia,"Noto Serif SC","Songti SC","Microsoft YaHei",serif;
   --theme-panel-filter:none;--theme-panel-radius:3px;--theme-control-radius:3px;
 }
 *{box-sizing:border-box}
@@ -142,6 +142,11 @@ svg.icon.solid{fill:currentColor;stroke:none}
 
 /* Frontend Theme Runtime: themes own presentation only; terrain facts stay shared. */
 .app[data-theme]{font-family:var(--theme-font)}
+.app[data-theme-layout="modern-atlas"] .topbar{padding-inline:18px}.app[data-theme-layout="modern-atlas"] .nav-btn{min-width:84px}
+.app[data-theme-layout="ancient-atlas"] .topbar{padding-inline:26px}.app[data-theme-layout="ancient-atlas"] .brand{letter-spacing:.045em}.app[data-theme-layout="ancient-atlas"] .nav-btn{min-width:94px}
+.app[data-theme-icons="modern"] svg.icon{stroke-width:1.65}.app[data-theme-icons="engraved"] svg.icon{stroke-width:1.45}
+.app[data-theme-density="comfortable"] .panel-head,.app[data-theme-density="comfortable"] .modal-head{height:52px}
+.app[data-theme-density="comfortable"] .form-row{min-height:46px}
 .app[data-theme] .floating-panel,.app[data-theme] .modal,.app[data-theme] .context-menu{border-radius:var(--theme-panel-radius);backdrop-filter:var(--theme-panel-filter)}
 .app[data-theme] .square-btn,.app[data-theme] .zoom-control,.app[data-theme] .scale-box,.app[data-theme] .coord-box,.app[data-theme] .card,.app[data-theme] .field,.app[data-theme] .choice,.app[data-theme] .btn{border-radius:var(--theme-control-radius)}
 .app[data-theme="modern"]{background:#dfe8e2}

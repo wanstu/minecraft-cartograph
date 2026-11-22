@@ -133,9 +133,10 @@ A theme is a complete presentation package, not only a map-style switch. A theme
 change layout, controls, icons, typography, panels, overlays, HUD treatment and map
 composition while consuming the same `CartographBackendApi` contract.
 
-The built-in theme identities are `satellite`, `modern` and `ancient`. Theme
-selection is frontend-only state and must not rescan the world, rebuild the persistent
-facts cache, reconnect transport or create a second backend instance.
+The built-in theme identities are `satellite`, `modern` and `ancient`. Each theme
+declares its layout family, icon family, control density, typography family and map
+renderer. Theme selection is frontend-only state and must not rescan the world, rebuild
+the persistent facts cache, reconnect transport or create a second backend instance.
 
 The current theme runtime enables all three UI themes. Map composition dispatches
 through a frontend `MAP_RENDERERS` registry; only the satellite renderer is complete.

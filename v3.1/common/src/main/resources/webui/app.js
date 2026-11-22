@@ -38,9 +38,9 @@
     'mineshaft','trial_chambers','ancient_city','stronghold','buried_treasure'
   ]);
   const FRONTEND_THEMES = Object.freeze({
-    satellite:{id:'satellite',label:'原生 · 卫星',mapRenderer:'satellite',mapReady:true},
-    modern:{id:'modern',label:'手绘 · 现代',mapRenderer:'satellite',mapReady:false},
-    ancient:{id:'ancient',label:'手绘 · 古式',mapRenderer:'satellite',mapReady:false}
+    satellite:{id:'satellite',label:'原生 · 卫星',layout:'technical',iconFamily:'technical',density:'compact',typography:'sans',mapRenderer:'satellite',mapReady:true},
+    modern:{id:'modern',label:'手绘 · 现代',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans',mapRenderer:'satellite',mapReady:false},
+    ancient:{id:'ancient',label:'手绘 · 古式',layout:'ancient-atlas',iconFamily:'engraved',density:'comfortable',typography:'serif',mapRenderer:'satellite',mapReady:false}
   });
   const MAP_RENDERERS = Object.freeze({
     satellite:renderSatelliteTerrain
@@ -112,6 +112,10 @@
     const theme=currentFrontendTheme();
     settings.frontendTheme=theme.id;
     app.dataset.theme=theme.id;
+    app.dataset.themeLayout=theme.layout;
+    app.dataset.themeIcons=theme.iconFamily;
+    app.dataset.themeDensity=theme.density;
+    app.dataset.themeTypography=theme.typography;
     app.dataset.style=theme.mapRenderer;
     document.documentElement.dataset.cartographTheme=theme.id;
     const aboutTheme=q('#aboutThemeValue');if(aboutTheme)aboutTheme.textContent=theme.label;

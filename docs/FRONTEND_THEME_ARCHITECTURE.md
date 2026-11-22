@@ -50,12 +50,20 @@ The WebUI stores `frontendTheme` as a frontend-only preference.
 
 - stable theme id
 - display label
+- layout family
+- icon family
+- control density
+- typography family
 - map renderer id
 - whether that map renderer is ready
 
 `applyFrontendTheme()` applies only frontend state:
 
-- `app.dataset.theme` selects UI presentation
+- `app.dataset.theme` selects the theme identity
+- `themeLayout` selects the layout family
+- `themeIcons` selects the icon family
+- `themeDensity` selects control spacing/density
+- `themeTypography` selects typography semantics
 - `app.dataset.style` exposes the active map renderer identity
 - About/settings UI reports the active theme and renderer state
 
