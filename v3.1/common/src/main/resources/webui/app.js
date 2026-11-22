@@ -42,6 +42,9 @@
     modern:{id:'modern',label:'手绘 · 现代',mapRenderer:'satellite',mapReady:false},
     ancient:{id:'ancient',label:'手绘 · 古式',mapRenderer:'satellite',mapReady:false}
   });
+  const MAP_RENDERERS = Object.freeze({
+    satellite:renderSatelliteTerrain
+  });
 
   const defaults = {
     showCoords:true, playerRing:true, labels:true, custom:true, structures:true,
@@ -348,6 +351,11 @@
     if(flags&DRAW_MARKERS)renderMarkers(s);
   }
   function renderTerrain(s){
+    const theme=currentFrontendTheme();
+    const renderer=MAP_RENDERERS[theme.mapRenderer]||MAP_RENDERERS.satellite;
+    renderer(s);
+  }
+  function renderSatelliteTerrain(s){
     const dpr=resizeTransform(s);
     ctx.save();ctx.fillStyle='#17383c';ctx.fillRect(0,0,s.width,s.height);
     ctx.imageSmoothingEnabled=view.zoom<1;

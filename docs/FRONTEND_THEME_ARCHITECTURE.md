@@ -56,8 +56,12 @@ The WebUI stores `frontendTheme` as a frontend-only preference.
 `applyFrontendTheme()` applies only frontend state:
 
 - `app.dataset.theme` selects UI presentation
-- `app.dataset.style` selects the map renderer
+- `app.dataset.style` exposes the active map renderer identity
 - About/settings UI reports the active theme and renderer state
+
+`MAP_RENDERERS` is the renderer registry. `renderTerrain()` is only a dispatcher:
+it resolves the active theme's `mapRenderer` and invokes the registered renderer.
+The existing satellite implementation lives in `renderSatelliteTerrain()`.
 
 At this stage:
 

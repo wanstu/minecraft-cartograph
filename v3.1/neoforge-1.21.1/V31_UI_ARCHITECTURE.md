@@ -137,10 +137,11 @@ The built-in theme identities are `satellite`, `modern` and `ancient`. Theme
 selection is frontend-only state and must not rescan the world, rebuild the persistent
 facts cache, reconnect transport or create a second backend instance.
 
-The current theme runtime enables all three UI themes. Only the satellite map renderer
-is complete; modern and ancient currently fall back to the satellite renderer until
-their own derived hand-drawn renderers are implemented. See
-`docs/FRONTEND_THEME_ARCHITECTURE.md` for the contract.
+The current theme runtime enables all three UI themes. Map composition dispatches
+through a frontend `MAP_RENDERERS` registry; only the satellite renderer is complete.
+Modern and ancient currently resolve to that satellite renderer until their own derived
+hand-drawn renderers are implemented. Theme switching therefore does not need to change
+the terrain/cache pipeline. See `docs/FRONTEND_THEME_ARCHITECTURE.md` for the contract.
 
 ## Frontend responsibility
 
