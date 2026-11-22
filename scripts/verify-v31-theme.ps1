@@ -31,7 +31,13 @@ foreach ($hook in @(
   '--theme-switch-off:',
   '--theme-switch-on:',
   '--theme-warning-bg:',
-  '--theme-warning-text:'
+  '--theme-warning-text:',
+  '--theme-scroll-track:',
+  '--theme-scroll-thumb:',
+  '--theme-dirty:',
+  '--theme-offline-bg:',
+  '--theme-offline-border:',
+  '--theme-offline-text:'
 )) { Require-Contains $html $hook "theme CSS hook missing: $hook" }
 
 foreach ($hook in @(

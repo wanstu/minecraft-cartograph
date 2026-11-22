@@ -16,6 +16,8 @@
   --theme-row-border:#ffffff0a;--theme-surface-muted:#8f9ba2;--theme-toast-bg:#162026f2;
   --theme-switch-off:#66727a;--theme-switch-on:#4da1ef;--theme-switch-knob:#fff;
   --theme-warning-border:#776d43;--theme-warning-bg:#332f1f;--theme-warning-text:#e8d9a2;
+  --theme-scroll-track:#11191e;--theme-scroll-thumb:#56646d;--theme-dirty:#e5c66e;
+  --theme-offline-bg:#321f20ef;--theme-offline-border:#774246;--theme-offline-text:#f0b2ae;
 }
 .app[data-theme="modern"]{
   --bg:#e7ece8;--top:#f4f7f4f2;--panel:#f7faf7f2;--panel2:#edf3eef2;--panel3:#dfe8e2;
@@ -26,6 +28,8 @@
   --theme-row-border:#4f65551c;--theme-surface-muted:#65756b;--theme-toast-bg:#f3f7f4f5;
   --theme-switch-off:#aab7ae;--theme-switch-on:#547f62;--theme-switch-knob:#fff;
   --theme-warning-border:#c5ad76;--theme-warning-bg:#fff7df;--theme-warning-text:#665126;
+  --theme-scroll-track:#dfe8e2;--theme-scroll-thumb:#87998d;--theme-dirty:#7b642b;
+  --theme-offline-bg:#f6e9e7f5;--theme-offline-border:#c99a94;--theme-offline-text:#7f3f39;
 }
 .app[data-theme="ancient"]{
   --bg:#bca06f;--top:#3e2e20f2;--panel:#e0c995f2;--panel2:#d3b77ff2;--panel3:#c5a56b;
@@ -37,6 +41,8 @@
   --theme-row-border:#62482e26;--theme-surface-muted:#725b3d;--theme-toast-bg:#d8bd84f5;
   --theme-switch-off:#9b8159;--theme-switch-on:#8f572f;--theme-switch-knob:#fff7df;
   --theme-warning-border:#7f633f;--theme-warning-bg:#ead5a1;--theme-warning-text:#573d24;
+  --theme-scroll-track:#b99b67;--theme-scroll-thumb:#7d603e;--theme-dirty:#7d442a;
+  --theme-offline-bg:#d4b17eef;--theme-offline-border:#7f4938;--theme-offline-text:#5c2b24;
 }
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1013;color:var(--text);font-family:var(--theme-font)}
@@ -316,10 +322,11 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
 }
 .setting-page.active::-webkit-scrollbar,
 .settings-nav::-webkit-scrollbar{width:10px}
+#settingsDirty{color:var(--theme-dirty)}
 .setting-page.active::-webkit-scrollbar-track,
-.settings-nav::-webkit-scrollbar-track{background:#11191e}
+.settings-nav::-webkit-scrollbar-track{background:var(--theme-scroll-track)}
 .setting-page.active::-webkit-scrollbar-thumb,
-.settings-nav::-webkit-scrollbar-thumb{background:#56646d;border-radius:7px;border:2px solid #11191e}
+.settings-nav::-webkit-scrollbar-thumb{background:var(--theme-scroll-thumb);border-radius:7px;border:2px solid var(--theme-scroll-track)}
 .structure-table{
   display:block;
   min-height:0;
@@ -375,7 +382,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
 #mapCanvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:#17383c}
 .player,.player-ring{left:0;top:0}
 .app[data-connection="offline"] .location-info{color:#df6d68}
-.webui-offline{position:absolute;z-index:110;left:50%;top:calc(var(--header) + 24px);transform:translateX(-50%);background:#321f20ef;border:1px solid #774246;border-radius:7px;padding:8px 13px;display:none;color:#f0b2ae;box-shadow:0 8px 24px #0008}
+.webui-offline{position:absolute;z-index:110;left:50%;top:calc(var(--header) + 24px);transform:translateX(-50%);background:var(--theme-offline-bg);border:1px solid var(--theme-offline-border);border-radius:7px;padding:8px 13px;display:none;color:var(--theme-offline-text);box-shadow:0 8px 24px #0008}
 .app[data-connection="offline"] .webui-offline{display:block}
 
 </style>
@@ -541,7 +548,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   <div class="overlay" id="overlay"></div>
 
   <div class="modal settings-modal" id="settingsModal">
-    <div class="modal-head"><svg class="icon"><use href="#i-settings"/></svg>设置<span id="settingsDirty" class="small" style="display:none;color:#e5c66e;margin-left:6px">● 有未应用更改</span><div class="spacer"></div><button class="close-btn" data-modal-close><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="modal-head"><svg class="icon"><use href="#i-settings"/></svg>设置<span id="settingsDirty" class="small" style="display:none;margin-left:6px">● 有未应用更改</span><div class="spacer"></div><button class="close-btn" data-modal-close><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div class="settings-layout">
       <aside class="settings-nav">
         <div class="settings-nav-item active" data-page="general"><svg class="icon"><use href="#i-settings"/></svg>通用</div>
