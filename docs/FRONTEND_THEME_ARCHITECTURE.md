@@ -42,7 +42,7 @@ Those stay in the backend/runtime layers.
 
 Switching a theme therefore must not rescan the world, rebuild the facts cache, reconnect transport, or create another backend instance.
 
-The CI theme-contract verifier enforces the built-in theme registry, required frontend hooks, the renderer fallback declaration, the dynamic current-theme label, and the presentation-only boundary of `applyFrontendTheme()`.
+The CI theme-contract verifier enforces the built-in theme registry, required frontend hooks, the renderer fallback declaration, the dynamic current-theme label, and the presentation-only boundary of `applyFrontendTheme()`. A headless Chromium smoke test also switches all built-in themes in the real V3.1 WebUI, verifies persistence and dynamic labels, and checks that each theme's map viewport, floating panels, and toolbar remain inside their intended layout bounds.
 
 ## Current runtime
 
