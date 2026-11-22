@@ -54,7 +54,7 @@ final class InGameMapTiles implements AutoCloseable {
 
     void update(InGameMapCamera camera) {
         String dim = backend.dimension();
-        long appearance = SatelliteSurfaceRenderer.renderSignature();
+        long appearance = FrontendThemeStyle.renderSignature();
         if (!dim.equals(dimension) || appearance != signature) {
             close();
             dimension = dim;
@@ -212,7 +212,7 @@ final class InGameMapTiles implements AutoCloseable {
     }
 
     private static void paint(NativeImage image, int x, int z, SurfaceTile tile, int stride, int edge) {
-        int[] colors = tile == null ? null : SatelliteSurfaceRenderer.renderPixels(tile, stride);
+        int[] colors = tile == null ? null : FrontendThemeStyle.renderPixels(tile, stride);
         for (int row = 0; row < edge; row++) {
             for (int column = 0; column < edge; column++) {
                 int pixel = colors == null ? 0 : opaqueAbgr(colors[row * edge + column]);

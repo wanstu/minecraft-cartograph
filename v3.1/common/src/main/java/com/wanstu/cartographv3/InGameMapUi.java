@@ -9,18 +9,27 @@ import java.util.Locale;
 import java.util.Map;
 
 final class InGameMapUi {
-    static final int BACKGROUND = 0xff17383c;
-    static final int TOP = 0xff111a20;
-    static final int PANEL = 0xf8182228;
-    static final int FIELD = 0xff202b32;
-    static final int HOVER = 0xff293840;
-    static final int LINE = 0xff46555f;
-    static final int TEXT = 0xfff2f5f7;
-    static final int MUTED = 0xffaab5bc;
-    static final int SOFT = 0xff84939b;
-    static final int ACCENT = 0xfff3c94f;
-    static final int BLUE = 0xff68b5f7;
-    static final int DANGER = 0xffdf6d68;
+    static int BACKGROUND;
+    static int TOP;
+    static int PANEL;
+    static int FIELD;
+    static int HOVER;
+    static int LINE;
+    static int TEXT;
+    static int MUTED;
+    static int SOFT;
+    static int ACCENT;
+    static int BLUE;
+    static int DANGER;
+    static int SELECTED;
+    static int SHADOW;
+    static int GRID_LINE;
+    static int OVERLAY;
+    static int OVERLAY_LIGHT;
+    static int RAIL;
+    static int SWITCH_ON;
+    static int MARKER_LABEL;
+    static int MARKER_SHADOW;
     static final float SMALL_TEXT = .75f;
 
     private static final String[] ICON_NAMES = "map pin layers settings info close check edit trash teleport add locate reset chevron copy frame display performance keyboard wrench home village mansion temple outpost mine portal ship city fortress cave mountain tree water player cross dot save desert-pyramid jungle-temple swamp-hut igloo ocean-monument ruined-portal shipwreck ocean-ruin buried-treasure trail-ruins trial-chambers ancient-city stronghold nether-fortress bastion-remnant nether-fossil end-city".split(" ");
@@ -51,12 +60,39 @@ final class InGameMapUi {
 
     InGameMapUi(MapGraphics graphics, Font font, int mouseX, int mouseY,
                 double guiUnitsPerLayoutUnit, float fontScale) {
+        applyTheme();
         this.g = graphics;
         this.font = font;
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         this.guiUnitsPerLayoutUnit = guiUnitsPerLayoutUnit;
         this.fontScale = fontScale;
+    }
+
+
+    private static void applyTheme() {
+        FrontendThemeStyle.Palette palette = FrontendThemeStyle.palette();
+        BACKGROUND = palette.background();
+        TOP = palette.top();
+        PANEL = palette.panel();
+        FIELD = palette.field();
+        HOVER = palette.hover();
+        LINE = palette.line();
+        TEXT = palette.text();
+        MUTED = palette.muted();
+        SOFT = palette.soft();
+        ACCENT = palette.accent();
+        BLUE = palette.focus();
+        DANGER = palette.danger();
+        SELECTED = palette.selected();
+        SHADOW = palette.shadow();
+        GRID_LINE = palette.gridLine();
+        OVERLAY = palette.overlay();
+        OVERLAY_LIGHT = palette.overlayLight();
+        RAIL = palette.rail();
+        SWITCH_ON = palette.switchOn();
+        MARKER_LABEL = palette.markerLabel();
+        MARKER_SHADOW = palette.markerShadow();
     }
 
     boolean hovered(Box box) { return box.at(mouseX, mouseY); }
@@ -96,7 +132,7 @@ final class InGameMapUi {
     void border(Box box, int color) { g.renderOutline(box.x, box.y, box.w, box.h, color); }
 
     void panel(Box box) {
-        fill(new Box(box.x + 2, box.y + 3, box.w, box.h), 0x48000000);
+        fill(new Box(box.x + 2, box.y + 3, box.w, box.h), SHADOW);
         fill(box, PANEL);
         border(box, LINE);
         block(box);
@@ -160,7 +196,7 @@ final class InGameMapUi {
     void divider(int x, int y, int width) { fill(new Box(x, y, width, 1), LINE); }
 
     void button(Box box, String title, boolean selected, Runnable run) {
-        fill(box, selected ? 0xff314754 : hovered(box) ? HOVER : FIELD);
+        fill(box, selected ? SELECTED : hovered(box) ? HOVER : FIELD);
         border(box, selected ? BLUE : LINE);
         center(title, box, TEXT);
         action(box, run);

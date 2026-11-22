@@ -156,14 +156,14 @@ final class InGameMapDialogs {
 
     void render(InGameMapUi ui) {
         Box viewport = new Box(0, 0, screen.layoutWidth(), screen.layoutHeight());
-        ui.fill(viewport, 0xa4070b0e);
+        ui.fill(viewport, OVERLAY);
         if (mode == Mode.SETTINGS) renderSettings(ui);
         if (mode == Mode.EDIT) renderEditor(ui);
         if (mode == Mode.ABOUT) renderAbout(ui);
 
         if (iconResult != null || colorResult != null) {
             ui.clearActions();
-            ui.fill(viewport, 0x85070b0e);
+            ui.fill(viewport, OVERLAY_LIGHT);
             if (iconResult != null) renderIcons(ui);
             else renderColors(ui);
         }
@@ -181,12 +181,12 @@ final class InGameMapDialogs {
         Box box = settingsBox();
         title(ui, box, "settings", "设置", this::close);
         int railWidth = Math.clamp(box.w() / 5, 71, 98);
-        ui.fill(new Box(box.x() + 1, box.y() + 27, railWidth, box.h() - 28), 0xff131b20);
+        ui.fill(new Box(box.x() + 1, box.y() + 27, railWidth, box.h() - 28), RAIL);
         ui.fill(new Box(box.x() + railWidth + 1, box.y() + 27, 1, box.h() - 28), LINE);
         int tabStep = Math.clamp((box.h() - 38) / Tab.values().length, 11, 21);
         for (Tab item : Tab.values()) {
             Box nav = new Box(box.x() + 6, box.y() + 33 + item.ordinal() * tabStep, railWidth - 10, tabStep - 2);
-            if (item == tab || ui.hovered(nav)) ui.fill(nav, item == tab ? 0xff2e414e : FIELD);
+            if (item == tab || ui.hovered(nav)) ui.fill(nav, item == tab ? SELECTED : FIELD);
             if (item == tab) ui.fill(new Box(nav.x(), nav.y(), 2, nav.h()), BLUE);
             int iconSize = Math.min(11, nav.h() - 3);
             ui.glyph(item.icon, nav.x() + 6, nav.y() + (nav.h() - iconSize) / 2, iconSize, TEXT);
@@ -339,7 +339,7 @@ final class InGameMapDialogs {
         rowLabel(ui, row, label, 31);
         boolean checked = preferences.enabled(flag);
         Box box = new Box(row.right() - 27, row.y() + 6, 21, 10);
-        ui.fill(box, checked ? 0xff3776ab : FIELD);
+        ui.fill(box, checked ? SWITCH_ON : FIELD);
         ui.border(box, checked ? BLUE : LINE);
         ui.fill(new Box(box.x() + (checked ? 12 : 2), box.y() + 2, 7, 6), checked ? TEXT : SOFT);
         ui.action(row, () -> preferences.toggle(flag));

@@ -39,11 +39,13 @@
   ]);
   const FRONTEND_THEMES = Object.freeze({
     satellite:{id:'satellite',label:'原生 · 卫星',layout:'technical',iconFamily:'technical',density:'compact',typography:'sans',mapRenderer:'satellite',mapReady:true},
-    modern:{id:'modern',label:'手绘 · 现代',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans',mapRenderer:'satellite',mapReady:false},
-    ancient:{id:'ancient',label:'手绘 · 古式',layout:'ancient-atlas',iconFamily:'engraved',density:'comfortable',typography:'serif',mapRenderer:'satellite',mapReady:false}
+    modern:{id:'modern',label:'手绘 · 现代',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans',mapRenderer:'modern',mapReady:true},
+    ancient:{id:'ancient',label:'手绘 · 古式',layout:'ancient-atlas',iconFamily:'engraved',density:'comfortable',typography:'serif',mapRenderer:'ancient',mapReady:true}
   });
   const MAP_RENDERERS = Object.freeze({
-    satellite:renderSatelliteTerrain
+    satellite:renderThemeTerrain,
+    modern:renderThemeTerrain,
+    ancient:renderThemeTerrain
   });
 
   const defaults = {
@@ -130,13 +132,18 @@
     settings.frontendTheme=id;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
     const theme=currentFrontendTheme();
     if(socket&&socket.readyState===WebSocket.OPEN){
-      try{await wsRequest('runtime_settings',{payload:{frontendTheme:id}});}
+      try{await wsRequest('runtime_settings',{payload:{frontendTheme:id}});refreshThemeTerrain();}
       catch(_){
         settings.frontendTheme=previous;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
         toast('前端主题保存失败');return;
       }
     }
-    toast(theme.mapReady?'已切换到 '+theme.label:'已切换到 '+theme.label+'；地图暂使用卫星真值');
+    toast('已切换到 '+theme.label);
+  }
+  function refreshThemeTerrain(){
+    regionCache.clear();tileCache.clear();lastViewportSignature='';
+    scheduleRender(DRAW_TERRAIN);
+    if(socket&&socket.readyState===WebSocket.OPEN)sendViewportSoon();
   }
   function worldKey(s){ return String(s && s.worldId || '') + '|' + String(s && s.dimension || ''); }
   function saveView(){
@@ -422,9 +429,10 @@
     const renderer=MAP_RENDERERS[theme.mapRenderer]||MAP_RENDERERS.satellite;
     renderer(s);
   }
-  function renderSatelliteTerrain(s){
-    const dpr=resizeTransform(s);
-    ctx.save();ctx.fillStyle='#17383c';ctx.fillRect(0,0,s.width,s.height);
+  function renderThemeTerrain(s){
+    const dpr=resizeTransform(s),theme=currentFrontendTheme();
+    const background=theme.id==='modern'?'#e7ece8':theme.id==='ancient'?'#bca06f':'#17383c';
+    ctx.save();ctx.fillStyle=background;ctx.fillRect(0,0,s.width,s.height);
     ctx.imageSmoothingEnabled=view.zoom<1;
     if(serverState&&serverState.connected&&currentDimension){
       const hx=s.width/(2*view.zoom),hz=s.height/(2*view.zoom);
@@ -472,8 +480,10 @@
       ctx.lineTo(width,y);
     }
     ctx.lineWidth=1;
-    ctx.strokeStyle='rgba(11,22,27,.38)';
+    ctx.strokeStyle=getComputedStyle(app).getPropertyValue('--line').trim()||'#46555f';
+    ctx.globalAlpha=.38;
     ctx.stroke();
+    ctx.globalAlpha=1;
   }
 
   function tileKey(x,z){return currentDimension+'|'+x+'|'+z;}
@@ -837,7 +847,7 @@
   function syncRuntimeSettings(){
     const r=serverState&&serverState.runtime;if(!r)return;
     if(r.frontendTheme&&FRONTEND_THEMES[r.frontendTheme]&&settings.frontendTheme!==r.frontendTheme){
-      settings.frontendTheme=r.frontendTheme;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
+      settings.frontendTheme=r.frontendTheme;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);refreshThemeTerrain();scheduleRender(DRAW_ALL);
     }
     if(r.frontendTarget)q('#frontendTarget').value=r.frontendTarget;
     if(r.requestBatchSize!=null){q('#requestRange').value=r.requestBatchSize;q('#requestValue').textContent=String(r.requestBatchSize);}

@@ -486,12 +486,12 @@ final class CartographWebUiServer implements AutoCloseable {
         if (facts == null || !facts.hasSurfaceFacts()) return null;
 
         long fingerprint = facts.fingerprint64();
-        long signature = SatelliteSurfaceRenderer.renderSignature();
+        long signature = FrontendThemeStyle.renderSignature();
         CachedTile cached = renderedTiles.get(key);
         if (cached == null
                 || cached.fingerprint() != fingerprint
                 || cached.styleSignature() != signature) {
-            int[] rgb = SatelliteSurfaceRenderer.render(facts).rgb();
+            int[] rgb = FrontendThemeStyle.render(facts).rgb();
             byte[] body = new byte[SurfaceTile.PIXELS * 3];
             for (int i = 0; i < SurfaceTile.PIXELS; i++) {
                 int color = rgb[i];

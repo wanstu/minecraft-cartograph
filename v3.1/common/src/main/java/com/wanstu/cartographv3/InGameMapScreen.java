@@ -18,7 +18,6 @@ import static com.wanstu.cartographv3.InGameMapUi.*;
 final class InGameMapScreen extends AtlasScreenBase {
     private static final int HEADER = 31;
     private static final int ROW = 19;
-    private static final int GRID_LINE = 0x610b161b;
     static final int DEFAULT_PLAYER_SIZE = 12;
     static final int DEFAULT_MARKER_SIZE = 11;
 
@@ -429,12 +428,12 @@ final class InGameMapScreen extends AtlasScreenBase {
         for (int i = pins.size() - 1; i >= 0; i--) {
             Pin pin = pins.get(i);
             Box box = pin.glyph;
-            draw.glyph(pin.label.marker.icon, box.x() + 1, box.y() + 1, box.w(), 0x9905090b);
+            draw.glyph(pin.label.marker.icon, box.x() + 1, box.y() + 1, box.w(), MARKER_SHADOW);
             draw.glyph(pin.label.marker.icon, box.x(), box.y(), box.w(), 0xff000000 | pin.label.marker.accent());
         }
         for (Pin pin : pins) {
             if (!pin.nameVisible) continue;
-            draw.fill(pin.name, 0xcc12191d);
+            draw.fill(pin.name, MARKER_LABEL);
             draw.border(pin.name, LINE);
             draw.center(pin.label.text, pin.name, TEXT, SMALL_TEXT);
         }

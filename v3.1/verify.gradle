@@ -172,6 +172,9 @@ tasks.register('verifyV31FrontendThemes') {
         def sharedTheme = file("$commonMain/java/com/wanstu/cartographv3/CartographFrontendTheme.java").text
         def webServer = file("$commonMain/java/com/wanstu/cartographv3/CartographWebUiServer.java").text
         def dialogs = file("$commonMain/java/com/wanstu/cartographv3/InGameMapDialogs.java").text
+        def nativeUi = file("$commonMain/java/com/wanstu/cartographv3/InGameMapUi.java").text
+        def nativeTiles = file("$commonMain/java/com/wanstu/cartographv3/InGameMapTiles.java").text
+        def themeStyle = file("$commonMain/java/com/wanstu/cartographv3/FrontendThemeStyle.java").text
 
         ['SATELLITE("satellite", "原生 · 卫星")',
          'MODERN("modern", "手绘 · 现代")',
@@ -205,6 +208,34 @@ tasks.register('verifyV31FrontendThemes') {
             }
         }
 
+        ['record Palette(', 'case SATELLITE -> SATELLITE;', 'case MODERN -> MODERN;',
+         'case ANCIENT -> ANCIENT;', 'static long renderSignature()',
+         'static int[] renderPixels(SurfaceTile tile, int stride)',
+         'SatelliteSurfaceRenderer.renderPixels(tile, stride)'].each { token ->
+            if (!themeStyle.contains(token)) {
+                throw new GradleException('Shared native/map theme style is incomplete: ' + token)
+            }
+        }
+        ['FrontendThemeStyle.Palette palette = FrontendThemeStyle.palette();',
+         'BACKGROUND = palette.background();', 'PANEL = palette.panel();',
+         'MARKER_LABEL = palette.markerLabel();'].each { token ->
+            if (!nativeUi.contains(token)) {
+                throw new GradleException('Native UI theme palette is incomplete: ' + token)
+            }
+        }
+        ['FrontendThemeStyle.renderSignature()',
+         'FrontendThemeStyle.renderPixels(tile, stride)'].each { token ->
+            if (!nativeTiles.contains(token)) {
+                throw new GradleException('Native themed terrain renderer is incomplete: ' + token)
+            }
+        }
+        ['FrontendThemeStyle.renderSignature()',
+         'FrontendThemeStyle.render(facts).rgb()'].each { token ->
+            if (!webServer.contains(token)) {
+                throw new GradleException('WebUI themed tile renderer is incomplete: ' + token)
+            }
+        }
+
         ['satellite', 'modern', 'ancient'].each { theme ->
             if (!page.contains('data-theme-choice="' + theme + '"')) {
                 throw new GradleException('Missing frontend theme card: ' + theme)
@@ -216,7 +247,7 @@ tasks.register('verifyV31FrontendThemes') {
         ['FRONTEND_THEMES', 'MAP_RENDERERS', 'THEME_ICON_SYMBOLS', 'frontendTheme:\'satellite\'',
          'applyFrontendTheme()', 'selectFrontendTheme(id)', 'refreshStaticUi(true)',
          'function baseIconSymbol(raw)', 'function iconSymbol(raw)',
-         'function renderSatelliteTerrain(s)'].each { token ->
+         'function renderThemeTerrain(s)', 'function refreshThemeTerrain()'].each { token ->
             if (!app.contains(token)) {
                 throw new GradleException('Frontend theme runtime is incomplete: ' + token)
             }

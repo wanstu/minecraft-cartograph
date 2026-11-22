@@ -7,6 +7,9 @@ $settingsPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartograph
 $themePath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/CartographFrontendTheme.java'
 $serverPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/CartographWebUiServer.java'
 $dialogsPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/InGameMapDialogs.java'
+$nativeUiPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/InGameMapUi.java'
+$nativeTilesPath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/InGameMapTiles.java'
+$themeStylePath = Join-Path $root 'v3.1/common/src/main/java/com/wanstu/cartographv3/FrontendThemeStyle.java'
 
 $app = Get-Content -Raw -Encoding UTF8 $appPath
 $html = Get-Content -Raw -Encoding UTF8 $htmlPath
@@ -14,6 +17,9 @@ $sharedSettings = Get-Content -Raw -Encoding UTF8 $settingsPath
 $sharedTheme = Get-Content -Raw -Encoding UTF8 $themePath
 $server = Get-Content -Raw -Encoding UTF8 $serverPath
 $dialogs = Get-Content -Raw -Encoding UTF8 $dialogsPath
+$nativeUi = Get-Content -Raw -Encoding UTF8 $nativeUiPath
+$nativeTiles = Get-Content -Raw -Encoding UTF8 $nativeTilesPath
+$themeStyle = Get-Content -Raw -Encoding UTF8 $themeStylePath
 $errors = [System.Collections.Generic.List[string]]::new()
 
 function Require-Contains([string]$text,[string]$needle,[string]$message) {
@@ -22,8 +28,8 @@ function Require-Contains([string]$text,[string]$needle,[string]$message) {
 
 $themeRows = @(
   "satellite:{id:'satellite',label:'原生 · 卫星',layout:'technical',iconFamily:'technical',density:'compact',typography:'sans',mapRenderer:'satellite',mapReady:true}",
-  "modern:{id:'modern',label:'手绘 · 现代',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans',mapRenderer:'satellite',mapReady:false}",
-  "ancient:{id:'ancient',label:'手绘 · 古式',layout:'ancient-atlas',iconFamily:'engraved',density:'comfortable',typography:'serif',mapRenderer:'satellite',mapReady:false}"
+  "modern:{id:'modern',label:'手绘 · 现代',layout:'modern-atlas',iconFamily:'modern',density:'comfortable',typography:'sans',mapRenderer:'modern',mapReady:true}",
+  "ancient:{id:'ancient',label:'手绘 · 古式',layout:'ancient-atlas',iconFamily:'engraved',density:'comfortable',typography:'serif',mapRenderer:'ancient',mapReady:true}"
 )
 foreach ($row in $themeRows) { Require-Contains $app $row "theme registry contract missing or changed: $row" }
 
@@ -74,7 +80,10 @@ Require-Contains $app 'const THEME_UI_ICON_SYMBOLS = Object.freeze({' 'theme UI 
 Require-Contains $app 'function applyThemeUiIcons()' 'theme UI icon application hook missing'
 Require-Contains $html 'data-theme-ui-icon="map"' 'theme-aware UI icon markup missing'
 Require-Contains $app 'const MAP_RENDERERS = Object.freeze({' 'map renderer registry missing'
-Require-Contains $app 'satellite:renderSatelliteTerrain' 'satellite renderer registry entry missing'
+Require-Contains $app 'satellite:renderThemeTerrain' 'satellite renderer registry entry missing'
+Require-Contains $app 'modern:renderThemeTerrain' 'modern renderer registry entry missing'
+Require-Contains $app 'ancient:renderThemeTerrain' 'ancient renderer registry entry missing'
+Require-Contains $app 'function refreshThemeTerrain()' 'theme terrain refresh hook missing'
 Require-Contains $html 'id="interfaceThemeValue"' 'dynamic current-theme field missing'
 Require-Contains $app "interfaceThemeValue.textContent=theme.label" 'dynamic current-theme field is not wired'
 
@@ -105,8 +114,34 @@ foreach ($token in @(
 foreach ($token in @(
   "wsRequest('runtime_settings',{payload:{frontendTheme:id}})",
   'r.frontendTheme&&FRONTEND_THEMES[r.frontendTheme]',
-  'settings.frontendTheme=r.frontendTheme'
+  'settings.frontendTheme=r.frontendTheme',
+  'refreshThemeTerrain()'
 )) { Require-Contains $app $token "WebUI shared-theme synchronization is incomplete: $token" }
+
+foreach ($token in @(
+  'record Palette(',
+  'case SATELLITE -> SATELLITE;',
+  'case MODERN -> MODERN;',
+  'case ANCIENT -> ANCIENT;',
+  'static long renderSignature()',
+  'static int[] renderPixels(SurfaceTile tile, int stride)',
+  'CartographSettings.frontendTheme()',
+  'SatelliteSurfaceRenderer.renderPixels(tile, stride)'
+)) { Require-Contains $themeStyle $token "shared native/map theme style is incomplete: $token" }
+foreach ($token in @(
+  'FrontendThemeStyle.Palette palette = FrontendThemeStyle.palette();',
+  'BACKGROUND = palette.background();',
+  'PANEL = palette.panel();',
+  'MARKER_LABEL = palette.markerLabel();'
+)) { Require-Contains $nativeUi $token "native UI theme palette is incomplete: $token" }
+foreach ($token in @(
+  'FrontendThemeStyle.renderSignature()',
+  'FrontendThemeStyle.renderPixels(tile, stride)'
+)) { Require-Contains $nativeTiles $token "native themed terrain renderer is incomplete: $token" }
+foreach ($token in @(
+  'FrontendThemeStyle.renderSignature()',
+  'FrontendThemeStyle.render(facts).rgb()'
+)) { Require-Contains $server $token "WebUI themed tile renderer is incomplete: $token" }
 
 if ($html.Contains('深色（当前唯一主题）')) { $errors.Add('stale single-theme copy remains in WebUI') }
 

@@ -114,7 +114,7 @@ $browserTest = @'
     };
 
     assert(result.theme === id, id + ': data-theme mismatch');
-    assert(result.renderer === 'satellite', id + ': renderer fallback changed unexpectedly');
+    assert(result.renderer === id, id + ': active map renderer does not match theme: ' + result.renderer);
     assert(result.stored === id, id + ': theme was not persisted');
     assert(result.cardActive, id + ': selected card is not active');
     assert(result.panelDisplay !== 'none', id + ': layers panel did not open');

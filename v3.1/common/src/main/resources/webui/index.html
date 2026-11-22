@@ -74,6 +74,9 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .world .satellite{display:inline}
 .app[data-map-renderer="satellite"] .map-stage{background:#17383c}
 .map-shade{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 58%,#0610153f 100%)}
+.app[data-theme="modern"] .map-shade{background:radial-gradient(circle at center,transparent 66%,#334d3b18 100%)}
+.app[data-map-renderer="modern"] .map-stage{background:#e7ece8}
+.app[data-map-renderer="ancient"] .map-stage{background:#bca06f}
 
 .marker-layer{position:absolute;inset:0;pointer-events:none}
 .map-marker{position:absolute;left:0;top:0;z-index:12;display:flex;align-items:center;pointer-events:auto;cursor:pointer;color:white;will-change:transform;contain:layout style}
@@ -609,11 +612,11 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
             <div class="card"><div class="card-title">前端主题</div><div class="card-note">主题控制整套前端的布局、控件、图标、字体、面板质感和地图画法；三套主题共享同一份真实世界事实与后端 API。</div>
               <div class="style-cards">
                 <div class="style-card active" data-theme-choice="satellite"><span class="coming-badge">完整</span><div class="style-preview sat"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">原生 · 卫星</div><div class="style-sub">技术型顶栏 + 真实地表直接成图</div></div></div>
-                <div class="style-card" data-theme-choice="modern"><span class="coming-badge">UI 已接入</span><div class="style-preview mod"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">手绘 · 现代</div><div class="style-sub">全屏地图 + 右上悬浮工具条；底图暂回退卫星真值</div></div></div>
-                <div class="style-card" data-theme-choice="ancient"><span class="coming-badge">UI 已接入</span><div class="style-preview old"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">手绘 · 古式</div><div class="style-sub">地图册框架 + 羊皮纸控件；底图暂回退卫星真值</div></div></div>
+                <div class="style-card" data-theme-choice="modern"><span class="coming-badge">完整</span><div class="style-preview mod"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">手绘 · 现代</div><div class="style-sub">现代浅色控件 + 柔和地表色 + 轻量地形线</div></div></div>
+                <div class="style-card" data-theme-choice="ancient"><span class="coming-badge">完整</span><div class="style-preview old"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">手绘 · 古式</div><div class="style-sub">羊皮纸控件 + 古地图配色 + 墨线地形表达</div></div></div>
               </div>
             </div>
-            <div class="card"><div class="card-title">主题边界</div><div class="form-row"><div class="label">共享能力</div><div class="field readonly-field">真实地表 / 缓存 / 标点 / 结构 / 传送 / WebSocket API</div><div></div></div><div class="notice-inline"><svg class="icon"><use href="#i-info"/></svg>现代与古式主题已经可以切换整套 UI；各自的手绘地图 renderer 后续独立实现，不会重新扫描世界。</div></div>
+            <div class="card"><div class="card-title">主题边界</div><div class="form-row"><div class="label">共享能力</div><div class="field readonly-field">真实地表 / 缓存 / 标点 / 结构 / 传送 / WebSocket API</div><div></div></div><div class="notice-inline"><svg class="icon"><use href="#i-info"/></svg>现代与古式主题已同时接入 WebUI 与游戏内原生 UI；地图 renderer 基于同一份真实 SurfaceTile 事实重绘，不会重新扫描世界。</div></div>
           </div>
           <div class="subpage hidden" data-subpage="function">
             <div class="card"><div class="card-title">地图行为</div><div class="form-row"><div class="label">M 打开的位置</div><select class="field" id="frontendTarget"><option value="in_game">游戏内</option><option value="web">WebUI</option></select><div></div></div><div class="form-row"><div class="label">右键地图</div><div class="field readonly-field">添加标点 / 传送 / 复制坐标</div><div></div></div><div class="form-row"><div class="label">右键标点</div><div class="field readonly-field">传送 / 编辑 / 删除或重置</div><div></div></div><div class="form-row"><div class="label">拖拽地图</div><div></div><div class="switch on" data-switch data-setting="dragMap"></div></div></div>
