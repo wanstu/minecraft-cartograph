@@ -11,7 +11,17 @@ permissions:
   contents: read
 
 jobs:
+  theme-contract:
+    name: Frontend theme contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frontend theme architecture
+        shell: pwsh
+        run: ./scripts/verify-v31-theme.ps1
+
   build:
+    needs: theme-contract
     name: Minecraft ${{ matrix.minecraft }} / ${{ matrix.loader }}
     runs-on: ubuntu-latest
     strategy:
