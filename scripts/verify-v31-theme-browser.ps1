@@ -36,6 +36,7 @@ $browserTest = @'
     }
   };
   const assert = (condition, message) => { if (!condition) failures.push(message); };
+  const overlaps = (a,b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
   const rect = el => {
     const r = el.getBoundingClientRect();
     return {left:r.left, top:r.top, right:r.right, bottom:r.bottom, width:r.width, height:r.height};
@@ -101,6 +102,10 @@ $browserTest = @'
     assert(result.panelDisplay !== 'none', id + ': layers panel did not open');
     assert(result.panel.top >= result.stage.top - 0.5, id + ': panel starts above map viewport');
     assert(result.panel.bottom <= result.stage.bottom + 0.5, id + ': panel extends below map viewport');
+    const appStyle = getComputedStyle(app);
+    const floatTop = parseFloat(appStyle.getPropertyValue('--theme-float-top')) || 0;
+    const floatBottom = parseFloat(appStyle.getPropertyValue('--theme-float-bottom')) || 0;
+    approx(result.panelMaxHeight, result.stage.height - floatTop - floatBottom, 1.5, id + ' panel max-height');
 
     return result;
   };
@@ -117,14 +122,16 @@ $browserTest = @'
     approx(modern.stage.left, 0, 1, 'modern stage left');
     assert(modern.layout === 'modern-atlas', 'modern layout mismatch');
     assert(modern.icons === 'modern', 'modern icon family mismatch');
-    assert(modern.topbar.left > modern.panel.right + 20, 'modern floating toolbar overlaps left panel');
-    assert(modern.topbar.top >= 18 && modern.topbar.top <= 22, 'modern toolbar vertical position mismatch');
+    assert(!overlaps(modern.topbar, modern.panel), 'modern floating toolbar overlaps left panel');
+    const expectedModernTop = innerWidth <= 520 ? 6 : innerWidth <= 900 ? 10 : 20;
+    approx(modern.topbar.top, expectedModernTop, 1.5, 'modern toolbar vertical position');
 
     const ancient = choose('ancient');
-    approx(ancient.stage.top, 88, 1.5, 'ancient stage top');
-    approx(ancient.stage.left, 18, 1.5, 'ancient stage left');
-    approx(innerWidth - ancient.stage.right, 18, 1.5, 'ancient stage right inset');
-    approx(innerHeight - ancient.stage.bottom, 18, 1.5, 'ancient stage bottom inset');
+    const ancientInsets = innerWidth <= 520 ? {top:66,side:6,bottom:6} : innerWidth <= 900 ? {top:78,side:10,bottom:10} : {top:88,side:18,bottom:18};
+    approx(ancient.stage.top, ancientInsets.top, 1.5, 'ancient stage top');
+    approx(ancient.stage.left, ancientInsets.side, 1.5, 'ancient stage left');
+    approx(innerWidth - ancient.stage.right, ancientInsets.side, 1.5, 'ancient stage right inset');
+    approx(innerHeight - ancient.stage.bottom, ancientInsets.bottom, 1.5, 'ancient stage bottom inset');
     assert(ancient.layout === 'ancient-atlas', 'ancient layout mismatch');
     assert(ancient.icons === 'engraved', 'ancient icon family mismatch');
     assert(ancient.typography === 'serif', 'ancient typography mismatch');
@@ -168,44 +175,53 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   $harnessPath = Join-Path $tmp 'index.html'
   [IO.File]::WriteAllText($harnessPath, $harness, [Text.UTF8Encoding]::new($false))
-  $profile = Join-Path $tmp 'profile'
-  New-Item -ItemType Directory -Path $profile | Out-Null
-
   $browser = Find-Chromium
   $uri = [Uri]::new($harnessPath).AbsoluteUri
-  $args = @(
-    '--headless=new',
-    '--no-sandbox',
-    '--disable-gpu',
-    '--disable-dev-shm-usage',
-    '--no-first-run',
-    '--disable-background-networking',
-    '--window-size=1440,900',
-    "--user-data-dir=$profile",
-    '--dump-dom',
-    $uri
+  $viewports = @(
+    @{ Width = 1440; Height = 900 },
+    @{ Width = 820; Height = 720 },
+    @{ Width = 500; Height = 700 }
   )
-  $dump = & $browser @args 2>$null | Out-String
-  if ($LASTEXITCODE -ne 0) { throw "Headless browser exited with code $LASTEXITCODE" }
 
-  $match = [regex]::Match($dump, 'data-theme-browser-test="([^"]+)"')
-  if (-not $match.Success) { throw 'Browser test result marker was not emitted' }
+  foreach ($viewport in $viewports) {
+    $profile = Join-Path $tmp ('profile-' + $viewport.Width + 'x' + $viewport.Height)
+    New-Item -ItemType Directory -Path $profile | Out-Null
+    $args = @(
+      '--headless=new',
+      '--no-sandbox',
+      '--disable-gpu',
+      '--disable-dev-shm-usage',
+      '--no-first-run',
+      '--disable-background-networking',
+      ('--window-size=' + $viewport.Width + ',' + $viewport.Height),
+      "--user-data-dir=$profile",
+      '--dump-dom',
+      $uri
+    )
+    $dump = & $browser @args 2>$null | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Headless browser exited with code $LASTEXITCODE" }
 
-  $encoded = [System.Net.WebUtility]::HtmlDecode($match.Groups[1].Value)
-  $json = [Uri]::UnescapeDataString($encoded)
-  $result = $json | ConvertFrom-Json
+    $match = [regex]::Match($dump, 'data-theme-browser-test="([^"]+)"')
+    if (-not $match.Success) { throw 'Browser test result marker was not emitted' }
 
-  if (-not $result.ok) {
-    foreach ($failure in $result.failures) { Write-Error $failure }
-    exit 1
-  }
+    $encoded = [System.Net.WebUtility]::HtmlDecode($match.Groups[1].Value)
+    $json = [Uri]::UnescapeDataString($encoded)
+    $result = $json | ConvertFrom-Json
 
-  Write-Host ("Cartograph V3.1 theme browser smoke: OK ({0}x{1})" -f $result.viewport.width,$result.viewport.height)
-  foreach ($id in @('satellite','modern','ancient')) {
-    $t = $result.themes.$id
-    Write-Host ("  {0}: layout={1}, stage=({2},{3}) {4}x{5}, panelMax={6}" -f
-      $id,$t.layout,[math]::Round($t.stage.left),[math]::Round($t.stage.top),
-      [math]::Round($t.stage.width),[math]::Round($t.stage.height),[math]::Round($t.panelMaxHeight))
+    if (-not $result.ok) {
+      foreach ($failure in $result.failures) {
+        Write-Error ("{0}x{1}: {2}" -f $result.viewport.width,$result.viewport.height,$failure)
+      }
+      exit 1
+    }
+
+    Write-Host ("Cartograph V3.1 theme browser smoke: OK ({0}x{1})" -f $result.viewport.width,$result.viewport.height)
+    foreach ($id in @('satellite','modern','ancient')) {
+      $t = $result.themes.$id
+      Write-Host ("  {0}: layout={1}, stage=({2},{3}) {4}x{5}, panelMax={6}" -f
+        $id,$t.layout,[math]::Round($t.stage.left),[math]::Round($t.stage.top),
+        [math]::Round($t.stage.width),[math]::Round($t.stage.height),[math]::Round($t.panelMaxHeight))
+    }
   }
 }
 finally {
