@@ -119,6 +119,7 @@
     app.dataset.style=theme.mapRenderer;
     document.documentElement.dataset.cartographTheme=theme.id;
     const activeThemeLabel=q('#activeThemeLabel');if(activeThemeLabel)activeThemeLabel.textContent=theme.label;
+    const interfaceThemeValue=q('#interfaceThemeValue');if(interfaceThemeValue)interfaceThemeValue.textContent=theme.label;
     const aboutTheme=q('#aboutThemeValue');if(aboutTheme)aboutTheme.textContent=theme.label;
     const aboutRenderer=q('#aboutThemeRenderer');if(aboutRenderer)aboutRenderer.textContent=theme.mapReady?'主题地图 renderer 已启用':'主题地图 renderer 待实现；当前使用卫星真值兜底';
   }

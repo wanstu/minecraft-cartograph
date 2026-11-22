@@ -42,6 +42,8 @@ Those stay in the backend/runtime layers.
 
 Switching a theme therefore must not rescan the world, rebuild the facts cache, reconnect transport, or create another backend instance.
 
+The CI theme-contract verifier enforces the built-in theme registry, required frontend hooks, the renderer fallback declaration, the dynamic current-theme label, and the presentation-only boundary of `applyFrontendTheme()`.
+
 ## Current runtime
 
 The WebUI stores `frontendTheme` as a frontend-only preference.
