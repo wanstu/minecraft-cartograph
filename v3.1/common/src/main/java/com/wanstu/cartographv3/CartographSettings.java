@@ -23,6 +23,7 @@ final class CartographSettings {
     private static int requestBatchSize = DEFAULT_REQUEST_BATCH;
     private static int liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
     private static CartographFrontendTarget frontendTarget = CartographFrontendTarget.IN_GAME;
+    private static CartographFrontendTheme frontendTheme = CartographFrontendTheme.SATELLITE;
     private static final Map<MapMarkerStore.StructurePreset, StructureAppearance> STRUCTURE_PRESETS =
             new EnumMap<>(MapMarkerStore.StructurePreset.class);
     private static long structurePresetRevision;
@@ -46,6 +47,11 @@ final class CartographSettings {
         return frontendTarget;
     }
 
+    static synchronized CartographFrontendTheme frontendTheme() {
+        ensureLoaded();
+        return frontendTheme;
+    }
+
     static synchronized void setRequestBatchSize(int value) {
         ensureLoaded();
         requestBatchSize = Math.max(8, Math.min(256, value));
@@ -61,6 +67,12 @@ final class CartographSettings {
     static synchronized void setFrontendTarget(CartographFrontendTarget value) {
         ensureLoaded();
         frontendTarget = value == null ? CartographFrontendTarget.IN_GAME : value;
+        save();
+    }
+
+    static synchronized void setFrontendTheme(CartographFrontendTheme value) {
+        ensureLoaded();
+        frontendTheme = value == null ? CartographFrontendTheme.SATELLITE : value;
         save();
     }
 
@@ -114,6 +126,8 @@ final class CartographSettings {
                             "liveScanIntervalTicks", Integer.toString(DEFAULT_LIVE_SCAN_INTERVAL)))));
             frontendTarget = CartographFrontendTarget.parse(
                     p.getProperty("mapFrontend", CartographFrontendTarget.IN_GAME.id()));
+            frontendTheme = CartographFrontendTheme.parse(
+                    p.getProperty("frontendTheme", CartographFrontendTheme.SATELLITE.id()));
             for (var preset : MapMarkerStore.StructurePreset.values()) {
                 String key = "structurePreset." + preset.name();
                 String icon = p.getProperty(key + ".icon");
@@ -133,6 +147,7 @@ final class CartographSettings {
             requestBatchSize = DEFAULT_REQUEST_BATCH;
             liveScanIntervalTicks = DEFAULT_LIVE_SCAN_INTERVAL;
             frontendTarget = CartographFrontendTarget.IN_GAME;
+            frontendTheme = CartographFrontendTheme.SATELLITE;
         }
     }
 
@@ -149,6 +164,7 @@ final class CartographSettings {
         p.setProperty("requestBatchSize", Integer.toString(requestBatchSize));
         p.setProperty("liveScanIntervalTicks", Integer.toString(liveScanIntervalTicks));
         p.setProperty("mapFrontend", frontendTarget.id());
+        p.setProperty("frontendTheme", frontendTheme.id());
         presets.forEach((preset, appearance) -> {
             String key = "structurePreset." + preset.name();
             p.setProperty(key + ".icon", appearance.icon().name());

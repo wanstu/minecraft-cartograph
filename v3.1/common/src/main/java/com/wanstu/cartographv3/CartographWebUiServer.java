@@ -87,7 +87,8 @@ final class CartographWebUiServer implements AutoCloseable {
     private record RuntimeSettingsPayload(
             Integer requestBatchSize,
             Integer liveScanIntervalTicks,
-            String frontendTarget) {}
+            String frontendTarget,
+            String frontendTheme) {}
 
     private static final String FRONTEND_SESSION = "web";
 
@@ -367,7 +368,11 @@ final class CartographWebUiServer implements AutoCloseable {
         result.put("player", playerJson);
         result.put("runtime", Map.of(
                 "cachedCount", backend.cachedCount(),
-                "pendingCount", backend.pendingCount()));
+                "pendingCount", backend.pendingCount(),
+                "requestBatchSize", CartographSettings.requestBatchSize(),
+                "liveScanIntervalTicks", CartographSettings.liveScanIntervalTicks(),
+                "frontendTarget", CartographSettings.frontendTarget().id(),
+                "frontendTheme", CartographSettings.frontendTheme().id()));
         return result;
     }
 
@@ -400,7 +405,8 @@ final class CartographWebUiServer implements AutoCloseable {
                 "pendingCount", backend.pendingCount(),
                 "requestBatchSize", CartographSettings.requestBatchSize(),
                 "liveScanIntervalTicks", CartographSettings.liveScanIntervalTicks(),
-                "frontendTarget", CartographSettings.frontendTarget().id()));
+                "frontendTarget", CartographSettings.frontendTarget().id(),
+                "frontendTheme", CartographSettings.frontendTheme().id()));
         return result;
     }
 
@@ -774,6 +780,10 @@ final class CartographWebUiServer implements AutoCloseable {
                             if (settings.frontendTarget() != null) {
                                 CartographSettings.setFrontendTarget(
                                         CartographFrontendTarget.parse(settings.frontendTarget()));
+                            }
+                            if (settings.frontendTheme() != null) {
+                                CartographSettings.setFrontendTheme(
+                                        CartographFrontendTheme.parse(settings.frontendTheme()));
                             }
                             return null;
                         });

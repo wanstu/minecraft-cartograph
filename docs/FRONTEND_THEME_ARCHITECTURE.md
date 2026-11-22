@@ -46,12 +46,14 @@ The CI theme-contract verifier enforces the built-in theme registry, required fr
 
 ## Current runtime
 
-The WebUI stores `frontendTheme` as a frontend-only preference.
+`frontendTheme` is persisted once in Minecraft-owned `CartographSettings` and shared by the in-game settings UI and WebUI. WebUI localStorage keeps only a temporary/fallback copy for startup and disconnected rendering; when connected, the Minecraft runtime value is authoritative.
 
 The loopback server intentionally remains a thin transport and currently serves the two
-frontend bundles (`index.html` and `app.js`). Theme implementation therefore stays
-inside those frontend bundles instead of adding theme-specific HTTP routes. Shared
-controls consume theme surface tokens such as `--theme-control-bg`,
+frontend bundles (`index.html` and `app.js`). The existing `runtime_settings` WebSocket
+message carries `frontendTheme` between Minecraft and WebUI; it does not introduce a
+theme-specific backend service. Theme presentation therefore stays inside the frontend
+bundle while theme identity is a shared client/runtime setting. Shared controls consume
+theme surface tokens such as `--theme-control-bg`,
 `--theme-control-border`, `--theme-control-hover` and
 `--theme-surface-muted`, so new controls inherit the active theme by default.
 
@@ -126,7 +128,7 @@ A future renderer must not require a second world scan merely because the user c
 
 ## Compatibility rule
 
-Theme identity is frontend-only and may evolve without changing the backend API.
+Theme identity is presentation-only but shared across frontends. It may evolve without changing world facts or `CartographBackendApi`; the in-game selector and WebUI both read/write the same `CartographSettings.frontendTheme` value.
 
 Backend feature additions should expose semantic capability through `CartographBackendApi`; theme implementations decide how that capability looks.
 

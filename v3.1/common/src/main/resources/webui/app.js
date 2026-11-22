@@ -124,10 +124,18 @@
     const aboutTheme=q('#aboutThemeValue');if(aboutTheme)aboutTheme.textContent=theme.label;
     const aboutRenderer=q('#aboutThemeRenderer');if(aboutRenderer)aboutRenderer.textContent=theme.mapReady?'主题地图 renderer 已启用':'主题地图 renderer 待实现；当前使用卫星真值兜底';
   }
-  function selectFrontendTheme(id){
+  async function selectFrontendTheme(id){
     if(!FRONTEND_THEMES[id])return;
+    const previous=settings.frontendTheme;
     settings.frontendTheme=id;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
     const theme=currentFrontendTheme();
+    if(socket&&socket.readyState===WebSocket.OPEN){
+      try{await wsRequest('runtime_settings',{payload:{frontendTheme:id}});}
+      catch(_){
+        settings.frontendTheme=previous;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
+        toast('前端主题保存失败');return;
+      }
+    }
     toast(theme.mapReady?'已切换到 '+theme.label:'已切换到 '+theme.label+'；地图暂使用卫星真值');
   }
   function worldKey(s){ return String(s && s.worldId || '') + '|' + String(s && s.dimension || ''); }
@@ -225,6 +233,12 @@
     if(live.player)serverState.player=live.player;
     if(live.runtime)serverState.runtime={...previousRuntime,...live.runtime};
 
+    if(live.runtime&&(previousRuntime?.frontendTheme!==serverState.runtime?.frontendTheme||
+                     previousRuntime?.frontendTarget!==serverState.runtime?.frontendTarget||
+                     previousRuntime?.requestBatchSize!==serverState.runtime?.requestBatchSize||
+                     previousRuntime?.liveScanIntervalTicks!==serverState.runtime?.liveScanIntervalTicks)){
+      syncRuntimeSettings();
+    }
     if(previousRuntime?.cachedCount!==serverState.runtime?.cachedCount)renderStatus();
     if(wasConnected!==serverState.connected){
       cancelCursorLookup();
@@ -822,8 +836,12 @@
   }
   function syncRuntimeSettings(){
     const r=serverState&&serverState.runtime;if(!r)return;
-    if(r.frontendTarget)q('#frontendTarget').value=r.frontendTarget;q('#requestRange').value=r.requestBatchSize;q('#requestValue').textContent=String(r.requestBatchSize);
-    q('#scanRange').value=r.liveScanIntervalTicks;q('#scanValue').textContent=r.liveScanIntervalTicks+' tick / '+(r.liveScanIntervalTicks/20).toFixed(2)+' s';
+    if(r.frontendTheme&&FRONTEND_THEMES[r.frontendTheme]&&settings.frontendTheme!==r.frontendTheme){
+      settings.frontendTheme=r.frontendTheme;saveSettings();applyFrontendTheme();renderSettings();refreshStaticUi(true);scheduleRender(DRAW_ALL);
+    }
+    if(r.frontendTarget)q('#frontendTarget').value=r.frontendTarget;
+    if(r.requestBatchSize!=null){q('#requestRange').value=r.requestBatchSize;q('#requestValue').textContent=String(r.requestBatchSize);}
+    if(r.liveScanIntervalTicks!=null){q('#scanRange').value=r.liveScanIntervalTicks;q('#scanValue').textContent=r.liveScanIntervalTicks+' tick / '+(r.liveScanIntervalTicks/20).toFixed(2)+' s';}
   }
 
   async function queryPoint(x,z){return wsRequest('point',{x:Math.round(x),z:Math.round(z)});}

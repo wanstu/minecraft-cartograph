@@ -252,7 +252,11 @@ final class InGameMapDialogs {
                         inGame ? CartographFrontendTarget.WEB : CartographFrontendTarget.IN_GAME));
             }
             case 1 -> action(ui, row, "WebUI", "在浏览器打开", openWeb);
-            case 2 -> summary(ui, row, "地图风格", "卫星 · 写实");
+            case 2 -> {
+                CartographFrontendTheme theme = CartographSettings.frontendTheme();
+                action(ui, row, "前端主题", theme.label(),
+                        () -> CartographSettings.setFrontendTheme(theme.next()));
+            }
             case 3 -> toggle(ui, row, "显示坐标", Flag.COORDS);
             case 4 -> toggle(ui, row, "玩家定位圆环", Flag.PLAYER_RING);
             case 5 -> toggle(ui, row, "拖拽地图", Flag.DRAG_MAP);
@@ -508,8 +512,8 @@ final class InGameMapDialogs {
         ui.smallText("地图册 · Map Atlas", box.x() + 50, box.y() + 37, box.w() - 60, TEXT);
         ui.smallText("Cartograph V3.1 · 游戏内地图", box.x() + 50, box.y() + 52, box.w() - 60, MUTED);
         ui.divider(box.x() + 12, box.y() + 71, box.w() - 24);
-        ui.text("地图风格", box.x() + 13, box.y() + 83, SOFT);
-        ui.text("卫星 · 写实", box.x() + 83, box.y() + 83, TEXT);
+        ui.text("前端主题", box.x() + 13, box.y() + 83, SOFT);
+        ui.text(CartographSettings.frontendTheme().label(), box.x() + 83, box.y() + 83, TEXT);
         ui.text("地图数据", box.x() + 13, box.y() + 100, SOFT);
         ui.smallText("已生成区块的地表数据", box.x() + 83, box.y() + 100, box.w() - 93, TEXT);
         ui.button(new Box(box.right() - 55, box.bottom() - 25, 43, 17), "关闭", true, this::close);

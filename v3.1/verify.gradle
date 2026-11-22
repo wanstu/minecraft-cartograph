@@ -168,6 +168,42 @@ tasks.register('verifyV31FrontendThemes') {
     doLast {
         def app = file("$commonMain/resources/webui/app.js").text
         def page = file("$commonMain/resources/webui/index.html").text
+        def sharedSettings = file("$commonMain/java/com/wanstu/cartographv3/CartographSettings.java").text
+        def sharedTheme = file("$commonMain/java/com/wanstu/cartographv3/CartographFrontendTheme.java").text
+        def webServer = file("$commonMain/java/com/wanstu/cartographv3/CartographWebUiServer.java").text
+        def dialogs = file("$commonMain/java/com/wanstu/cartographv3/InGameMapDialogs.java").text
+
+        ['SATELLITE("satellite", "原生 · 卫星")',
+         'MODERN("modern", "手绘 · 现代")',
+         'ANCIENT("ancient", "手绘 · 古式")',
+         'CartographFrontendTheme next()',
+         'static CartographFrontendTheme parse(String raw)'].each { token ->
+            if (!sharedTheme.contains(token)) {
+                throw new GradleException('Shared frontend theme enum is incomplete: ' + token)
+            }
+        }
+        ['private static CartographFrontendTheme frontendTheme = CartographFrontendTheme.SATELLITE;',
+         'static synchronized CartographFrontendTheme frontendTheme()',
+         'static synchronized void setFrontendTheme(CartographFrontendTheme value)',
+         'p.setProperty("frontendTheme", frontendTheme.id())'].each { token ->
+            if (!sharedSettings.contains(token)) {
+                throw new GradleException('Shared frontend theme persistence is incomplete: ' + token)
+            }
+        }
+        ['String frontendTheme) {}',
+         '"frontendTheme", CartographSettings.frontendTheme().id()',
+         'CartographSettings.setFrontendTheme(',
+         'CartographFrontendTheme.parse(settings.frontendTheme())'].each { token ->
+            if (!webServer.contains(token)) {
+                throw new GradleException('WebUI runtime theme bridge is incomplete: ' + token)
+            }
+        }
+        ['action(ui, row, "前端主题", theme.label()',
+         'CartographSettings.setFrontendTheme(theme.next())'].each { token ->
+            if (!dialogs.contains(token)) {
+                throw new GradleException('Native theme selector is incomplete: ' + token)
+            }
+        }
 
         ['satellite', 'modern', 'ancient'].each { theme ->
             if (!page.contains('data-theme-choice="' + theme + '"')) {
@@ -216,7 +252,7 @@ tasks.register('verifyV31FrontendThemes') {
         }
 
         def start = app.indexOf('function applyFrontendTheme()')
-        def end = app.indexOf('function worldKey(', start)
+        def end = app.indexOf('async function selectFrontendTheme(', start)
         if (start < 0 || end <= start) {
             throw new GradleException('Cannot inspect frontend theme runtime boundary')
         }
