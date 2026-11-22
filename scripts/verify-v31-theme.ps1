@@ -62,6 +62,9 @@ foreach ($hook in @(
   'app.dataset.mapRenderer='
 )) { Require-Contains $app $hook "applyFrontendTheme hook missing: $hook" }
 
+Require-Contains $app 'const THEME_UI_ICON_SYMBOLS = Object.freeze({' 'theme UI icon registry missing'
+Require-Contains $app 'function applyThemeUiIcons()' 'theme UI icon application hook missing'
+Require-Contains $html 'data-theme-ui-icon="map"' 'theme-aware UI icon markup missing'
 Require-Contains $app 'const MAP_RENDERERS = Object.freeze({' 'map renderer registry missing'
 Require-Contains $app 'satellite:renderSatelliteTerrain' 'satellite renderer registry entry missing'
 Require-Contains $html 'id="interfaceThemeValue"' 'dynamic current-theme field missing'

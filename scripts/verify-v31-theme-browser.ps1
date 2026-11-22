@@ -85,6 +85,15 @@ $browserTest = @'
       density: app.dataset.themeDensity,
       typography: app.dataset.themeTypography,
       renderer: app.dataset.mapRenderer,
+      uiIcons: {
+        map: document.querySelector('[data-nav="map"] [data-theme-ui-icon]').getAttribute('href'),
+        markers: document.querySelector('[data-nav="markers"] [data-theme-ui-icon]').getAttribute('href'),
+        layers: document.querySelector('[data-nav="layers"] [data-theme-ui-icon]').getAttribute('href'),
+        settings: document.querySelector('[data-nav="settings"] [data-theme-ui-icon]').getAttribute('href'),
+        about: document.querySelector('[data-nav="about"] [data-theme-ui-icon]').getAttribute('href'),
+        locate: document.querySelector('#locateBtn [data-theme-ui-icon]').getAttribute('href'),
+        home: document.querySelector('#homeBtn [data-theme-ui-icon]').getAttribute('href')
+      },
       activeLabel: document.querySelector('#activeThemeLabel').textContent.trim(),
       settingsLabel: document.querySelector('#interfaceThemeValue').textContent.trim(),
       aboutLabel: document.querySelector('#aboutThemeValue').textContent.trim(),
@@ -169,9 +178,17 @@ $browserTest = @'
       modern: '手绘 · 现代',
       ancient: '手绘 · 古式'
     };
+    const expectedUiIcons = {
+      satellite:{map:'#i-map',markers:'#i-pin',layers:'#i-layers',settings:'#i-settings',about:'#i-info',locate:'#i-locate',home:'#i-home'},
+      modern:{map:'#i-theme-modern-map',markers:'#i-theme-modern-pin',layers:'#i-theme-modern-layers',settings:'#i-theme-modern-settings',about:'#i-theme-modern-info',locate:'#i-theme-modern-locate',home:'#i-theme-modern-home'},
+      ancient:{map:'#i-theme-engraved-map',markers:'#i-theme-engraved-pin',layers:'#i-theme-engraved-layers',settings:'#i-theme-engraved-settings',about:'#i-theme-engraved-info',locate:'#i-theme-engraved-locate',home:'#i-theme-engraved-home'}
+    };
     for (const item of [satellite, modern, ancient]) {
       for (const label of [item.activeLabel, item.settingsLabel, item.aboutLabel]) {
         assert(label === expectedLabels[item.id], item.id + ': dynamic theme label mismatch: ' + label);
+      }
+      for (const [semantic,href] of Object.entries(expectedUiIcons[item.id])) {
+        assert(item.uiIcons[semantic] === href, item.id + ': UI icon family mismatch for ' + semantic + ': ' + item.uiIcons[semantic]);
       }
     }
     assert(satellite.footerBg !== modern.footerBg, 'modern settings footer still uses satellite surface');

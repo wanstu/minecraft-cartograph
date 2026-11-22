@@ -118,6 +118,7 @@
     app.dataset.themeTypography=theme.typography;
     app.dataset.mapRenderer=theme.mapRenderer;
     document.documentElement.dataset.cartographTheme=theme.id;
+    applyThemeUiIcons();
     const activeThemeLabel=q('#activeThemeLabel');if(activeThemeLabel)activeThemeLabel.textContent=theme.label;
     const interfaceThemeValue=q('#interfaceThemeValue');if(interfaceThemeValue)interfaceThemeValue.textContent=theme.label;
     const aboutTheme=q('#aboutThemeValue');if(aboutTheme)aboutTheme.textContent=theme.label;
@@ -265,6 +266,32 @@
     toastTimer=setTimeout(()=>el.classList.remove('show'),1800);
   }
   function setConnection(on){ app.dataset.connection=on?'online':'offline'; }
+
+  const THEME_UI_ICON_SYMBOLS = Object.freeze({
+    modern:Object.freeze({
+      map:'i-theme-modern-map',markers:'i-theme-modern-pin',layers:'i-theme-modern-layers',
+      settings:'i-theme-modern-settings',about:'i-theme-modern-info',locate:'i-theme-modern-locate',
+      home:'i-theme-modern-home'
+    }),
+    engraved:Object.freeze({
+      map:'i-theme-engraved-map',markers:'i-theme-engraved-pin',layers:'i-theme-engraved-layers',
+      settings:'i-theme-engraved-settings',about:'i-theme-engraved-info',locate:'i-theme-engraved-locate',
+      home:'i-theme-engraved-home'
+    })
+  });
+  const BASE_UI_ICON_SYMBOLS = Object.freeze({
+    map:'i-map',markers:'i-pin',layers:'i-layers',settings:'i-settings',about:'i-info',
+    locate:'i-locate',home:'i-home'
+  });
+  function uiIconSymbol(raw){
+    const semantic=String(raw||'').toLowerCase();
+    const family=currentFrontendTheme().iconFamily;
+    const themed=THEME_UI_ICON_SYMBOLS[family];
+    return themed&&themed[semantic] ? themed[semantic] : (BASE_UI_ICON_SYMBOLS[semantic]||'i-info');
+  }
+  function applyThemeUiIcons(){
+    qa('[data-theme-ui-icon]').forEach(use=>use.setAttribute('href','#'+uiIconSymbol(use.dataset.themeUiIcon)));
+  }
 
   const THEME_ICON_SYMBOLS = Object.freeze({
     modern:Object.freeze({
