@@ -188,9 +188,18 @@ tasks.register('verifyV31FrontendThemes') {
         ['app.dataset.themeLayout=theme.layout',
          'app.dataset.themeIcons=theme.iconFamily',
          'app.dataset.themeDensity=theme.density',
-         'app.dataset.themeTypography=theme.typography'].each { token ->
+         'app.dataset.themeTypography=theme.typography',
+         "q('#activeThemeLabel')"].each { token ->
             if (!app.contains(token)) {
                 throw new GradleException('Theme capability is not applied: ' + token)
+            }
+        }
+
+        ['id="activeThemeLabel"',
+         '.app[data-theme-layout="modern-atlas"] .map-stage{inset:0}',
+         '.app[data-theme-layout="modern-atlas"] .topbar{left:auto;right:22px'].each { token ->
+            if (!page.contains(token)) {
+                throw new GradleException('Modern theme layout contract is incomplete: ' + token)
             }
         }
 

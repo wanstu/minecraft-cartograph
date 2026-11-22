@@ -81,6 +81,20 @@ At this stage:
 
 The fallback is intentional. It keeps theme switching useful without pretending the hand-drawn renderer already exists.
 
+## Current UI baselines
+
+The satellite theme keeps the technical full-width header used by the current production WebUI.
+
+The modern theme follows the earlier high-fidelity map-first direction in
+`preview/cartograph-map-styles-hifi.html`: the terrain occupies the full viewport,
+the primary navigation becomes a compact floating toolbar at the upper right, and
+markers/layers remain independent floating panels. Responsive rules keep that toolbar
+usable on narrow windows.
+
+The ancient theme already has an independent palette, typography, density and layout
+identity. Its stronger atlas/paper composition will be refined separately instead of
+being implemented as a sepia filter on the modern theme.
+
 ## Future theme renderer contract
 
 Modern and ancient map renderers must derive from the same facts-only tiles already used by satellite rendering.

@@ -142,7 +142,16 @@ svg.icon.solid{fill:currentColor;stroke:none}
 
 /* Frontend Theme Runtime: themes own presentation only; terrain facts stay shared. */
 .app[data-theme]{font-family:var(--theme-font)}
-.app[data-theme-layout="modern-atlas"] .topbar{padding-inline:18px}.app[data-theme-layout="modern-atlas"] .nav-btn{min-width:84px}
+.app[data-theme-layout="modern-atlas"] .map-stage{inset:0}
+.app[data-theme-layout="modern-atlas"] .topbar{left:auto;right:22px;top:20px;height:60px;padding:6px;gap:4px;border:1px solid #9aa9a0;border-radius:14px;background:#f4f7f4f2;box-shadow:0 14px 42px #23372a42}
+.app[data-theme-layout="modern-atlas"] .topbar>.brand,.app[data-theme-layout="modern-atlas"] .topbar>.location-info,.app[data-theme-layout="modern-atlas"] .topbar>.top-spacer,.app[data-theme-layout="modern-atlas"] .topbar>.sep-v{display:none}
+.app[data-theme-layout="modern-atlas"] .nav{height:48px;gap:3px}
+.app[data-theme-layout="modern-atlas"] .nav-btn{min-width:54px;height:48px;padding:4px 8px;border:1px solid transparent;border-radius:9px;border-bottom-width:1px;gap:2px}
+.app[data-theme-layout="modern-atlas"] .nav-btn .icon{width:19px;height:19px}.app[data-theme-layout="modern-atlas"] .nav-btn span{font-size:11px;font-weight:650}
+.app[data-theme-layout="modern-atlas"] .nav-btn:hover,.app[data-theme-layout="modern-atlas"] .nav-btn.active{border-color:#91a198;background:#dfe9e2;color:#23342a}
+.app[data-theme-layout="modern-atlas"] .window-close{width:48px;height:48px;margin:0;border:1px solid transparent;border-radius:9px;color:#8b4f48}.app[data-theme-layout="modern-atlas"] .window-close:hover{border-color:#c5a09b;background:#f2e5e3}
+.app[data-theme-layout="modern-atlas"] .floating-panel{top:20px}
+.app[data-theme-layout="modern-atlas"] .webui-offline{top:94px}
 .app[data-theme-layout="ancient-atlas"] .topbar{padding-inline:26px}.app[data-theme-layout="ancient-atlas"] .brand{letter-spacing:.045em}.app[data-theme-layout="ancient-atlas"] .nav-btn{min-width:94px}
 .app[data-theme-icons="modern"] svg.icon{stroke-width:1.65}.app[data-theme-icons="engraved"] svg.icon{stroke-width:1.45}
 .app[data-theme-density="comfortable"] .panel-head,.app[data-theme-density="comfortable"] .modal-head{height:52px}
@@ -180,6 +189,15 @@ svg.icon.solid{fill:currentColor;stroke:none}
 @media(max-width:900px){
   .location-info{display:none}.nav-btn{min-width:70px;padding-inline:9px}.settings-layout{grid-template-columns:150px 1fr}.settings-nav-item{padding-inline:8px}
   .form-row{grid-template-columns:125px 1fr 72px}.performance-line{grid-template-columns:125px 1fr 80px}.performance-help{margin-left:139px}.structure-head,.structure-row{grid-template-columns:125px 1fr 70px}
+  .app[data-theme-layout="modern-atlas"] .topbar{right:10px;top:10px;height:56px;padding:4px}
+  .app[data-theme-layout="modern-atlas"] .nav{height:46px}.app[data-theme-layout="modern-atlas"] .nav-btn{min-width:48px;height:46px;padding-inline:5px}
+  .app[data-theme-layout="modern-atlas"] .window-close{width:44px;height:46px}.app[data-theme-layout="modern-atlas"] .webui-offline{top:76px}
+}
+@media(max-width:520px){
+  .app[data-theme-layout="modern-atlas"] .topbar{right:6px;top:6px;height:50px;gap:1px}
+  .app[data-theme-layout="modern-atlas"] .nav{height:42px;gap:1px}.app[data-theme-layout="modern-atlas"] .nav-btn{min-width:40px;height:42px;padding:3px}
+  .app[data-theme-layout="modern-atlas"] .nav-btn .icon{width:17px;height:17px}.app[data-theme-layout="modern-atlas"] .nav-btn span{font-size:9px}
+  .app[data-theme-layout="modern-atlas"] .window-close{width:38px;height:42px}.app[data-theme-layout="modern-atlas"] .webui-offline{top:64px}
 }
 
 /* usability pass */
@@ -398,7 +416,7 @@ kbd.key.capturing{border-color:#69b6f8;color:#8dcbff;box-shadow:0 0 0 1px #69b6f
   <header class="topbar">
     <div class="brand"><svg class="icon"><use href="#i-map"/></svg><span>地图册</span><small>Map Atlas · V3.1 WebUI</small></div>
     <div class="sep-v"></div>
-    <div class="location-info"><svg class="icon"><use href="#i-map"/></svg><span>卫星 · 写实</span><div class="sep-v" style="margin:0 4px;height:18px"></div><span id="mapDataStatus">结构 0 · 标点 0</span></div>
+    <div class="location-info"><svg class="icon"><use href="#i-map"/></svg><span id="activeThemeLabel">原生 · 卫星</span><div class="sep-v" style="margin:0 4px;height:18px"></div><span id="mapDataStatus">结构 0 · 标点 0</span></div>
     <div class="top-spacer"></div>
     <nav class="nav">
       <button class="nav-btn active" data-nav="map"><svg class="icon"><use href="#i-map"/></svg><span>地图</span></button>
