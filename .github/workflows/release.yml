@@ -19,6 +19,9 @@ jobs:
       - name: Verify frontend theme architecture
         shell: pwsh
         run: ./scripts/verify-v31-theme.ps1
+      - name: Verify frontend themes in Chromium
+        shell: pwsh
+        run: ./scripts/verify-v31-theme-browser.ps1
 
   build:
     needs: theme-contract
