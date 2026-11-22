@@ -37,6 +37,11 @@
   const HIDDEN_BY_DEFAULT = new Set([
     'mineshaft','trial_chambers','ancient_city','stronghold','buried_treasure'
   ]);
+  const FRONTEND_THEMES = Object.freeze({
+    satellite:{id:'satellite',label:'原生 · 卫星',mapRenderer:'satellite',mapReady:true},
+    modern:{id:'modern',label:'手绘 · 现代',mapRenderer:'satellite',mapReady:false},
+    ancient:{id:'ancient',label:'手绘 · 古式',mapRenderer:'satellite',mapReady:false}
+  });
 
   const defaults = {
     showCoords:true, playerRing:true, labels:true, custom:true, structures:true,
@@ -44,7 +49,7 @@
     playerSize:24, playerColor:'#FFE14E', markerScale:35,
     markerDefaultIcon:'pin', markerDefaultColor:'#FFD34E',
     markerDefaultSize:22, hideLabelsLowZoom:true, avoidLabels:true,
-    debug:false, structureFilters:{}
+    frontendTheme:'satellite', debug:false, structureFilters:{}
   };
 
   let settings = loadJson(LOCAL_KEY, defaults);
@@ -99,6 +104,22 @@
     catch(_){/* The current session still uses the in-memory state. */}
   }
   function saveSettings(){ saveJson(LOCAL_KEY,settings); }
+  function currentFrontendTheme(){return FRONTEND_THEMES[settings.frontendTheme]||FRONTEND_THEMES.satellite;}
+  function applyFrontendTheme(){
+    const theme=currentFrontendTheme();
+    settings.frontendTheme=theme.id;
+    app.dataset.theme=theme.id;
+    app.dataset.style=theme.mapRenderer;
+    document.documentElement.dataset.cartographTheme=theme.id;
+    const aboutTheme=q('#aboutThemeValue');if(aboutTheme)aboutTheme.textContent=theme.label;
+    const aboutRenderer=q('#aboutThemeRenderer');if(aboutRenderer)aboutRenderer.textContent=theme.mapReady?'主题地图 renderer 已启用':'主题地图 renderer 待实现；当前使用卫星真值兜底';
+  }
+  function selectFrontendTheme(id){
+    if(!FRONTEND_THEMES[id])return;
+    settings.frontendTheme=id;saveSettings();applyFrontendTheme();renderSettings();scheduleRender(DRAW_ALL);
+    const theme=currentFrontendTheme();
+    toast(theme.mapReady?'已切换到 '+theme.label:'已切换到 '+theme.label+'；地图暂使用卫星真值');
+  }
   function worldKey(s){ return String(s && s.worldId || '') + '|' + String(s && s.dimension || ''); }
   function saveView(){
     if(!serverState)return;
@@ -820,6 +841,7 @@
     q('#markerScaleRange').value=settings.markerScale;q('#markerScaleValue').textContent=settings.markerScale+'%';q('#markerDefaultColor').value=settings.markerDefaultColor;q('#markerDefaultSwatch').style.background=settings.markerDefaultColor;q('#markerDefaultColorText').textContent=settings.markerDefaultColor.toUpperCase();
     q('#markerDefaultSize').value=settings.markerDefaultSize;q('#markerDefaultSizeValue').textContent=settings.markerDefaultSize+' px';updateIconSelect(q('#markerDefaultIconSelect'),settings.markerDefaultIcon);
     qa('[data-player-icon]').forEach(el=>el.classList.toggle('active',el.dataset.playerIcon===settings.playerIcon));
+    qa('[data-theme-choice]').forEach(el=>el.classList.toggle('active',el.dataset.themeChoice===settings.frontendTheme));
   }
   function updateIconSelect(el,icon){const left=q('.left',el);if(!left)return;left.innerHTML='<svg class="icon"><use href="#'+iconSymbol(icon)+'"/></svg><span>'+escapeHtml(iconLabel(icon))+'</span>';el.dataset.value=icon;}
   function openIconDropdown(anchor,current,onSelect,extraIcons=[]){
@@ -868,6 +890,7 @@
     qa('[data-panel-close]').forEach(b=>b.onclick=hidePanels);qa('[data-about-close]').forEach(b=>b.onclick=closeModal);qa('[data-editor-close]').forEach(b=>b.onclick=closeModal);qa('[data-modal-close]').forEach(b=>b.onclick=closeModal);
     qa('.settings-nav-item').forEach(el=>el.onclick=()=>activateSettingsPage(el.dataset.page));qa('.subtab').forEach(tab=>tab.onclick=()=>{qa('.subtab').forEach(x=>x.classList.remove('active'));tab.classList.add('active');qa('[data-subpage]').forEach(x=>x.classList.toggle('hidden',x.dataset.subpage!==tab.dataset.sub));});
     qa('[data-switch][data-setting]').forEach(sw=>sw.onclick=()=>{const k=sw.dataset.setting;if(!Object.prototype.hasOwnProperty.call(settings,k))return;settings[k]=!settings[k];syncSwitches();scheduleRender();saveSettings();});
+    qa('[data-theme-choice]').forEach(card=>card.onclick=()=>selectFrontendTheme(card.dataset.themeChoice));
     qa('[data-player-icon]').forEach(b=>b.onclick=()=>{settings.playerIcon=b.dataset.playerIcon;saveSettings();renderSettings();scheduleRender();});
     q('#playerSize').oninput=e=>{settings.playerSize=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#playerColor').oninput=e=>{settings.playerColor=e.target.value.toUpperCase();saveSettings();renderSettings();scheduleRender();};
     q('#markerScaleRange').oninput=e=>{settings.markerScale=Number(e.target.value);saveSettings();renderSettings();scheduleRender();};q('#markerDefaultColor').oninput=e=>{settings.markerDefaultColor=e.target.value.toUpperCase();saveSettings();renderSettings();};
@@ -954,6 +977,6 @@
   }
 
   new ResizeObserver(resizeCanvas).observe(mapStage);
-  patchCopy();bind();renderSettings();renderHud();resizeCanvas();setConnection(false);app.dataset.webui='loaded';connectSocket();
+  patchCopy();applyFrontendTheme();bind();renderSettings();renderHud();resizeCanvas();setConnection(false);app.dataset.webui='loaded';connectSocket();
   window.addEventListener('beforeunload',()=>{if(socket)socket.close(1000,'page unload');});
 })();

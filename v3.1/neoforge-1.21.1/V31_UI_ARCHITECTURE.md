@@ -127,6 +127,21 @@ Rendered pixels are not authoritative data and are not persisted in the world fa
 cache. Satellite, modern hand-drawn, ancient hand-drawn and future themes derive
 their presentation from the same facts.
 
+## Frontend themes
+
+A theme is a complete presentation package, not only a map-style switch. A theme may
+change layout, controls, icons, typography, panels, overlays, HUD treatment and map
+composition while consuming the same `CartographBackendApi` contract.
+
+The built-in theme identities are `satellite`, `modern` and `ancient`. Theme
+selection is frontend-only state and must not rescan the world, rebuild the persistent
+facts cache, reconnect transport or create a second backend instance.
+
+The current theme runtime enables all three UI themes. Only the satellite map renderer
+is complete; modern and ancient currently fall back to the satellite renderer until
+their own derived hand-drawn renderers are implemented. See
+`docs/FRONTEND_THEME_ARCHITECTURE.md` for the contract.
+
 ## Frontend responsibility
 
 A frontend is responsible for presentation and interaction only:

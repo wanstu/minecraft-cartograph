@@ -164,8 +164,45 @@ tasks.register('verifyV31WebSocketTransport') {
     }
 }
 
+tasks.register('verifyV31FrontendThemes') {
+    doLast {
+        def app = file("$commonMain/resources/webui/app.js").text
+        def page = file("$commonMain/resources/webui/index.html").text
+
+        ['satellite', 'modern', 'ancient'].each { theme ->
+            if (!page.contains('data-theme-choice="' + theme + '"')) {
+                throw new GradleException('Missing frontend theme card: ' + theme)
+            }
+            if (!app.contains(theme + ":{id:'" + theme + "'")) {
+                throw new GradleException('Missing frontend theme registry entry: ' + theme)
+            }
+        }
+        ['FRONTEND_THEMES', 'frontendTheme:\'satellite\'',
+         'applyFrontendTheme()', 'selectFrontendTheme(id)'].each { token ->
+            if (!app.contains(token)) {
+                throw new GradleException('Frontend theme runtime is incomplete: ' + token)
+            }
+        }
+
+        def start = app.indexOf('function applyFrontendTheme()')
+        def end = app.indexOf('function worldKey(', start)
+        if (start < 0 || end <= start) {
+            throw new GradleException('Cannot inspect frontend theme runtime boundary')
+        }
+        def themeRuntime = app.substring(start, end)
+        ['wsRequest(', 'connectSocket(', 'sendViewport', 'tileCache.clear',
+         'regionCache.clear'].each { forbidden ->
+            if (themeRuntime.contains(forbidden)) {
+                throw new GradleException(
+                    'Frontend theme switching must not own backend/cache/transport work: ' + forbidden)
+            }
+        }
+    }
+}
+
 tasks.named('check').configure {
     dependsOn tasks.named('verifyV3Isolation')
     dependsOn tasks.named('verifyV31WebUiBoundary')
     dependsOn tasks.named('verifyV31WebSocketTransport')
+    dependsOn tasks.named('verifyV31FrontendThemes')
 }
