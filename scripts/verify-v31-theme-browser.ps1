@@ -103,6 +103,7 @@ $browserTest = @'
       stage: rect(stage),
       topbar: rect(topbar),
       panel: rect(panel),
+      panelHeadHeight: rect(panel.querySelector('.panel-head')).height,
       rightControls: rect(rightControls),
       coordBox: rect(coordBox),
       scaleBox: rect(scaleBox),
@@ -191,6 +192,9 @@ $browserTest = @'
         assert(item.uiIcons[semantic] === href, item.id + ': UI icon family mismatch for ' + semantic + ': ' + item.uiIcons[semantic]);
       }
     }
+    assert(modern.panelHeadHeight >= satellite.panelHeadHeight + 1.5, 'modern comfortable density is not applied to panel headers');
+    assert(ancient.panelHeadHeight >= satellite.panelHeadHeight + 1.5, 'ancient comfortable density is not applied to panel headers');
+    assert(/Segoe UI|sans-serif/i.test(modern.fontFamily), 'modern UI font stack is not active');
     assert(satellite.footerBg !== modern.footerBg, 'modern settings footer still uses satellite surface');
     assert(satellite.footerBg !== ancient.footerBg, 'ancient settings footer still uses satellite surface');
     assert(modern.footerBg !== ancient.footerBg, 'modern and ancient settings footer surfaces collapsed together');
