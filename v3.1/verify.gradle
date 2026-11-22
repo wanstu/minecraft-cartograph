@@ -200,9 +200,11 @@ tasks.register('verifyV31FrontendThemes') {
          'id="i-theme-modern-pin"', 'id="i-theme-modern-village"',
          'id="i-theme-engraved-pin"', 'id="i-theme-engraved-village"',
          '.app[data-theme-layout="modern-atlas"] .map-stage{inset:0}',
-         '.app[data-theme-layout="modern-atlas"] .topbar{left:auto;right:22px'].each { token ->
+         '.app[data-theme-layout="modern-atlas"] .topbar{left:auto;right:22px',
+         '.app[data-theme-layout="ancient-atlas"] .map-stage{inset:88px 18px 18px',
+         '.app[data-theme-layout="ancient-atlas"] .topbar{left:18px;right:18px;top:14px'].each { token ->
             if (!page.contains(token)) {
-                throw new GradleException('Modern theme layout contract is incomplete: ' + token)
+                throw new GradleException('Frontend theme UI contract is incomplete: ' + token)
             }
         }
 

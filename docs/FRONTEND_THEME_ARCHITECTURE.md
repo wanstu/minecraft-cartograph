@@ -92,9 +92,11 @@ the primary navigation becomes a compact floating toolbar at the upper right, an
 markers/layers remain independent floating panels. Responsive rules keep that toolbar
 usable on narrow windows.
 
-The ancient theme already has an independent palette, typography, density and layout
-identity. Its stronger atlas/paper composition will be refined separately instead of
-being implemented as a sepia filter on the modern theme.
+The ancient theme uses its own atlas composition instead of inheriting the modern
+toolbar: a parchment-like framed header, a separately framed map sheet, serif typography
+and engraved glyph family. It still displays the satellite renderer as an explicit
+fallback until the ancient hand-drawn renderer exists; no sepia filter is applied to
+the terrain canvas.
 
 Marker and structure icon data stays semantic. The modern and engraved icon families
 currently provide independent glyphs for the most common atlas concepts (pin, home,
