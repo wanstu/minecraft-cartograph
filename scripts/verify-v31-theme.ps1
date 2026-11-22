@@ -40,7 +40,12 @@ foreach ($hook in @(
   '--theme-offline-text:',
   'theme-preview-toolbar',
   'theme-preview-panel',
-  'theme-preview-controls'
+  'theme-preview-controls',
+  '--theme-map-vertical-inset:',
+  '--theme-float-top:',
+  '--theme-float-bottom:',
+  '--theme-panel-head-height:',
+  '--theme-marker-chrome-height:'
 )) { Require-Contains $html $hook "theme CSS hook missing: $hook" }
 
 foreach ($hook in @(
