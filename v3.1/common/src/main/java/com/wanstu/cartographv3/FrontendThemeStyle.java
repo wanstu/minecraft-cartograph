@@ -157,7 +157,7 @@ final class FrontendThemeStyle {
             result = mix(sepia, 0xd2b77e, 34);
             result = desaturate(result, 18);
         }
-        result = quantize(result, 12);
+        result = quantizeColor(result, 12);
         int grain = noise(worldX, worldZ, 7) - 3;
         return offset(result, grain);
     }
@@ -187,14 +187,14 @@ final class FrontendThemeStyle {
         return r << 16 | g << 8 | b;
     }
 
-    private static int quantize(int rgb, int step) {
-        int r = quantize(rgb >>> 16 & 255, step);
-        int g = quantize(rgb >>> 8 & 255, step);
-        int b = quantize(rgb & 255, step);
+    private static int quantizeColor(int rgb, int step) {
+        int r = quantizeChannel(rgb >>> 16 & 255, step);
+        int g = quantizeChannel(rgb >>> 8 & 255, step);
+        int b = quantizeChannel(rgb & 255, step);
         return r << 16 | g << 8 | b;
     }
 
-    private static int quantize(int value, int step) {
+    private static int quantizeChannel(int value, int step) {
         return clamp((value + step / 2) / step * step);
     }
 
