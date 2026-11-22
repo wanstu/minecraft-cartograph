@@ -42,7 +42,7 @@ Those stay in the backend/runtime layers.
 
 Switching a theme therefore must not rescan the world, rebuild the facts cache, reconnect transport, or create another backend instance.
 
-The CI theme-contract verifier enforces the built-in theme registry, required frontend hooks, the renderer fallback declaration, the dynamic current-theme label, and the presentation-only boundary of `applyFrontendTheme()`. A headless Chromium smoke test also switches all built-in themes in the real V3.1 WebUI, verifies persistence and dynamic labels, and checks that each theme's map viewport, floating panels, and toolbar remain inside their intended layout bounds.
+The CI theme-contract verifier enforces the built-in theme registry, required frontend hooks, renderer fallback declaration, dynamic current-theme labels, theme-aware UI icon registry, and the presentation-only boundary of `applyFrontendTheme()`. A headless Chromium smoke test switches all built-in themes through the real settings flow at desktop, narrow, and small-window viewports. It verifies persistence, labels, UI glyph families, density/typography effects, modal bounds, map viewport geometry, and collision-free layers/markers/controls.
 
 ## Current runtime
 
@@ -71,10 +71,11 @@ controls consume theme surface tokens such as `--theme-control-bg`,
 - `app.dataset.theme` selects the theme identity
 - `themeLayout` selects the layout family
 - `themeIcons` selects the icon family
-- semantic marker icons are resolved through `THEME_ICON_SYMBOLS`; persisted marker data keeps semantic names such as `village`, `mountain` and `water`
+- primary frontend UI glyphs are resolved through `THEME_UI_ICON_SYMBOLS` from semantic roles such as `map`, `markers`, `layers`, `settings`, `about`, `locate` and `home`
+- semantic marker/structure icons are resolved separately through `THEME_ICON_SYMBOLS`; persisted marker data keeps semantic names such as `village`, `mountain` and `water`
 - `themeDensity` selects control spacing/density
-- `themeTypography` selects typography semantics
-- `app.dataset.style` exposes the active map renderer identity
+- `themeTypography` selects typography semantics and each theme's font stack
+- `app.dataset.mapRenderer` exposes the active map renderer identity; renderer state is intentionally named separately from frontend theme state
 - About/settings UI reports the active theme and renderer state
 
 `MAP_RENDERERS` is the renderer registry. `renderTerrain()` is only a dispatcher:
@@ -108,10 +109,12 @@ fallback until the ancient hand-drawn renderer exists; no sepia filter is applie
 the terrain canvas.
 
 Marker and structure icon data stays semantic. The modern and engraved icon families
-currently provide independent glyphs for the most common atlas concepts (pin, home,
-village, mountain and water) and safely fall back to the technical symbol set for the
-rest. Switching themes refreshes existing marker/layer UI without mutating persisted
-marker definitions.
+provide independent glyphs for common atlas concepts (pin, home, village, mountain and
+water) and safely fall back to the technical symbol set for the rest. Primary frontend
+navigation and location controls use a separate semantic UI-icon registry so frontend
+chrome can genuinely change glyph family without changing button behavior or persisted
+data. Switching themes refreshes existing marker/layer/UI glyphs without mutating marker
+definitions.
 
 ## Future theme renderer contract
 
