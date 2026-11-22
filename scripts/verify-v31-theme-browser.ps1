@@ -68,6 +68,9 @@ $browserTest = @'
     const stage = document.querySelector('#mapStage');
     const topbar = document.querySelector('.topbar');
     const panel = document.querySelector('#layersPanel');
+    const rightControls = document.querySelector('.right-controls');
+    const coordBox = document.querySelector('.coord-box');
+    const scaleBox = document.querySelector('.scale-box');
     const activeCard = document.querySelector('[data-theme-choice="' + id + '"]');
     const stored = (() => {
       try { return JSON.parse(localStorage.getItem('cartograph-v31-webui-settings-v1') || '{}').frontendTheme || ''; }
@@ -89,6 +92,9 @@ $browserTest = @'
       stage: rect(stage),
       topbar: rect(topbar),
       panel: rect(panel),
+      rightControls: rect(rightControls),
+      coordBox: rect(coordBox),
+      scaleBox: rect(scaleBox),
       panelDisplay: getComputedStyle(panel).display,
       panelMaxHeight: parseFloat(getComputedStyle(panel).maxHeight) || 0,
       cardActive: activeCard.classList.contains('active'),
@@ -106,6 +112,24 @@ $browserTest = @'
     const floatTop = parseFloat(appStyle.getPropertyValue('--theme-float-top')) || 0;
     const floatBottom = parseFloat(appStyle.getPropertyValue('--theme-float-bottom')) || 0;
     approx(result.panelMaxHeight, result.stage.height - floatTop - floatBottom, 1.5, id + ' panel max-height');
+    assert(!overlaps(result.panel, result.rightControls), id + ': panel overlaps zoom/player controls');
+    assert(!overlaps(result.panel, result.coordBox), id + ': panel overlaps coordinate box');
+    assert(!overlaps(result.panel, result.scaleBox), id + ': panel overlaps scale box');
+
+    const markersNav = document.querySelector('[data-nav="markers"]');
+    const markersPanel = document.querySelector('#markersPanel');
+    if (getComputedStyle(markersPanel).display === 'none') markersNav.click();
+    const markerRect = rect(markersPanel);
+    const markerMaxHeight = parseFloat(getComputedStyle(markersPanel).maxHeight) || 0;
+    assert(getComputedStyle(markersPanel).display !== 'none', id + ': markers panel did not open');
+    assert(markerRect.top >= result.stage.top - 0.5, id + ': markers panel starts above map viewport');
+    assert(markerRect.bottom <= result.stage.bottom + 0.5, id + ': markers panel extends below map viewport');
+    approx(markerMaxHeight, result.stage.height - floatTop - floatBottom, 1.5, id + ' markers panel max-height');
+    assert(!overlaps(markerRect, result.rightControls), id + ': markers panel overlaps zoom/player controls');
+    assert(!overlaps(markerRect, result.coordBox), id + ': markers panel overlaps coordinate box');
+    assert(!overlaps(markerRect, result.scaleBox), id + ': markers panel overlaps scale box');
+    result.markersPanel = markerRect;
+    result.markersPanelMaxHeight = markerMaxHeight;
 
     return result;
   };
