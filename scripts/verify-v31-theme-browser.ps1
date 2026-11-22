@@ -41,9 +41,24 @@ $browserTest = @'
     return {left:r.left, top:r.top, right:r.right, bottom:r.bottom, width:r.width, height:r.height};
   };
   const choose = id => {
+    const settingsButton = document.querySelector('[data-nav="settings"]');
+    settingsButton.click();
+    const themeTab = document.querySelector('[data-sub="mapstyle"]');
+    themeTab.click();
+
     const card = document.querySelector('[data-theme-choice="' + id + '"]');
     assert(!!card, 'missing theme card: ' + id);
+    assert(card && !card.closest('[data-subpage="mapstyle"]').classList.contains('hidden'), id + ': theme card is not visible in settings flow');
     if (card) card.click();
+
+    const settingsModal = document.querySelector('#settingsModal');
+    const settingsRect = rect(settingsModal);
+    assert(getComputedStyle(settingsModal).display !== 'none', id + ': settings modal closed during theme switch');
+    assert(settingsRect.left >= -0.5 && settingsRect.top >= -0.5, id + ': settings modal starts outside viewport');
+    assert(settingsRect.right <= innerWidth + 0.5 && settingsRect.bottom <= innerHeight + 0.5, id + ': settings modal extends outside viewport');
+
+    settingsModal.querySelector('[data-modal-close]').click();
+
     const layersNav = document.querySelector('[data-nav="layers"]');
     const layersPanel = document.querySelector('#layersPanel');
     if (getComputedStyle(layersPanel).display === 'none') layersNav.click();
@@ -69,6 +84,7 @@ $browserTest = @'
       settingsLabel: document.querySelector('#interfaceThemeValue').textContent.trim(),
       aboutLabel: document.querySelector('#aboutThemeValue').textContent.trim(),
       stored,
+      settingsModal: settingsRect,
       stage: rect(stage),
       topbar: rect(topbar),
       panel: rect(panel),
