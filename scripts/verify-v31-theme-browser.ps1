@@ -44,12 +44,12 @@ $browserTest = @'
   const choose = id => {
     const settingsButton = document.querySelector('[data-nav="settings"]');
     settingsButton.click();
-    const themeTab = document.querySelector('[data-sub="mapstyle"]');
+    const themeTab = document.querySelector('[data-sub="theme"]');
     themeTab.click();
 
     const card = document.querySelector('[data-theme-choice="' + id + '"]');
     assert(!!card, 'missing theme card: ' + id);
-    assert(card && !card.closest('[data-subpage="mapstyle"]').classList.contains('hidden'), id + ': theme card is not visible in settings flow');
+    assert(card && !card.closest('[data-subpage="theme"]').classList.contains('hidden'), id + ': theme card is not visible in settings flow');
     if (card) card.click();
 
     const settingsModal = document.querySelector('#settingsModal');
@@ -80,7 +80,7 @@ $browserTest = @'
       icons: app.dataset.themeIcons,
       density: app.dataset.themeDensity,
       typography: app.dataset.themeTypography,
-      renderer: app.dataset.style,
+      renderer: app.dataset.mapRenderer,
       activeLabel: document.querySelector('#activeThemeLabel').textContent.trim(),
       settingsLabel: document.querySelector('#interfaceThemeValue').textContent.trim(),
       aboutLabel: document.querySelector('#aboutThemeValue').textContent.trim(),

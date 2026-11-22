@@ -58,7 +58,7 @@ foreach ($hook in @(
   'app.dataset.themeIcons=',
   'app.dataset.themeDensity=',
   'app.dataset.themeTypography=',
-  'app.dataset.style='
+  'app.dataset.mapRenderer='
 )) { Require-Contains $app $hook "applyFrontendTheme hook missing: $hook" }
 
 Require-Contains $app 'const MAP_RENDERERS = Object.freeze({' 'map renderer registry missing'

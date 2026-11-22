@@ -116,7 +116,7 @@
     app.dataset.themeIcons=theme.iconFamily;
     app.dataset.themeDensity=theme.density;
     app.dataset.themeTypography=theme.typography;
-    app.dataset.style=theme.mapRenderer;
+    app.dataset.mapRenderer=theme.mapRenderer;
     document.documentElement.dataset.cartographTheme=theme.id;
     const activeThemeLabel=q('#activeThemeLabel');if(activeThemeLabel)activeThemeLabel.textContent=theme.label;
     const interfaceThemeValue=q('#interfaceThemeValue');if(interfaceThemeValue)interfaceThemeValue.textContent=theme.label;

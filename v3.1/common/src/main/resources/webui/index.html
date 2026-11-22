@@ -72,7 +72,7 @@ svg.icon.solid{fill:currentColor;stroke:none}
 .world-wrap{position:absolute;left:50%;top:50%;width:1800px;height:1100px;transform-origin:50% 50%;transform:translate(-50%,-50%) scale(1)}
 .world{width:100%;height:100%;display:block}
 .world .satellite{display:inline}
-.app[data-style="satellite"] .map-stage{background:#17383c}
+.app[data-map-renderer="satellite"] .map-stage{background:#17383c}
 .map-shade{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at center,transparent 58%,#0610153f 100%)}
 
 .marker-layer{position:absolute;inset:0;pointer-events:none}
@@ -477,7 +477,7 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
 </defs>
 </svg>
 
-<div class="app" id="app" data-style="satellite" data-grid="off" data-labels="on" data-structures="on" data-custom="on" data-player-ring="on">
+<div class="app" id="app" data-map-renderer="satellite" data-grid="off" data-labels="on" data-structures="on" data-custom="on" data-player-ring="on">
   <div class="webui-offline">Minecraft 未连接，地图数据暂不可用</div>
   <header class="topbar">
     <div class="brand"><svg class="icon"><use href="#i-map"/></svg><span>地图册</span><small>Map Atlas · V3.1 WebUI</small></div>
@@ -579,7 +579,7 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
       <section class="settings-main">
         <div class="setting-page active" data-setting-page="general">
           <div class="settings-title-row"><div class="settings-title">通用</div><div class="settings-desc">常用设置与前端主题</div></div>
-          <div class="subtabs"><button class="subtab active" data-sub="interface"><svg class="icon"><use href="#i-display"/></svg>界面</button><button class="subtab" data-sub="mapstyle"><svg class="icon"><use href="#i-map"/></svg>前端主题</button><button class="subtab" data-sub="function"><svg class="icon"><use href="#i-settings"/></svg>功能</button></div>
+          <div class="subtabs"><button class="subtab active" data-sub="interface"><svg class="icon"><use href="#i-display"/></svg>界面</button><button class="subtab" data-sub="theme"><svg class="icon"><use href="#i-map"/></svg>前端主题</button><button class="subtab" data-sub="function"><svg class="icon"><use href="#i-settings"/></svg>功能</button></div>
           <div class="subpage" data-subpage="interface">
             <div class="card">
               <div class="card-title">界面</div>
@@ -595,7 +595,7 @@ kbd.key.capturing{border-color:var(--theme-focus);color:var(--theme-focus);box-s
               <div class="form-row"><div class="label">图标颜色</div><label class="color-field" id="playerColorField"><span class="swatch" id="playerSwatch" style="background:#ffe14e"></span><span id="playerColorText">#FFE14E</span><input class="native-color" id="playerColor" type="color" value="#ffe14e"></label><div></div></div>
             </div>
           </div>
-          <div class="subpage hidden" data-subpage="mapstyle">
+          <div class="subpage hidden" data-subpage="theme">
             <div class="card"><div class="card-title">前端主题</div><div class="card-note">主题控制整套前端的布局、控件、图标、字体、面板质感和地图画法；三套主题共享同一份真实世界事实与后端 API。</div>
               <div class="style-cards">
                 <div class="style-card active" data-theme-choice="satellite"><span class="coming-badge">完整</span><div class="style-preview sat"><span class="theme-preview-toolbar"></span><span class="theme-preview-panel"></span><span class="theme-preview-controls"></span></div><div class="style-info"><div class="style-name">原生 · 卫星</div><div class="style-sub">技术型顶栏 + 真实地表直接成图</div></div></div>
