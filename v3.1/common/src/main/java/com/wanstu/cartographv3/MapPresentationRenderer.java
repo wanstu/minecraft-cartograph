@@ -2,7 +2,7 @@ package com.wanstu.cartographv3;
 
 /** Resolves drawing mode first, then delegates presentation to the active visual style. */
 final class MapPresentationRenderer {
-    private static final long PIPELINE_VERSION = 4L;
+    private static final long PIPELINE_VERSION = 5L;
 
     private MapPresentationRenderer() {}
 

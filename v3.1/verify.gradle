@@ -227,11 +227,17 @@ tasks.register('verifyV31FrontendThemes') {
         ['record HandDrawnMapData(', 'static final int CELL_SIZE = 4;',
          'private enum TerrainClass', 'TerrainClass.VEGETATION',
          'static final int WATER_THRESHOLD = 19;',
+         'static final int FOREST_THRESHOLD = 31;',
          'classes[cell] = waterPct >= WATER_THRESHOLD',
          'depth[cell] = waterCount == 0',
          'depth = smoothWaterDepth(depth, water);',
+         'forest = smoothForestPercent(forest, water);',
+         'canopy = smoothCanopyHeight(canopy, forest);',
          'int waterDepthAtPixel(int localX, int localZ)',
          'int shorelineStrengthAtPixel(int localX, int localZ, int radius)',
+         'int forestPercentAtPixel(int localX, int localZ)',
+         'int canopyHeightAtPixel(int localX, int localZ)',
+         'int forestEdgeStrengthAtPixel(int localX, int localZ, int radius)',
          'Arrays.sort(heights, 0, heightCount);',
          'relief[cell] = heights[heightCount / 2];',
          'classes = smoothClasses(classes, water);',
@@ -246,12 +252,16 @@ tasks.register('verifyV31FrontendThemes') {
          'applyHandDrawnShoreline(color, shoreline, style)',
          'HandDrawnMapData.WATER_THRESHOLD',
          'private static int applyHandDrawnWaterDepth',
-         'private static int applyHandDrawnShoreline'].each { token ->
+         'private static int applyHandDrawnShoreline',
+         'applyHandDrawnForest(color, forestPercent, canopyHeight, style)',
+         'applyHandDrawnForestEdge(color, forestEdge, style)',
+         'private static int applyHandDrawnForest(',
+         'private static int applyHandDrawnForestEdge('].each { token ->
             if (!processors.contains(token)) {
                 throw new GradleException('Hand-drawn water presentation is incomplete: ' + token)
             }
         }
-        if (!renderer.contains('private static final long PIPELINE_VERSION = 4L;')) {
+        if (!renderer.contains('private static final long PIPELINE_VERSION = 5L;')) {
             throw new GradleException('Presentation pipeline version must invalidate pre-water-semantics atlases')
         }
         ['switch (CartographSettings.drawingMode())',

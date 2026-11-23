@@ -70,11 +70,17 @@ foreach ($token in @(
   'private enum TerrainClass',
   'TerrainClass.VEGETATION',
   'static final int WATER_THRESHOLD = 19;',
+  'static final int FOREST_THRESHOLD = 31;',
   'classes[cell] = waterPct >= WATER_THRESHOLD',
   'depth[cell] = waterCount == 0',
   'depth = smoothWaterDepth(depth, water);',
+  'forest = smoothForestPercent(forest, water);',
+  'canopy = smoothCanopyHeight(canopy, forest);',
   'int waterDepthAtPixel(int localX, int localZ)',
   'int shorelineStrengthAtPixel(int localX, int localZ, int radius)',
+  'int forestPercentAtPixel(int localX, int localZ)',
+  'int canopyHeightAtPixel(int localX, int localZ)',
+  'int forestEdgeStrengthAtPixel(int localX, int localZ, int radius)',
   'Arrays.sort(heights, 0, heightCount);',
   'relief[cell] = heights[heightCount / 2];',
   'classes = smoothClasses(classes, water);',
@@ -91,11 +97,15 @@ foreach ($token in @(
   'HandDrawnMapData.WATER_THRESHOLD',
   'if (water) {',
   'private static int applyHandDrawnWaterDepth',
-  'private static int applyHandDrawnShoreline'
+  'private static int applyHandDrawnShoreline',
+  'applyHandDrawnForest(color, forestPercent, canopyHeight, style)',
+  'applyHandDrawnForestEdge(color, forestEdge, style)',
+  'private static int applyHandDrawnForest(',
+  'private static int applyHandDrawnForestEdge('
 )) { Require-Contains $processors $token "hand-drawn water presentation incomplete: $token" }
 
 foreach ($token in @(
-  'private static final long PIPELINE_VERSION = 4L;',
+  'private static final long PIPELINE_VERSION = 5L;',
   'MapVisualStyleProcessor processor = CartographSettings.visualStyle().processor();',
   'switch (CartographSettings.drawingMode())',
   'case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);',

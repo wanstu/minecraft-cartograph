@@ -143,11 +143,20 @@ final class MapVisualStyleProcessors {
                     int depth = data.waterDepthAtPixel(sx, sz);
                     color = applyHandDrawnWaterDepth(color, depth, style);
                 } else {
+                    int forestPercent = data.forestPercentAtPixel(sx, sz);
+                    if (forestPercent >= HandDrawnMapData.FOREST_THRESHOLD) {
+                        int canopyHeight = data.canopyHeightAtPixel(sx, sz);
+                        color = applyHandDrawnForest(color, forestPercent, canopyHeight, style);
+                    }
+
                     int relief = data.averageReliefAtPixel(sx, sz);
                     if (relief != SurfaceTile.UNKNOWN_HEIGHT) {
                         int range = data.reliefRangeAtPixel(sx, sz);
                         color = applyAbstractRelief(color, relief, range, style);
                     }
+
+                    int forestEdge = data.forestEdgeStrengthAtPixel(sx, sz, shorelineRadius);
+                    if (forestEdge > 0) color = applyHandDrawnForestEdge(color, forestEdge, style);
                 }
 
                 int shoreline = data.shorelineStrengthAtPixel(sx, sz, shorelineRadius);
@@ -205,6 +214,40 @@ final class MapVisualStyleProcessors {
         result = adjust(result, handDrawn ? 1.08 : 1.04);
         result = quantizeColor(result, handDrawn ? 18 : 10);
         return handDrawn ? result : offset(result, noise(worldX, worldZ, 5) - 2);
+    }
+
+    private static int applyHandDrawnForest(
+            int color, int forestPercent, int canopyHeight, StyleKind style) {
+        int density = Math.max(0, forestPercent - HandDrawnMapData.FOREST_THRESHOLD);
+        int amount = Math.min(46, 18 + density / 2);
+        int target = switch (style) {
+            case MODERN -> 0x5f7f60;
+            case ANCIENT -> 0x747b55;
+            case ANIME -> 0x52a85e;
+        };
+        int result = mix(color, target, amount);
+
+        if (canopyHeight > 3 && canopyHeight != Integer.MIN_VALUE) {
+            int heightAmount = Math.min(14, (canopyHeight - 3) * 2);
+            int deep = switch (style) {
+                case MODERN -> 0x456248;
+                case ANCIENT -> 0x59603f;
+                case ANIME -> 0x347d43;
+            };
+            result = mix(result, deep, heightAmount);
+        }
+        return result;
+    }
+
+    private static int applyHandDrawnForestEdge(int color, int strength, StyleKind style) {
+        if (strength < 28) return color;
+        int amount = Math.min(48, 12 + strength / 3);
+        int ink = switch (style) {
+            case MODERN -> 0x4c6751;
+            case ANCIENT -> 0x5a5035;
+            case ANIME -> 0x347745;
+        };
+        return mix(color, ink, amount);
     }
 
     private static int applyHandDrawnWaterDepth(int color, int depth, StyleKind style) {

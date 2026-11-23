@@ -14,6 +14,8 @@ record HandDrawnMapData(
         int[] regionColor,
         int[] waterPercent,
         int[] waterDepth,
+        int[] forestPercent,
+        int[] canopyHeight,
         int[] averageRelief,
         int[] reliefRange) {
 
@@ -21,6 +23,7 @@ record HandDrawnMapData(
     static final int GRID = SurfaceTile.SIZE / CELL_SIZE;
     static final int CELLS = GRID * GRID;
     static final int WATER_THRESHOLD = 19;
+    static final int FOREST_THRESHOLD = 31;
 
     private enum TerrainClass {
         UNKNOWN(0),
@@ -46,6 +49,8 @@ record HandDrawnMapData(
         TerrainClass[] classes = new TerrainClass[CELLS];
         int[] water = new int[CELLS];
         int[] depth = new int[CELLS];
+        int[] forest = new int[CELLS];
+        int[] canopy = new int[CELLS];
         int[] relief = new int[CELLS];
         int[] range = new int[CELLS];
 
@@ -56,6 +61,8 @@ record HandDrawnMapData(
                 int heightCount = 0;
                 int waterCount = 0;
                 int waterDepthTotal = 0;
+                int canopyCount = 0;
+                int canopyHeightTotal = 0;
 
                 for (int dz = 0; dz < CELL_SIZE; dz++) {
                     for (int dx = 0; dx < CELL_SIZE; dx++) {
@@ -72,7 +79,19 @@ record HandDrawnMapData(
                         TerrainClass terrain = classify(source[index], isWater);
                         if (terrain != TerrainClass.UNKNOWN) votes[terrain.ordinal()]++;
 
-                        int h = tile.reliefHeightAt(index);
+                        int surfaceY = tile.surfaceHeightAt(index);
+                        int reliefY = tile.reliefHeightAt(index);
+                        if (!isWater
+                                && surfaceY != SurfaceTile.UNKNOWN_HEIGHT
+                                && reliefY != SurfaceTile.UNKNOWN_HEIGHT) {
+                            int canopyDelta = surfaceY - reliefY;
+                            if (canopyDelta >= 2) {
+                                canopyCount++;
+                                canopyHeightTotal += canopyDelta;
+                            }
+                        }
+
+                        int h = reliefY;
                         if (h != SurfaceTile.UNKNOWN_HEIGHT) heights[heightCount++] = h;
                     }
                 }
@@ -82,6 +101,9 @@ record HandDrawnMapData(
                 water[cell] = waterPct;
                 depth[cell] = waterCount == 0
                         ? 0 : Math.round((float) waterDepthTotal / waterCount);
+                forest[cell] = canopyCount * 100 / (CELL_SIZE * CELL_SIZE);
+                canopy[cell] = canopyCount == 0
+                        ? 0 : Math.round((float) canopyHeightTotal / canopyCount);
                 classes[cell] = waterPct >= WATER_THRESHOLD
                         ? TerrainClass.WATER : dominant(votes);
 
@@ -100,12 +122,14 @@ record HandDrawnMapData(
 
         classes = smoothClasses(classes, water);
         depth = smoothWaterDepth(depth, water);
+        forest = smoothForestPercent(forest, water);
+        canopy = smoothCanopyHeight(canopy, forest);
         relief = smoothRelief(relief);
         range = smoothRanges(range);
         int[] colors = new int[CELLS];
         for (int i = 0; i < CELLS; i++) colors[i] = classes[i].color;
 
-        return new HandDrawnMapData(tile.key(), colors, water, depth, relief, range);
+        return new HandDrawnMapData(tile.key(), colors, water, depth, forest, canopy, relief, range);
     }
 
     /**
@@ -220,6 +244,72 @@ record HandDrawnMapData(
         return smoothed;
     }
 
+    /**
+     * Forest density is derived from canopy coverage, not from green color.
+     * WORLD_SURFACE includes leaves while MOTION_BLOCKING_NO_LEAVES does not,
+     * so their height delta identifies actual canopy without block-ID lists.
+     */
+    private static int[] smoothForestPercent(int[] source, int[] waterPercent) {
+        int[] smoothed = new int[source.length];
+        for (int z = 0; z < GRID; z++) {
+            for (int x = 0; x < GRID; x++) {
+                int index = z * GRID + x;
+                if (waterPercent[index] >= WATER_THRESHOLD) {
+                    smoothed[index] = 0;
+                    continue;
+                }
+
+                int sum = 0;
+                int weight = 0;
+                for (int dz = -1; dz <= 1; dz++) {
+                    int sampleZ = z + dz;
+                    if (sampleZ < 0 || sampleZ >= GRID) continue;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int sampleX = x + dx;
+                        if (sampleX < 0 || sampleX >= GRID) continue;
+                        int sample = sampleZ * GRID + sampleX;
+                        if (waterPercent[sample] >= WATER_THRESHOLD) continue;
+                        int w = dx == 0 && dz == 0 ? 4
+                                : (dx == 0 || dz == 0 ? 2 : 1);
+                        sum += source[sample] * w;
+                        weight += w;
+                    }
+                }
+                smoothed[index] = weight == 0 ? 0 : Math.round((float) sum / weight);
+            }
+        }
+        return smoothed;
+    }
+
+    private static int[] smoothCanopyHeight(int[] source, int[] forestPercent) {
+        int[] smoothed = new int[source.length];
+        for (int z = 0; z < GRID; z++) {
+            for (int x = 0; x < GRID; x++) {
+                int index = z * GRID + x;
+                if (forestPercent[index] < FOREST_THRESHOLD) continue;
+
+                int sum = 0;
+                int weight = 0;
+                for (int dz = -1; dz <= 1; dz++) {
+                    int sampleZ = z + dz;
+                    if (sampleZ < 0 || sampleZ >= GRID) continue;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int sampleX = x + dx;
+                        if (sampleX < 0 || sampleX >= GRID) continue;
+                        int sample = sampleZ * GRID + sampleX;
+                        if (forestPercent[sample] < FOREST_THRESHOLD || source[sample] <= 0) continue;
+                        int w = dx == 0 && dz == 0 ? 4 : 1;
+                        sum += source[sample] * w;
+                        weight += w;
+                    }
+                }
+                smoothed[index] = weight == 0 ? source[index]
+                        : Math.round((float) sum / weight);
+            }
+        }
+        return smoothed;
+    }
+
     private static int[] smoothRelief(int[] source) {
         int[] smoothed = new int[source.length];
         for (int z = 0; z < GRID; z++) {
@@ -314,6 +404,40 @@ record HandDrawnMapData(
 
         if (center >= WATER_THRESHOLD - 6 && center <= WATER_THRESHOLD + 20) {
             strongest = Math.max(strongest, 32);
+        }
+        return Math.min(100, strongest * 2);
+    }
+
+    int forestPercentAtPixel(int localX, int localZ) {
+        return interpolateScalar(forestPercent, localX, localZ, Integer.MIN_VALUE);
+    }
+
+    int canopyHeightAtPixel(int localX, int localZ) {
+        return interpolateScalar(canopyHeight, localX, localZ, Integer.MIN_VALUE);
+    }
+
+    int forestEdgeStrengthAtPixel(int localX, int localZ, int radius) {
+        int center = forestPercentAtPixel(localX, localZ);
+        if (center == Integer.MIN_VALUE) return 0;
+
+        int sampleRadius = Math.max(1, Math.min(CELL_SIZE, radius));
+        boolean forest = center >= FOREST_THRESHOLD;
+        int[] samples = {
+                forestPercentAtPixel(Math.max(0, localX - sampleRadius), localZ),
+                forestPercentAtPixel(Math.min(SurfaceTile.SIZE - 1, localX + sampleRadius), localZ),
+                forestPercentAtPixel(localX, Math.max(0, localZ - sampleRadius)),
+                forestPercentAtPixel(localX, Math.min(SurfaceTile.SIZE - 1, localZ + sampleRadius))
+        };
+
+        int strongest = 0;
+        for (int sample : samples) {
+            if (sample == Integer.MIN_VALUE) continue;
+            if ((sample >= FOREST_THRESHOLD) != forest) return 100;
+            strongest = Math.max(strongest, Math.abs(center - sample));
+        }
+
+        if (center >= FOREST_THRESHOLD - 8 && center <= FOREST_THRESHOLD + 20) {
+            strongest = Math.max(strongest, 28);
         }
         return Math.min(100, strongest * 2);
     }
