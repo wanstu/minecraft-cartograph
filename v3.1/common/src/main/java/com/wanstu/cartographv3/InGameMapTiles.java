@@ -73,7 +73,6 @@ final class InGameMapTiles implements AutoCloseable {
     private long allocatedTexels;
     private String dimension = "";
     private long targetSignature;
-    private long displaySignature;
 
     InGameMapTiles(CartographBackendApi backend) {
         this.backend = backend;
@@ -86,12 +85,11 @@ final class InGameMapTiles implements AutoCloseable {
             close();
             dimension = dim;
             targetSignature = appearance;
-            displaySignature = appearance;
         } else if (targetSignature != appearance) {
-            // Keep the last fully rendered presentation visible while the new
-            // drawing mode/style is prepared in parallel.
             targetSignature = appearance;
-            if (displaySignature == 0L) displaySignature = appearance;
+            // Never keep drawing the previous presentation after the user has
+            // selected another drawing mode/style.
+            frame = List.of();
         }
         if (dim.isBlank()) return;
 
@@ -105,7 +103,7 @@ final class InGameMapTiles implements AutoCloseable {
             for (int x = minX; x <= maxX; x++) {
                 Region key = new Region(x, z);
                 if (hasTiles(dim, key)
-                        || hasInMemoryAtlas(key)
+                        || hasInMemoryAtlas(key, targetSignature)
                         || hasPersistentAtlas(worldId, dim, key, targetSignature)) {
                     visible.add(key);
                 }
@@ -119,7 +117,6 @@ final class InGameMapTiles implements AutoCloseable {
         int remaining = MAX_PAINTED_TILES * Math.max(1, stride * stride / 4);
         long deadline = System.nanoTime() + CPU_BUDGET_NS;
 
-        boolean allTargetReady = true;
         Set<TextureKey> keep = new HashSet<>();
         for (Region region : visible) {
             TextureKey key = new TextureKey(region, stride, targetSignature);
@@ -133,19 +130,12 @@ final class InGameMapTiles implements AutoCloseable {
             if (remaining > 0 && System.nanoTime() < deadline) {
                 remaining -= updateAtlas(worldId, dim, region, atlas, stride, remaining, deadline);
             }
-            allTargetReady &= atlas.complete && atlas.hasPixels;
         }
-
-        if (allTargetReady && !visible.isEmpty()) displaySignature = targetSignature;
 
         List<DrawTile> drawing = new ArrayList<>(visible.size());
         for (Region region : visible) {
             Atlas atlas = findDisplayAtlas(
-                    worldId, dim, region, stride, displaySignature, keep);
-            if (atlas == null && displaySignature != targetSignature) {
-                atlas = findDisplayAtlas(
-                        worldId, dim, region, stride, targetSignature, keep);
-            }
+                    worldId, dim, region, stride, targetSignature, keep);
             if (atlas != null && atlas.hasPixels) drawing.add(new DrawTile(region, atlas));
         }
 
@@ -178,6 +168,9 @@ final class InGameMapTiles implements AutoCloseable {
             keep.add(exact);
             return atlas;
         }
+
+        // A complete atlas of the same target presentation is preferable to a
+        // partially generated exact-stride atlas. Never cross signatures here.
         for (int alternate = 1; alternate <= CHUNK; alternate *= 2) {
             if (alternate == stride) continue;
             TextureKey key = new TextureKey(region, alternate, signature);
@@ -199,12 +192,20 @@ final class InGameMapTiles implements AutoCloseable {
             keep.add(key);
             return candidate;
         }
+
+        // If no complete target atlas exists yet, progressively reveal only
+        // the current target presentation. This may be incomplete, but it can
+        // never show pixels from a previous drawing mode/style.
+        if (atlas != null && atlas.hasPixels) {
+            keep.add(exact);
+            return atlas;
+        }
         return null;
     }
 
-    private boolean hasInMemoryAtlas(Region region) {
+    private boolean hasInMemoryAtlas(Region region, long signature) {
         for (TextureKey key : atlases.keySet()) {
-            if (key.region.equals(region)) return true;
+            if (key.region.equals(region) && key.signature == signature) return true;
         }
         return false;
     }
@@ -393,6 +394,5 @@ final class InGameMapTiles implements AutoCloseable {
         allocatedTexels = 0;
         dimension = "";
         targetSignature = 0L;
-        displaySignature = 0L;
     }
 }

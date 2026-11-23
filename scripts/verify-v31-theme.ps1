@@ -130,15 +130,19 @@ foreach ($token in @(
 foreach ($token in @(
   'private record TextureKey(Region region, int stride, long signature) {}',
   'private long targetSignature;',
-  'private long displaySignature;',
+  'frame = List.of();',
   'targetSignature = appearance;',
-  'if (allTargetReady && !visible.isEmpty()) displaySignature = targetSignature;',
+  'findDisplayAtlas(',
+  'targetSignature, keep',
   'PersistentRenderedAtlasStore.load(',
   'PersistentRenderedAtlasStore.save(',
   'long fingerprint = tile.fingerprint64();',
   'if (atlas.fingerprints[index] == fingerprint) continue;',
-  'Keep the last fully rendered presentation visible'
+  'Never keep drawing the previous presentation',
+  'Never cross signatures here'
 )) { Require-Contains $nativeTiles $token "native rendered-atlas cache contract missing: $token" }
+Require-Absent $nativeTiles 'private long displaySignature;' 'previous presentation must never remain display-authoritative'
+Require-Absent $nativeTiles 'displaySignature != targetSignature' 'cross-style display fallback must not return'
 Require-Absent $nativeTiles 'appearance != signature) {' 'legacy style-switch close path must not return'
 foreach ($token in @(
   'final class PersistentRenderedAtlasStore',

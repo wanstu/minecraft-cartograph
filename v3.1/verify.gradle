@@ -276,15 +276,21 @@ tasks.register('verifyV31FrontendThemes') {
         }
 
         ['private record TextureKey(Region region, int stride, long signature) {}',
-         'private long targetSignature;', 'private long displaySignature;',
+         'private long targetSignature;', 'frame = List.of();',
          'targetSignature = appearance;',
-         'if (allTargetReady && !visible.isEmpty()) displaySignature = targetSignature;',
+         'findDisplayAtlas(', 'targetSignature, keep',
          'PersistentRenderedAtlasStore.load(', 'PersistentRenderedAtlasStore.save(',
          'long fingerprint = tile.fingerprint64();',
          'if (atlas.fingerprints[index] == fingerprint) continue;',
-         'Keep the last fully rendered presentation visible'].each { token ->
+         'Never keep drawing the previous presentation',
+         'Never cross signatures here'].each { token ->
             if (!nativeTiles.contains(token)) {
                 throw new GradleException('Native rendered-atlas cache contract is incomplete: ' + token)
+            }
+        }
+        ['private long displaySignature;', 'displaySignature != targetSignature'].each { forbidden ->
+            if (nativeTiles.contains(forbidden)) {
+                throw new GradleException('Cross-style display fallback must not return: ' + forbidden)
             }
         }
         if (nativeTiles.contains('appearance != signature) {')) {
