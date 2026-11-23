@@ -27,7 +27,8 @@ final class TileRequestScheduler {
     private static final int MAX_LOADED_CAPTURES_PER_TICK = 1;
     private static final int MAX_IN_FLIGHT_PER_PLAYER = 16;
     private static final int MAX_BACKGROUND_STARTED_PER_TICK = 1;
-    private static final int MAX_BACKGROUND_IN_FLIGHT_PER_PLAYER = 4;
+    private static final int MAX_BACKGROUND_IN_FLIGHT_PER_PLAYER = 1;
+    private static final int BACKGROUND_INTERVAL_TICKS = 10;
 
     private static final class PlayerQueue {
         final LinkedHashMap<ChunkKey, MapProtocol.RequestTile> pending =
@@ -44,6 +45,7 @@ final class TileRequestScheduler {
     private static final Map<UUID, PlayerQueue> QUEUES = new LinkedHashMap<>();
     private static final Set<UUID> OPEN_PLAYERS = new HashSet<>();
     private static int playerCursor;
+    private static int schedulerTicks;
 
     private TileRequestScheduler() {}
 
@@ -110,9 +112,11 @@ final class TileRequestScheduler {
         OPEN_PLAYERS.clear();
         GeneratedChunkBackfill.clear();
         playerCursor = 0;
+        schedulerTicks = 0;
     }
 
     static void tick(MinecraftServer server) {
+        schedulerTicks++;
         QUEUES.keySet().removeIf(uuid ->
                 server.getPlayerList().getPlayer(uuid) == null);
         OPEN_PLAYERS.removeIf(uuid ->
@@ -186,7 +190,8 @@ final class TileRequestScheduler {
             }
 
             int backgroundAttempts = 0;
-            while (queue.pending.isEmpty()
+            while (schedulerTicks % BACKGROUND_INTERVAL_TICKS == 0
+                    && queue.pending.isEmpty()
                     && started < MAX_STARTED_PER_TICK
                     && backgroundStarted < MAX_BACKGROUND_STARTED_PER_TICK
                     && playerStarts < MAX_STARTED_PER_PLAYER_PER_TICK

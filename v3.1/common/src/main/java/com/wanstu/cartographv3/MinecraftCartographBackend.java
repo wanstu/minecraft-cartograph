@@ -14,6 +14,8 @@ import java.util.UUID;
  */
 final class MinecraftCartographBackend implements CartographBackendApi {
     private static final int MIN_PENDING_REQUESTS = 32;
+    private static final int MAX_RAW_VISIBLE_TILES = 4096;
+    private static final int MAX_RAW_VISIBLE_RADIUS = 31;
 
     private final Minecraft minecraft = Minecraft.getInstance();
 
@@ -278,11 +280,24 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         int centerChunkX = Math.floorDiv((int) Math.floor(viewport.centerX()), 16);
         int centerChunkZ = Math.floorDiv((int) Math.floor(viewport.centerZ()), 16);
 
+        long visibleTiles = (long) (maxChunkX - minChunkX + 1)
+                * (long) (maxChunkZ - minChunkZ + 1);
+        int rawMinChunkX = minChunkX;
+        int rawMaxChunkX = maxChunkX;
+        int rawMinChunkZ = minChunkZ;
+        int rawMaxChunkZ = maxChunkZ;
+        if (visibleTiles > MAX_RAW_VISIBLE_TILES) {
+            rawMinChunkX = Math.max(minChunkX, centerChunkX - MAX_RAW_VISIBLE_RADIUS);
+            rawMaxChunkX = Math.min(maxChunkX, centerChunkX + MAX_RAW_VISIBLE_RADIUS);
+            rawMinChunkZ = Math.max(minChunkZ, centerChunkZ - MAX_RAW_VISIBLE_RADIUS);
+            rawMaxChunkZ = Math.min(maxChunkZ, centerChunkZ + MAX_RAW_VISIBLE_RADIUS);
+        }
+
         boolean viewportChanged =
-                minChunkX != lastRequestMinChunkX
-                        || maxChunkX != lastRequestMaxChunkX
-                        || minChunkZ != lastRequestMinChunkZ
-                        || maxChunkZ != lastRequestMaxChunkZ
+                rawMinChunkX != lastRequestMinChunkX
+                        || rawMaxChunkX != lastRequestMaxChunkX
+                        || rawMinChunkZ != lastRequestMinChunkZ
+                        || rawMaxChunkZ != lastRequestMaxChunkZ
                         || centerChunkX != requestCenterChunkX
                         || centerChunkZ != requestCenterChunkZ;
 
@@ -290,12 +305,12 @@ final class MinecraftCartographBackend implements CartographBackendApi {
 
         if (viewportChanged) {
             MapClientCache.restoreVisibleFromDisk(
-                    dim, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
+                    dim, rawMinChunkX, rawMaxChunkX, rawMinChunkZ, rawMaxChunkZ);
 
-            lastRequestMinChunkX = minChunkX;
-            lastRequestMaxChunkX = maxChunkX;
-            lastRequestMinChunkZ = minChunkZ;
-            lastRequestMaxChunkZ = maxChunkZ;
+            lastRequestMinChunkX = rawMinChunkX;
+            lastRequestMaxChunkX = rawMaxChunkX;
+            lastRequestMinChunkZ = rawMinChunkZ;
+            lastRequestMaxChunkZ = rawMaxChunkZ;
             requestCenterChunkX = centerChunkX;
             requestCenterChunkZ = centerChunkZ;
             requestRing = 0;
@@ -304,11 +319,11 @@ final class MinecraftCartographBackend implements CartographBackendApi {
 
         int maxRadius = Math.max(
                 Math.max(
-                        Math.abs(minChunkX - centerChunkX),
-                        Math.abs(maxChunkX - centerChunkX)),
+                        Math.abs(rawMinChunkX - centerChunkX),
+                        Math.abs(rawMaxChunkX - centerChunkX)),
                 Math.max(
-                        Math.abs(minChunkZ - centerChunkZ),
-                        Math.abs(maxChunkZ - centerChunkZ)));
+                        Math.abs(rawMinChunkZ - centerChunkZ),
+                        Math.abs(rawMaxChunkZ - centerChunkZ)));
 
         int requestBatch = CartographSettings.requestBatchSize();
         int requestBudget = Math.min(
@@ -360,8 +375,8 @@ final class MinecraftCartographBackend implements CartographBackendApi {
             scanned++;
             int x = centerChunkX + dx;
             int z = centerChunkZ + dz;
-            if (x < minChunkX || x > maxChunkX
-                    || z < minChunkZ || z > maxChunkZ) {
+            if (x < rawMinChunkX || x > rawMaxChunkX
+                    || z < rawMinChunkZ || z > rawMaxChunkZ) {
                 continue;
             }
 
