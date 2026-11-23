@@ -69,7 +69,12 @@ foreach ($token in @(
   'static final int GRID = SurfaceTile.SIZE / CELL_SIZE;',
   'private enum TerrainClass',
   'TerrainClass.VEGETATION',
-  'classes[cell] = waterPct >= 25 ? TerrainClass.WATER : dominant(votes);',
+  'static final int WATER_THRESHOLD = 19;',
+  'classes[cell] = waterPct >= WATER_THRESHOLD',
+  'depth[cell] = waterCount == 0',
+  'depth = smoothWaterDepth(depth, water);',
+  'int waterDepthAtPixel(int localX, int localZ)',
+  'int shorelineStrengthAtPixel(int localX, int localZ, int radius)',
   'Arrays.sort(heights, 0, heightCount);',
   'relief[cell] = heights[heightCount / 2];',
   'classes = smoothClasses(classes, water);',
@@ -81,6 +86,16 @@ foreach ($token in @(
 )) { Require-Contains $handData $token "hand-drawn data wrapper incomplete: $token" }
 
 foreach ($token in @(
+  'applyHandDrawnWaterDepth(color, depth, style)',
+  'applyHandDrawnShoreline(color, shoreline, style)',
+  'HandDrawnMapData.WATER_THRESHOLD',
+  'if (water) {',
+  'private static int applyHandDrawnWaterDepth',
+  'private static int applyHandDrawnShoreline'
+)) { Require-Contains $processors $token "hand-drawn water presentation incomplete: $token" }
+
+foreach ($token in @(
+  'private static final long PIPELINE_VERSION = 4L;',
   'MapVisualStyleProcessor processor = CartographSettings.visualStyle().processor();',
   'switch (CartographSettings.drawingMode())',
   'case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);',

@@ -129,19 +129,29 @@ final class MapVisualStyleProcessors {
         int sampleOffset = Math.max(0, stride / 2);
         int baseX = data.key().x() * SurfaceTile.SIZE;
         int baseZ = data.key().z() * SurfaceTile.SIZE;
+        int shorelineRadius = Math.max(2, Math.min(HandDrawnMapData.CELL_SIZE, stride));
         for (int z = 0; z < edge; z++) {
             for (int x = 0; x < edge; x++) {
                 int sx = Math.min(SurfaceTile.SIZE - 1, x * stride + sampleOffset);
                 int sz = Math.min(SurfaceTile.SIZE - 1, z * stride + sampleOffset);
-                int relief = data.averageReliefAtPixel(sx, sz);
-                boolean water = data.waterPercentAtPixel(sx, sz) >= 25;
+                int waterPercent = data.waterPercentAtPixel(sx, sz);
+                boolean water = waterPercent >= HandDrawnMapData.WATER_THRESHOLD;
                 int color = pixels[z * edge + x];
                 color = applyStyle(color, water, baseX + sx, baseZ + sz, style, true);
 
-                if (relief != SurfaceTile.UNKNOWN_HEIGHT) {
-                    int range = data.reliefRangeAtPixel(sx, sz);
-                    color = applyAbstractRelief(color, relief, range, style);
+                if (water) {
+                    int depth = data.waterDepthAtPixel(sx, sz);
+                    color = applyHandDrawnWaterDepth(color, depth, style);
+                } else {
+                    int relief = data.averageReliefAtPixel(sx, sz);
+                    if (relief != SurfaceTile.UNKNOWN_HEIGHT) {
+                        int range = data.reliefRangeAtPixel(sx, sz);
+                        color = applyAbstractRelief(color, relief, range, style);
+                    }
                 }
+
+                int shoreline = data.shorelineStrengthAtPixel(sx, sz, shorelineRadius);
+                if (shoreline > 0) color = applyHandDrawnShoreline(color, shoreline, style);
                 pixels[z * edge + x] = color;
             }
         }
@@ -195,6 +205,28 @@ final class MapVisualStyleProcessors {
         result = adjust(result, handDrawn ? 1.08 : 1.04);
         result = quantizeColor(result, handDrawn ? 18 : 10);
         return handDrawn ? result : offset(result, noise(worldX, worldZ, 5) - 2);
+    }
+
+    private static int applyHandDrawnWaterDepth(int color, int depth, StyleKind style) {
+        if (depth <= 1 || depth == Integer.MIN_VALUE) return color;
+        int amount = Math.min(22, (depth - 1) * 3);
+        int target = switch (style) {
+            case MODERN -> 0x567d89;
+            case ANCIENT -> 0x607b76;
+            case ANIME -> 0x3f93c7;
+        };
+        return mix(color, target, amount);
+    }
+
+    private static int applyHandDrawnShoreline(int color, int strength, StyleKind style) {
+        if (strength < 30) return color;
+        int amount = Math.min(62, 18 + strength / 2);
+        int ink = switch (style) {
+            case MODERN -> 0x425c54;
+            case ANCIENT -> 0x4b3825;
+            case ANIME -> 0x365f72;
+        };
+        return mix(color, ink, amount);
     }
 
     private static int applyRelief(

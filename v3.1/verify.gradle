@@ -226,7 +226,12 @@ tasks.register('verifyV31FrontendThemes') {
         }
         ['record HandDrawnMapData(', 'static final int CELL_SIZE = 4;',
          'private enum TerrainClass', 'TerrainClass.VEGETATION',
-         'classes[cell] = waterPct >= 25 ? TerrainClass.WATER : dominant(votes);',
+         'static final int WATER_THRESHOLD = 19;',
+         'classes[cell] = waterPct >= WATER_THRESHOLD',
+         'depth[cell] = waterCount == 0',
+         'depth = smoothWaterDepth(depth, water);',
+         'int waterDepthAtPixel(int localX, int localZ)',
+         'int shorelineStrengthAtPixel(int localX, int localZ, int radius)',
          'Arrays.sort(heights, 0, heightCount);',
          'relief[cell] = heights[heightCount / 2];',
          'classes = smoothClasses(classes, water);',
@@ -236,6 +241,18 @@ tasks.register('verifyV31FrontendThemes') {
             if (!handData.contains(token)) {
                 throw new GradleException('HandDrawnMapData contract is incomplete: ' + token)
             }
+        }
+        ['applyHandDrawnWaterDepth(color, depth, style)',
+         'applyHandDrawnShoreline(color, shoreline, style)',
+         'HandDrawnMapData.WATER_THRESHOLD',
+         'private static int applyHandDrawnWaterDepth',
+         'private static int applyHandDrawnShoreline'].each { token ->
+            if (!processors.contains(token)) {
+                throw new GradleException('Hand-drawn water presentation is incomplete: ' + token)
+            }
+        }
+        if (!renderer.contains('private static final long PIPELINE_VERSION = 4L;')) {
+            throw new GradleException('Presentation pipeline version must invalidate pre-water-semantics atlases')
         }
         ['switch (CartographSettings.drawingMode())',
          'case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);',

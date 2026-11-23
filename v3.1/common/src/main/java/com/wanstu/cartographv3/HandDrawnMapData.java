@@ -6,20 +6,21 @@ import java.util.Arrays;
  * Abstract map representation derived from SurfaceTile facts.
  *
  * A 16x16 factual tile is aggregated into 4x4 semantic cells before any visual
- * style sees it. A cell stores a dominant terrain class and robust relief facts,
- * not averaged block pixels, so hand-drawn mode cannot collapse back into a
- * blurred satellite image.
+ * style sees it. Cells carry terrain classes, water semantics and robust relief
+ * facts rather than averaged block pixels.
  */
 record HandDrawnMapData(
         ChunkKey key,
         int[] regionColor,
         int[] waterPercent,
+        int[] waterDepth,
         int[] averageRelief,
         int[] reliefRange) {
 
     static final int CELL_SIZE = 4;
     static final int GRID = SurfaceTile.SIZE / CELL_SIZE;
     static final int CELLS = GRID * GRID;
+    static final int WATER_THRESHOLD = 19;
 
     private enum TerrainClass {
         UNKNOWN(0),
@@ -44,6 +45,7 @@ record HandDrawnMapData(
         int[] source = SatelliteSurfaceRenderer.renderPixels(tile, 1);
         TerrainClass[] classes = new TerrainClass[CELLS];
         int[] water = new int[CELLS];
+        int[] depth = new int[CELLS];
         int[] relief = new int[CELLS];
         int[] range = new int[CELLS];
 
@@ -53,14 +55,19 @@ record HandDrawnMapData(
                 int[] heights = new int[CELL_SIZE * CELL_SIZE];
                 int heightCount = 0;
                 int waterCount = 0;
+                int waterDepthTotal = 0;
 
                 for (int dz = 0; dz < CELL_SIZE; dz++) {
                     for (int dx = 0; dx < CELL_SIZE; dx++) {
                         int x = cellX * CELL_SIZE + dx;
                         int z = cellZ * CELL_SIZE + dz;
                         int index = z * SurfaceTile.SIZE + x;
-                        boolean isWater = tile.waterDepthAt(index) > 0;
-                        if (isWater) waterCount++;
+                        int sampleDepth = tile.waterDepthAt(index);
+                        boolean isWater = sampleDepth > 0;
+                        if (isWater) {
+                            waterCount++;
+                            waterDepthTotal += sampleDepth;
+                        }
 
                         TerrainClass terrain = classify(source[index], isWater);
                         if (terrain != TerrainClass.UNKNOWN) votes[terrain.ordinal()]++;
@@ -73,7 +80,10 @@ record HandDrawnMapData(
                 int cell = cellZ * GRID + cellX;
                 int waterPct = waterCount * 100 / (CELL_SIZE * CELL_SIZE);
                 water[cell] = waterPct;
-                classes[cell] = waterPct >= 25 ? TerrainClass.WATER : dominant(votes);
+                depth[cell] = waterCount == 0
+                        ? 0 : Math.round((float) waterDepthTotal / waterCount);
+                classes[cell] = waterPct >= WATER_THRESHOLD
+                        ? TerrainClass.WATER : dominant(votes);
 
                 if (heightCount == 0) {
                     relief[cell] = SurfaceTile.UNKNOWN_HEIGHT;
@@ -89,12 +99,13 @@ record HandDrawnMapData(
         }
 
         classes = smoothClasses(classes, water);
+        depth = smoothWaterDepth(depth, water);
         relief = smoothRelief(relief);
         range = smoothRanges(range);
         int[] colors = new int[CELLS];
         for (int i = 0; i < CELLS; i++) colors[i] = classes[i].color;
 
-        return new HandDrawnMapData(tile.key(), colors, water, relief, range);
+        return new HandDrawnMapData(tile.key(), colors, water, depth, relief, range);
     }
 
     /**
@@ -146,16 +157,15 @@ record HandDrawnMapData(
     }
 
     /**
-     * Remove isolated 4-block material islands while keeping water boundaries.
-     * This operates on semantic classes, not colors, so no texture variation can
-     * re-enter the hand-drawn representation.
+     * Remove isolated material islands while protecting meaningful water cells.
      */
     private static TerrainClass[] smoothClasses(TerrainClass[] source, int[] waterPercent) {
         TerrainClass[] smoothed = source.clone();
         for (int z = 0; z < GRID; z++) {
             for (int x = 0; x < GRID; x++) {
                 int index = z * GRID + x;
-                if (source[index] == TerrainClass.WATER && waterPercent[index] >= 35) continue;
+                if (source[index] == TerrainClass.WATER
+                        && waterPercent[index] >= WATER_THRESHOLD) continue;
 
                 int[] votes = new int[TerrainClass.values().length];
                 for (int dz = -1; dz <= 1; dz++) {
@@ -173,6 +183,38 @@ record HandDrawnMapData(
                 }
                 TerrainClass majority = dominant(votes);
                 if (majority != TerrainClass.UNKNOWN) smoothed[index] = majority;
+            }
+        }
+        return smoothed;
+    }
+
+    /**
+     * Water depth is a map-scale semantic. Smooth it only through cells that
+     * actually contain water so depth shading never bleeds onto dry land.
+     */
+    private static int[] smoothWaterDepth(int[] source, int[] waterPercent) {
+        int[] smoothed = source.clone();
+        for (int z = 0; z < GRID; z++) {
+            for (int x = 0; x < GRID; x++) {
+                int index = z * GRID + x;
+                if (waterPercent[index] < WATER_THRESHOLD) continue;
+
+                int sum = 0;
+                int weight = 0;
+                for (int dz = -1; dz <= 1; dz++) {
+                    int sampleZ = z + dz;
+                    if (sampleZ < 0 || sampleZ >= GRID) continue;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int sampleX = x + dx;
+                        if (sampleX < 0 || sampleX >= GRID) continue;
+                        int sample = sampleZ * GRID + sampleX;
+                        if (waterPercent[sample] < WATER_THRESHOLD) continue;
+                        int w = dx == 0 && dz == 0 ? 4 : 1;
+                        sum += source[sample] * w;
+                        weight += w;
+                    }
+                }
+                if (weight > 0) smoothed[index] = Math.round((float) sum / weight);
             }
         }
         return smoothed;
@@ -244,6 +286,36 @@ record HandDrawnMapData(
 
     int waterPercentAtPixel(int localX, int localZ) {
         return interpolateScalar(waterPercent, localX, localZ, Integer.MIN_VALUE);
+    }
+
+    int waterDepthAtPixel(int localX, int localZ) {
+        return interpolateScalar(waterDepth, localX, localZ, Integer.MIN_VALUE);
+    }
+
+    int shorelineStrengthAtPixel(int localX, int localZ, int radius) {
+        int center = waterPercentAtPixel(localX, localZ);
+        if (center == Integer.MIN_VALUE) return 0;
+
+        int sampleRadius = Math.max(1, Math.min(CELL_SIZE, radius));
+        boolean water = center >= WATER_THRESHOLD;
+        int[] samples = {
+                waterPercentAtPixel(Math.max(0, localX - sampleRadius), localZ),
+                waterPercentAtPixel(Math.min(SurfaceTile.SIZE - 1, localX + sampleRadius), localZ),
+                waterPercentAtPixel(localX, Math.max(0, localZ - sampleRadius)),
+                waterPercentAtPixel(localX, Math.min(SurfaceTile.SIZE - 1, localZ + sampleRadius))
+        };
+
+        int strongest = 0;
+        for (int sample : samples) {
+            if (sample == Integer.MIN_VALUE) continue;
+            if ((sample >= WATER_THRESHOLD) != water) return 100;
+            strongest = Math.max(strongest, Math.abs(center - sample));
+        }
+
+        if (center >= WATER_THRESHOLD - 6 && center <= WATER_THRESHOLD + 20) {
+            strongest = Math.max(strongest, 32);
+        }
+        return Math.min(100, strongest * 2);
     }
 
     int averageReliefAtPixel(int localX, int localZ) {
