@@ -677,7 +677,6 @@ final class InGameMapScreen extends AtlasScreenBase {
     }
 
     void refreshRaster() {
-        tiles.close();
         SatelliteSurfaceRenderer.beginMapSession();
         viewportDelay = 1;
         notice("地图图像已重新着色");
