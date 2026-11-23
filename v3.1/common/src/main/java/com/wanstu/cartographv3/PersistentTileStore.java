@@ -20,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 
 /**
  * V3.1 authoritative client cache.
@@ -59,6 +60,14 @@ final class PersistentTileStore {
         RegionIndex index = existingIndex(directory);
         if (index != null && !index.mayContain(key)) return Optional.empty();
         return loadRaw(file(directory, key), key);
+    }
+
+    static void loadAsync(
+            UUID worldId, ChunkKey key, BooleanSupplier current,
+            BiConsumer<UUID, Optional<SurfaceTile>> consumer) {
+        READER.execute(() -> {
+            if (current.getAsBoolean()) consumer.accept(worldId, load(worldId, key));
+        });
     }
 
     private static Optional<SurfaceTile> loadRaw(Path file, ChunkKey key) {
@@ -103,14 +112,17 @@ final class PersistentTileStore {
             int minChunkX, int maxChunkX,
             int minChunkZ, int maxChunkZ,
             Set<ChunkKey> scheduled,
+            BooleanSupplier current,
             BiConsumer<UUID, SurfaceTile> consumer) {
         if (worldId == null || dimension == null || dimension.isBlank()
                 || scheduled == null || consumer == null) return;
 
         Path directory = directory(worldId, dimension);
         READER.execute(() -> {
+            if (!current.getAsBoolean()) return;
             RegionIndex index = indexFor(directory);
             if (!index.prepare(directory, dimension)) return;
+            if (!current.getAsBoolean()) return;
             List<ChunkKey> candidates = index.inBounds(minChunkX, maxChunkX, minChunkZ, maxChunkZ);
             candidates.removeIf(key -> !scheduled.add(key));
 
@@ -123,6 +135,7 @@ final class PersistentTileStore {
             }));
 
             for (ChunkKey key : candidates) {
+                if (!current.getAsBoolean()) return;
                 Path file = file(directory, key);
                 Optional<SurfaceTile> tile = loadRaw(file, key);
                 if (tile.isPresent()) {
@@ -190,10 +203,12 @@ final class PersistentTileStore {
 
     static void delete(UUID worldId, ChunkKey key) {
         Path target = file(directory(worldId, key.dimension()), key);
-        try {
-            Files.deleteIfExists(target);
-            refreshIndex(target, key);
-        } catch (IOException ignored) {}
+        WRITER.execute(() -> {
+            try {
+                Files.deleteIfExists(target);
+                refreshIndex(target, key);
+            } catch (IOException ignored) {}
+        });
     }
 
     static void save(UUID worldId, SurfaceTile tile) {

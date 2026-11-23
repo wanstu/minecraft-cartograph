@@ -22,6 +22,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     private Viewport viewport;
     private boolean opened;
     private boolean viewStateSent;
+    private boolean viewStateViewing;
     private String viewStateDimension = "";
     private int requestTicks;
 
@@ -75,6 +76,11 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     }
 
     @Override
+    public boolean isTileMissing(ChunkKey key) {
+        return MapClientCache.isMissing(key);
+    }
+
+    @Override
     public boolean hasTilesInRegion(String dimension, int regionX, int regionZ) {
         return MapClientCache.hasTilesInRegion(dimension, regionX, regionZ);
     }
@@ -107,10 +113,19 @@ final class MinecraftCartographBackend implements CartographBackendApi {
 
     @Override
     public void updateViewport(Viewport viewport, boolean force) {
+        boolean visibilityChanged = (this.viewport == null) != (viewport == null);
         this.viewport = viewport;
-        if (!opened || viewport == null) return;
+        if (visibilityChanged) {
+            if (viewport != null) MapClientCache.beginMapSession();
+            MapClientCache.cancelVisibleRestores();
+            lastRequestMinChunkX = Integer.MIN_VALUE;
+            lastRequestMaxChunkX = Integer.MIN_VALUE;
+            lastRequestMinChunkZ = Integer.MIN_VALUE;
+            lastRequestMaxChunkZ = Integer.MIN_VALUE;
+        }
+        if (!opened) return;
         ensureViewState();
-        if (!viewStateSent) return;
+        if (!viewStateSent || viewport == null) return;
         requestVisible(force);
     }
 
@@ -219,7 +234,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
             if (viewStateSent) {
                 String dim = dimension();
                 MapTransport.sendToServer(new MapProtocol.MapViewState(
-                        true, ticks, MapClientCache.backgroundCheckpoint(dim)));
+                        true, viewport != null, ticks, MapClientCache.backgroundCheckpoint(dim)));
             }
         }
     }
@@ -229,11 +244,12 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         if (!opened) return;
         opened = false;
         viewport = null;
+        MapClientCache.cancelVisibleRestores();
 
         var connection = minecraft.getConnection();
         if (connection != null && connection.getConnection().isConnected() && viewStateSent) {
             MapTransport.sendToServer(new MapProtocol.MapViewState(
-                    false, CartographSettings.liveScanIntervalTicks(), 0L));
+                    false, false, CartographSettings.liveScanIntervalTicks(), 0L));
         }
         viewStateSent = false;
         viewStateDimension = "";
@@ -243,13 +259,16 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         if (!opened || minecraft.level == null || MapClientCache.worldId() == null) return;
         String dim = dimension();
         if (dim.isBlank()) return;
-        if (viewStateSent && dim.equals(viewStateDimension)) return;
+        boolean viewing = viewport != null;
+        if (viewStateSent && dim.equals(viewStateDimension) && viewStateViewing == viewing) return;
 
         MapTransport.sendToServer(new MapProtocol.MapViewState(
                 true,
+                viewing,
                 CartographSettings.liveScanIntervalTicks(),
                 MapClientCache.backgroundCheckpoint(dim)));
         viewStateSent = true;
+        viewStateViewing = viewing;
         viewStateDimension = dim;
     }
 
@@ -304,6 +323,7 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         if (!force && !viewportChanged) return;
 
         if (viewportChanged) {
+            MapClientCache.cancelVisibleRestores();
             MapClientCache.restoreVisibleFromDisk(
                     dim, rawMinChunkX, rawMaxChunkX, rawMinChunkZ, rawMaxChunkZ);
 
@@ -326,6 +346,12 @@ final class MinecraftCartographBackend implements CartographBackendApi {
                         Math.abs(rawMaxChunkZ - centerChunkZ)));
 
         int requestBatch = CartographSettings.requestBatchSize();
+        // Disk restores finish after their first cursor pass. Revisit skipped
+        // keys so asynchronous hits and misses can both reach the server.
+        if (force && requestRing > maxRadius) {
+            requestRing = 0;
+            requestRingOffset = 0;
+        }
         int requestBudget = Math.min(
                 requestBatch,
                 Math.max(0, maxPendingRequests() - MapClientCache.pendingCount()));

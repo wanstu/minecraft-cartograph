@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Persistent cache for fully rendered native-map atlases.
@@ -46,6 +47,14 @@ final class PersistentRenderedAtlasStore {
     private static final Set<Path> SCHEDULED = ConcurrentHashMap.newKeySet();
     private static final ConcurrentHashMap<IndexKey, Set<String>> REGION_INDEX =
             new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<IndexKey, CompletableFuture<Void>> INDEX_LOADS =
+            new ConcurrentHashMap<>();
+    private static final ExecutorService INDEX_READER = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "cartograph-v31-rendered-atlas-index");
+        thread.setDaemon(true);
+        return thread;
+    });
+    record RegionPosition(int x, int z) {}
 
     private record PendingWrite(
             IndexKey indexKey,
@@ -100,8 +109,32 @@ final class PersistentRenderedAtlasStore {
             UUID worldId, String dimension, long signature, int regionX, int regionZ) {
         if (worldId == null || dimension == null || dimension.isBlank()) return false;
         IndexKey key = new IndexKey(worldId, dimension, signature);
-        Set<String> regions = REGION_INDEX.computeIfAbsent(key, PersistentRenderedAtlasStore::buildIndex);
+        Set<String> regions = regionIndex(key);
         return regions.contains(regionName(regionX, regionZ));
+    }
+
+    static java.util.List<RegionPosition> regionsInBounds(
+            UUID worldId, String dimension, long signature, int minX, int maxX, int minZ, int maxZ) {
+        if (worldId == null || dimension == null || dimension.isBlank()) return java.util.List.of();
+        java.util.List<RegionPosition> result = new java.util.ArrayList<>();
+        for (String name : regionIndex(new IndexKey(worldId, dimension, signature))) {
+            int split = name.indexOf('_');
+            if (split <= 0 || split == name.length() - 1) continue;
+            try {
+                int x = Integer.parseInt(name.substring(0, split));
+                int z = Integer.parseInt(name.substring(split + 1));
+                if (x >= minX && x <= maxX && z >= minZ && z <= maxZ)
+                    result.add(new RegionPosition(x, z));
+            } catch (NumberFormatException ignored) {}
+        }
+        return result;
+    }
+
+    private static Set<String> regionIndex(IndexKey key) {
+        Set<String> regions = REGION_INDEX.computeIfAbsent(key, ignored -> ConcurrentHashMap.newKeySet());
+        INDEX_LOADS.computeIfAbsent(key, ignored -> CompletableFuture.runAsync(
+                () -> regions.addAll(buildIndex(key)), INDEX_READER));
+        return regions;
     }
 
     static void save(
@@ -122,7 +155,7 @@ final class PersistentRenderedAtlasStore {
         PENDING.put(target, new PendingWrite(
                 indexKey, signature, regionX, regionZ, stride, size,
                 fingerprints.clone(), pixels.clone()));
-        REGION_INDEX.computeIfAbsent(indexKey, PersistentRenderedAtlasStore::buildIndex)
+        regionIndex(indexKey)
                 .add(regionName(regionX, regionZ));
         schedule(target);
     }

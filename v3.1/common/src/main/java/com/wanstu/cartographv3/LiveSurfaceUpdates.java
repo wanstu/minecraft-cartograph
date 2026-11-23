@@ -27,6 +27,7 @@ final class LiveSurfaceUpdates {
 
     private static final class WatchState {
         final LinkedHashMap<ChunkKey, Long> watched = new LinkedHashMap<>();
+        final Set<ChunkKey> refreshing = new HashSet<>();
         int cursor;
         int intervalTicks = 10;
         double refreshCredit = 1.0;
@@ -97,6 +98,7 @@ final class LiveSurfaceUpdates {
             int refreshed = 0;
             int attempts = 0;
             while (refreshed < refreshBudget
+                    && state.refreshing.size() < MAX_REFRESH_PER_PLAYER_PER_TICK
                     && attempts < Math.min(
                             MAX_SCAN_ATTEMPTS_PER_PLAYER_PER_TICK,
                             keys.size())) {
@@ -105,20 +107,28 @@ final class LiveSurfaceUpdates {
                 attempts++;
 
                 if (!key.dimension().equals(dimension)) continue;
+                if (state.refreshing.contains(key)) continue;
                 LevelChunk chunk = level.getChunkSource().getChunkNow(key.x(), key.z());
                 if (chunk == null) continue;
 
                 refreshed++;
                 state.refreshCredit = Math.max(0.0, state.refreshCredit - 1.0);
-                SurfaceService.refreshLoaded(level, key.x(), key.z()).ifPresent(changed -> {
-                    MapProtocol.pushChanged(player, changed);
-                    changedPushes++;
-                    if (changedPushes == 1 || changedPushes % 256 == 0) {
-                        LOG.debug(
-                                "V3_LIVE_PUSH count={} dim={} chunk={},{} fingerprint={}",
-                                changedPushes, key.dimension(), key.x(), key.z(),
-                                Long.toUnsignedString(changed.fingerprint64()));
-                    }
+                state.refreshing.add(key);
+                SurfaceService.refreshLoaded(level, key.x(), key.z()).whenComplete((change, error) -> {
+                    state.refreshing.remove(key);
+                    if (error != null || WATCHERS.get(player.getUUID()) != state
+                            || !state.watched.containsKey(key)
+                            || MapGameAccess.level(player) != level) return;
+                    change.ifPresent(changed -> {
+                        MapProtocol.pushChanged(player, changed);
+                        changedPushes++;
+                        if (changedPushes == 1 || changedPushes % 256 == 0) {
+                            LOG.debug(
+                                    "V3_LIVE_PUSH count={} dim={} chunk={},{} fingerprint={}",
+                                    changedPushes, key.dimension(), key.x(), key.z(),
+                                    Long.toUnsignedString(changed.fingerprint64()));
+                        }
+                    });
                 });
             }
         }

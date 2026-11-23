@@ -16,6 +16,7 @@ public final class CartographServerEvents {
     static void tick(MinecraftServer server) {
         TileRequestScheduler.tick(server);
         LiveSurfaceUpdates.tick(server);
+        LoadedSurfaceReader.tick(server);
     }
 
     static void stopped(MinecraftServer server) {
@@ -23,6 +24,7 @@ public final class CartographServerEvents {
         StructureDiscovery.clear(server);
         TileRequestScheduler.clear();
         LiveSurfaceUpdates.clear();
+        LoadedSurfaceReader.clear(server);
         WorldIdentity.clear(server);
     }
 }

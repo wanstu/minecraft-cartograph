@@ -42,7 +42,7 @@ public final class CartographV3Mod {
     }
 
     private static void registerPayloads(RegisterPayloadHandlersEvent event) {
-        var registrar = event.registrar("9");
+        var registrar = event.registrar("10");
         registrar.playToServer(MapProtocol.MapViewState.TYPE, MapProtocol.MapViewState.CODEC,
                 (packet, context) -> onServer(packet, context, MapProtocol::handleViewState));
         registrar.playToServer(MapProtocol.RequestWorldInfo.TYPE, MapProtocol.RequestWorldInfo.CODEC,

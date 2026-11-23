@@ -410,3 +410,18 @@ tasks.named('check').configure {
     dependsOn tasks.named('verifyV31WebSocketTransport')
     dependsOn tasks.named('verifyV31FrontendThemes')
 }
+
+def performanceVerification = sourceSets.create('performanceVerification') {
+    java.srcDir '../common/src/test/java'
+    compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+    runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+}
+tasks.register('verifyV31PerformanceBudget', JavaExec) {
+    dependsOn tasks.named('performanceVerificationClasses')
+    classpath = performanceVerification.runtimeClasspath
+    mainClass = 'com.wanstu.cartographv3.PerformanceSelfTest'
+    maxHeapSize = '384m'
+}
+tasks.named('check').configure {
+    dependsOn tasks.named('verifyV31PerformanceBudget')
+}

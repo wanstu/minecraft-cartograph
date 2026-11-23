@@ -23,6 +23,7 @@ public final class MapProtocol {
 
     public record MapViewState(
             boolean open,
+            boolean viewing,
             int liveScanIntervalTicks,
             long backgroundCheckpointMillis)
             implements CustomPacketPayload {
@@ -36,11 +37,12 @@ public final class MapProtocol {
                 StreamCodec.of(
                         (buf, value) -> {
                             buf.writeBoolean(value.open());
+                            buf.writeBoolean(value.viewing());
                             buf.writeVarInt(value.liveScanIntervalTicks());
                             buf.writeLong(value.backgroundCheckpointMillis());
                         },
                         buf -> new MapViewState(
-                                buf.readBoolean(), buf.readVarInt(), buf.readLong()));
+                                buf.readBoolean(), buf.readBoolean(), buf.readVarInt(), buf.readLong()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
@@ -306,7 +308,12 @@ public final class MapProtocol {
     static void handleViewState(ServerPlayer player, MapViewState request) {
         if (request.open()) {
             TileRequestScheduler.open(player, request.backgroundCheckpointMillis());
-            LiveSurfaceUpdates.open(player, request.liveScanIntervalTicks());
+            TileRequestScheduler.setViewing(player, request.viewing());
+            if (request.viewing()) {
+                LiveSurfaceUpdates.open(player, request.liveScanIntervalTicks());
+            } else {
+                LiveSurfaceUpdates.close(player);
+            }
         } else {
             LiveSurfaceUpdates.close(player);
             TileRequestScheduler.close(player);

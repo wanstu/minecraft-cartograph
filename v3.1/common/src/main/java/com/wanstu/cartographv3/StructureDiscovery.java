@@ -20,8 +20,17 @@ import java.util.concurrent.ConcurrentHashMap;
 final class StructureDiscovery {
     private record Key(String worldRoot, String dimension, int x, int z) {}
 
-    private static final ConcurrentHashMap<Key, List<MapProtocol.StructureHit>> CACHE =
-            new ConcurrentHashMap<>();
+    private static final java.util.Map<Key, List<MapProtocol.StructureHit>> CACHE =
+            java.util.Collections.synchronizedMap(
+                    new LinkedHashMap<Key, List<MapProtocol.StructureHit>>(256, .75f, true) {
+                        @Override
+                        protected boolean removeEldestEntry(
+                                java.util.Map.Entry<Key, List<MapProtocol.StructureHit>> eldest) {
+                            if (size() <= 8192) return false;
+                            STALE.remove(eldest.getKey());
+                            return true;
+                        }
+                    });
     private static final Set<Key> STALE = ConcurrentHashMap.newKeySet();
     private static final ConcurrentHashMap<
             Key, CompletableFuture<List<MapProtocol.StructureHit>>> PENDING =
@@ -84,7 +93,8 @@ final class StructureDiscovery {
     }
 
     static void invalidate(ServerLevel level, ChunkPos pos) {
-        STALE.add(key(level, MapGameAccess.chunkX(pos), MapGameAccess.chunkZ(pos)));
+        Key key = key(level, MapGameAccess.chunkX(pos), MapGameAccess.chunkZ(pos));
+        if (CACHE.containsKey(key) || PENDING.containsKey(key)) STALE.add(key);
     }
 
     static void clear(MinecraftServer server) {

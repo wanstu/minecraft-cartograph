@@ -37,6 +37,8 @@ interface CartographBackendApi extends AutoCloseable {
 
     SurfaceTile tile(ChunkKey key);
 
+    boolean isTileMissing(ChunkKey key);
+
     boolean hasTilesInRegion(String dimension, int regionX, int regionZ);
 
     long regionRevision(String dimension, int regionX, int regionZ);

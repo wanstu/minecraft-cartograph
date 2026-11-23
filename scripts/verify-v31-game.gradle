@@ -1,0 +1,23 @@
+// Run with: gradlew -I ../../scripts/verify-v31-game.gradle runPerformance
+allprojects {
+    plugins.withId('net.neoforged.moddev') {
+        sourceSets.main.java.srcDir 'src/performanceTest/java'
+        sourceSets.main.resources.srcDir 'src/performanceTest/resources'
+        neoForge.runs.create('performance') {
+            type = 'gameTestServer'
+            gameDirectory = file('build/performance-game')
+            systemProperty 'neoforge.enabledGameTestNamespaces', 'cartograph_v3'
+            jvmArgument '-Xmx768m'
+        }
+        neoForge.runs.create('nativePerformance') {
+            client()
+            gameDirectory = file('build/native-performance')
+            systemProperty 'cartograph.nativePerformanceProbe', 'true'
+            jvmArgument '-Xmx1G'
+            programArgument '--width'
+            programArgument '1280'
+            programArgument '--height'
+            programArgument '720'
+        }
+    }
+}

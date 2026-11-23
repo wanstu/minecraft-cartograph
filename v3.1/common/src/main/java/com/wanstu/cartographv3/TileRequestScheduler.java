@@ -44,6 +44,7 @@ final class TileRequestScheduler {
 
     private static final Map<UUID, PlayerQueue> QUEUES = new LinkedHashMap<>();
     private static final Set<UUID> OPEN_PLAYERS = new HashSet<>();
+    private static final Set<UUID> VIEWING_PLAYERS = new HashSet<>();
     private static int playerCursor;
     private static int schedulerTicks;
 
@@ -58,7 +59,7 @@ final class TileRequestScheduler {
 
     static void enqueue(ServerPlayer player, MapProtocol.RequestTile request) {
         if (player == null || request == null) return;
-        if (!OPEN_PLAYERS.contains(player.getUUID())) {
+        if (!VIEWING_PLAYERS.contains(player.getUUID())) {
             sendRetry(player, request);
             return;
         }
@@ -92,7 +93,17 @@ final class TileRequestScheduler {
     static void close(ServerPlayer player) {
         if (player == null) return;
         OPEN_PLAYERS.remove(player.getUUID());
+        setViewing(player, false);
         GeneratedChunkBackfill.close(player);
+    }
+
+    static void setViewing(ServerPlayer player, boolean viewing) {
+        if (player == null) return;
+        if (viewing) {
+            VIEWING_PLAYERS.add(player.getUUID());
+            return;
+        }
+        VIEWING_PLAYERS.remove(player.getUUID());
         PlayerQueue queue = QUEUES.get(player.getUUID());
         if (queue == null) return;
 
@@ -110,6 +121,7 @@ final class TileRequestScheduler {
     static void clear() {
         QUEUES.clear();
         OPEN_PLAYERS.clear();
+        VIEWING_PLAYERS.clear();
         GeneratedChunkBackfill.clear();
         playerCursor = 0;
         schedulerTicks = 0;
@@ -120,6 +132,8 @@ final class TileRequestScheduler {
         QUEUES.keySet().removeIf(uuid ->
                 server.getPlayerList().getPlayer(uuid) == null);
         OPEN_PLAYERS.removeIf(uuid ->
+                server.getPlayerList().getPlayer(uuid) == null);
+        VIEWING_PLAYERS.removeIf(uuid ->
                 server.getPlayerList().getPlayer(uuid) == null);
         GeneratedChunkBackfill.prune(server);
 

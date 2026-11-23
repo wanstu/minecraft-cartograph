@@ -10,7 +10,8 @@ public final class MapClientCache {
     private static final org.slf4j.Logger LOG =
             org.slf4j.LoggerFactory.getLogger("cartograph.v3.client");
     private record CachedTile(SurfaceTile tile, boolean restoredFromDisk) {}
-    private static final Map<ChunkKey, CachedTile> TILES = new HashMap<>();
+    private static final int MAX_CACHED_TILES = 8192;
+    private static final Map<ChunkKey, CachedTile> TILES = new LinkedHashMap<>(256, .75f, true);
     private static final Set<ChunkKey> PENDING = new HashSet<>();
     private static final Map<ChunkKey, Integer> MISSING_AT = new HashMap<>();
     private static final Map<ChunkKey, Long> VALIDATED_SESSION = new HashMap<>();
@@ -21,7 +22,8 @@ public final class MapClientCache {
             java.util.function.Consumer<ChunkKey>> TILE_CHANGE_LISTENERS =
             new java.util.concurrent.CopyOnWriteArrayList<>();
     private record DiskRestore(
-            java.util.UUID worldId, long generation, SurfaceTile tile) {}
+            java.util.UUID worldId, long generation, ChunkKey key,
+            SurfaceTile tile, boolean requestAfterRead) {}
     private static Set<ChunkKey> DISK_RESTORE_SCHEDULED = ConcurrentHashMap.newKeySet();
     private static final ArrayBlockingQueue<DiskRestore> DISK_RESTORE_QUEUE =
             new ArrayBlockingQueue<>(1024);
@@ -35,6 +37,7 @@ public final class MapClientCache {
     private static long firstRequestNanos;
     private static int received;
     private static int validated;
+    private static int diskRestored;
     private static long mapSession;
     private static long regionRevisionCounter;
     private static volatile long diskRestoreGeneration;
@@ -59,6 +62,7 @@ public final class MapClientCache {
         firstRequestNanos = 0L;
         received = 0;
         validated = 0;
+        diskRestored = 0;
         MapMarkerStore.ensureWorld(null);
         if (level != null) requestWorldInfo();
     }
@@ -83,6 +87,23 @@ public final class MapClientCache {
         return cached == null ? null : cached.tile();
     }
 
+    static boolean isMissing(ChunkKey key) { return MISSING_AT.containsKey(key); }
+
+    private static void putTile(ChunkKey key, CachedTile tile) {
+        if (TILES.put(key, tile) == null) addRegionTile(key);
+        while (TILES.size() > MAX_CACHED_TILES) {
+            var iterator = TILES.keySet().iterator();
+            ChunkKey evicted = iterator.next();
+            iterator.remove();
+            removeRegionTile(evicted);
+            DISK_RESTORE_SCHEDULED.remove(evicted);
+            VALIDATED_SESSION.remove(evicted);
+            // Eviction only drops RAM facts. Persisted presentation pixels
+            // remain valid and must not be treated as a missing chunk.
+        }
+        markRegionChanged(key);
+    }
+
     public static void restoreVisibleFromDisk(
             String dimension,
             int minChunkX, int maxChunkX,
@@ -99,8 +120,16 @@ public final class MapClientCache {
                 minChunkX, maxChunkX,
                 minChunkZ, maxChunkZ,
                 scheduled,
+                () -> generation == diskRestoreGeneration,
                 (restoreWorldId, tile) ->
-                        enqueueDiskRestore(restoreWorldId, generation, tile, scheduled));
+                        enqueueDiskRestore(new DiskRestore(
+                                restoreWorldId, generation, tile.key(), tile, false), scheduled));
+    }
+
+    static void cancelVisibleRestores() {
+        resetDiskRestores();
+        // Existing facts need no second disk read when a frontend reopens.
+        DISK_RESTORE_SCHEDULED.addAll(TILES.keySet());
     }
 
     private static void resetDiskRestores() {
@@ -110,13 +139,10 @@ public final class MapClientCache {
     }
 
     private static void enqueueDiskRestore(
-            java.util.UUID restoreWorldId,
-            long generation,
-            SurfaceTile tile,
+            DiskRestore restore,
             Set<ChunkKey> scheduled) {
-        DiskRestore restore = new DiskRestore(restoreWorldId, generation, tile);
         try {
-            while (generation == diskRestoreGeneration) {
+            while (restore.generation() == diskRestoreGeneration) {
                 if (DISK_RESTORE_QUEUE.offer(
                         restore, 25, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                     return;
@@ -125,7 +151,7 @@ public final class MapClientCache {
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
         }
-        scheduled.remove(tile.key());
+        scheduled.remove(restore.key());
     }
 
     private static void drainDiskRestores() {
@@ -141,18 +167,19 @@ public final class MapClientCache {
             }
 
             SurfaceTile raw = next.tile();
-            ChunkKey key = raw.key();
-            if (MISSING_AT.containsKey(key) || TILES.containsKey(key)) continue;
-
-            TILES.put(key, new CachedTile(raw, true));
-            addRegionTile(key);
-            markRegionChanged(key);
+            ChunkKey key = next.key();
+            if (raw != null && !MISSING_AT.containsKey(key) && !TILES.containsKey(key)) {
+                putTile(key, new CachedTile(raw, true));
+            }
+            if (next.requestAfterRead()) {
+                if (raw == null) DISK_RESTORE_SCHEDULED.remove(key);
+                requestFromServer(key);
+            }
             restored++;
 
-            int total = TILES.size();
-            if (total == 1 || total % 512 == 0) {
+            if (raw != null && (++diskRestored == 1 || diskRestored % 512 == 0)) {
                 LOG.info("V3_MAP_CACHE_RESTORE restored={} example={},{}",
-                        total, key.x(), key.z());
+                        diskRestored, key.x(), key.z());
             }
         }
     }
@@ -182,26 +209,29 @@ public final class MapClientCache {
             return;
         }
 
-        java.util.Optional<SurfaceTile> disk = PersistentTileStore.load(worldId, key);
-        if (disk.isPresent()) {
-            SurfaceTile restoredTile = disk.get();
-            if (TILES.put(key, new CachedTile(restoredTile, true)) == null) addRegionTile(key);
-            markRegionChanged(key);
-            int restored = TILES.size();
-            if (restored == 1 || restored % 64 == 0)
-                LOG.info("V3_MAP_CACHE_RESTORE restored={} example={},{}",
-                        restored, key.x(), key.z());
-            PENDING.add(key);
-            MapTransport.sendToServer(new MapProtocol.RequestTile(
-                    key.dimension(), key.x(), key.z(), true, restoredTile.fingerprint64()));
-            return;
-        }
         Integer missing = MISSING_AT.get(key);
         if (missing != null && ticks - missing < 40) return;
+        Set<ChunkKey> scheduled = DISK_RESTORE_SCHEDULED;
+        if (!scheduled.add(key)) return;
+        long generation = diskRestoreGeneration;
+        PersistentTileStore.loadAsync(worldId, key,
+                () -> generation == diskRestoreGeneration,
+                (id, disk) -> enqueueDiskRestore(new DiskRestore(
+                        id, generation, key, disk.orElse(null), true), scheduled));
+    }
+
+    private static void requestFromServer(ChunkKey key) {
+        if (world == null || worldId == null || PENDING.contains(key)) return;
+        Integer missing = MISSING_AT.get(key);
+        if (missing != null && ticks - missing < 40) return;
+        SurfaceTile inMemory = tile(key);
+        if (inMemory != null
+                && VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) == mapSession) return;
         PENDING.add(key);
         if (firstRequestNanos == 0L) firstRequestNanos = System.nanoTime();
         MapTransport.sendToServer(new MapProtocol.RequestTile(
-                key.dimension(), key.x(), key.z(), false, 0L));
+                key.dimension(), key.x(), key.z(), inMemory != null,
+                inMemory == null ? 0L : inMemory.fingerprint64()));
     }
 
     public static void accept(MapProtocol.WorldInfo info) {
@@ -284,9 +314,7 @@ public final class MapClientCache {
         }
 
         SurfaceTile tile = packet.toSurfaceTile(key);
-        TILES.put(key, new CachedTile(tile, false));
-        if (existing == null) addRegionTile(key);
-        markRegionChanged(key);
+        putTile(key, new CachedTile(tile, false));
         if (worldId != null) PersistentTileStore.save(worldId, tile);
         received++;
         if (received == 1 || received % 64 == 0) {

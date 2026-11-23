@@ -250,8 +250,13 @@ final class GeneratedChunkBackfill {
             List<ChunkKey> output) {
         try (RandomAccessFile file = new RandomAccessFile(regionFile.toFile(), "r")) {
             if (file.length() < 4096L) return;
+            // RandomAccessFile.readInt performs unbuffered reads. Read the
+            // whole location table once instead of thousands of tiny reads.
+            byte[] locations = new byte[4096];
+            file.readFully(locations);
+            java.nio.ByteBuffer header = java.nio.ByteBuffer.wrap(locations);
             for (int index = 0; index < 1024; index++) {
-                int location = file.readInt();
+                int location = header.getInt();
                 int sector = location >>> 8;
                 int sectors = location & 0xff;
                 if (sector < 2 || sectors == 0) continue;

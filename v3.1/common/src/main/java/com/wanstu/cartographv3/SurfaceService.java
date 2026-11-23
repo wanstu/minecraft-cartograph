@@ -20,7 +20,16 @@ final class SurfaceService {
             new java.util.concurrent.atomic.AtomicInteger();
     private record Key(String worldRoot, String dimension, int x, int z) {}
 
-    private static final ConcurrentHashMap<Key, SurfaceTile> CACHE = new ConcurrentHashMap<>();
+    private static final int MAX_CACHED_TILES = 8192;
+    private static final java.util.Map<Key, SurfaceTile> CACHE = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<Key, SurfaceTile>(256, .75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<Key, SurfaceTile> eldest) {
+                    if (size() <= MAX_CACHED_TILES) return false;
+                    DISK_STALE.remove(eldest.getKey());
+                    return true;
+                }
+            });
     private static final Set<Key> DISK_STALE = ConcurrentHashMap.newKeySet();
     private static final ConcurrentHashMap<Key, CompletableFuture<Optional<SurfaceTile>>> PENDING =
             new ConcurrentHashMap<>();
@@ -56,17 +65,16 @@ final class SurfaceService {
         if (cached != null && !DISK_STALE.contains(key))
             return CompletableFuture.completedFuture(Optional.of(cached));
 
-        if (watchLive) {
-            Optional<SurfaceTile> loaded = LoadedSurfaceReader.capture(level, chunkX, chunkZ);
-            if (loaded.isPresent()) {
-                CACHE.put(key, loaded.get());
+        if (watchLive && level.getChunkSource().getChunkNow(chunkX, chunkZ) != null) {
+            return LoadedSurfaceReader.captureAsync(level, chunkX, chunkZ).thenApply(loaded -> {
+                loaded.ifPresent(tile -> CACHE.put(key, tile));
                 DISK_STALE.remove(key);
                 int count = LOADED_HITS.incrementAndGet();
                 if (count == 1 || count % 64 == 0)
                     LOG.info("V3_LOADED_DIRECT_READ count={} dim={} example={},{}",
                             count, dimension, chunkX, chunkZ);
-                return CompletableFuture.completedFuture(loaded);
-            }
+                return loaded;
+            });
         }
 
         CompletableFuture<Optional<SurfaceTile>> existing = PENDING.get(key);
@@ -106,28 +114,29 @@ final class SurfaceService {
         return future;
     }
 
-    static Optional<SurfaceTile> refreshLoaded(
+    static CompletableFuture<Optional<SurfaceTile>> refreshLoaded(
             ServerLevel level, int chunkX, int chunkZ) {
         if (!level.getServer().isSameThread())
             throw new IllegalStateException("Live surface refresh must run on server thread");
 
-        Optional<SurfaceTile> current = LoadedSurfaceReader.capture(level, chunkX, chunkZ);
-        if (current.isEmpty()) return Optional.empty();
-
         Key key = key(level, chunkX, chunkZ);
-        SurfaceTile next = current.get();
-        SurfaceTile previous = CACHE.put(key, next);
-        DISK_STALE.remove(key);
-        if (previous != null && previous.fingerprint64() == next.fingerprint64())
-            return Optional.empty();
-        return Optional.of(next);
+        return LoadedSurfaceReader.captureAsync(level, chunkX, chunkZ).thenApply(current -> {
+            if (current.isEmpty()) return Optional.empty();
+            SurfaceTile next = current.get();
+            SurfaceTile previous = CACHE.put(key, next);
+            DISK_STALE.remove(key);
+            if (previous != null && previous.fingerprint64() == next.fingerprint64())
+                return Optional.empty();
+            return Optional.of(next);
+        });
     }
 
     static void invalidate(ServerLevel level, ChunkPos pos) {
         // Save means the on-disk copy may have changed. Keep the in-memory
         // fingerprint so live comparison remains meaningful; only force the
         // next *unloaded* disk request to bypass CACHE.
-        DISK_STALE.add(key(level, MapGameAccess.chunkX(pos), MapGameAccess.chunkZ(pos)));
+        Key key = key(level, MapGameAccess.chunkX(pos), MapGameAccess.chunkZ(pos));
+        if (CACHE.containsKey(key) || PENDING.containsKey(key)) DISK_STALE.add(key);
     }
 
     static void clear(MinecraftServer server) {
