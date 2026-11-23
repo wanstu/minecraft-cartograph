@@ -4,7 +4,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ArrayBlockingQueue;
 
 public final class MapClientCache {
     private static final org.slf4j.Logger LOG =
@@ -23,9 +23,10 @@ public final class MapClientCache {
     private record DiskRestore(
             java.util.UUID worldId, long generation, SurfaceTile tile) {}
     private static Set<ChunkKey> DISK_RESTORE_SCHEDULED = ConcurrentHashMap.newKeySet();
-    private static final ConcurrentLinkedQueue<DiskRestore> DISK_RESTORE_QUEUE =
-            new ConcurrentLinkedQueue<>();
-    private static final int MAX_DISK_RESTORES_PER_TICK = 512;
+    private static final ArrayBlockingQueue<DiskRestore> DISK_RESTORE_QUEUE =
+            new ArrayBlockingQueue<>(1024);
+    private static final int MAX_DISK_RESTORES_PER_TICK = 32;
+    private static final long MAX_DISK_RESTORE_NANOS_PER_TICK = 1_000_000L;
 
     private static ClientLevel world;
     private static java.util.UUID worldId;
@@ -36,7 +37,7 @@ public final class MapClientCache {
     private static int validated;
     private static long mapSession;
     private static long regionRevisionCounter;
-    private static long diskRestoreGeneration;
+    private static volatile long diskRestoreGeneration;
 
     private MapClientCache() {}
 
@@ -99,35 +100,7 @@ public final class MapClientCache {
                 minChunkZ, maxChunkZ,
                 scheduled,
                 (restoreWorldId, tile) ->
-                        DISK_RESTORE_QUEUE.add(
-                                new DiskRestore(restoreWorldId, generation, tile)));
-    }
-
-    private static void preloadCurrentDimensionFromDisk(String dimension) {
-        java.util.UUID currentWorldId = worldId;
-        if (world == null || currentWorldId == null
-                || dimension == null || dimension.isBlank()) {
-            return;
-        }
-
-        var player = net.minecraft.client.Minecraft.getInstance().player;
-        if (player != null) {
-            int centerChunkX = Math.floorDiv((int) Math.floor(player.getX()), 16);
-            int centerChunkZ = Math.floorDiv((int) Math.floor(player.getZ()), 16);
-            int radius = 1024;
-            Set<ChunkKey> scheduled = DISK_RESTORE_SCHEDULED;
-            long generation = diskRestoreGeneration;
-            PersistentTileStore.loadVisibleAsync(
-                    currentWorldId,
-                    dimension,
-                    centerChunkX - radius, centerChunkX + radius,
-                    centerChunkZ - radius, centerChunkZ + radius,
-                    scheduled,
-                    (restoreWorldId, tile) ->
-                            DISK_RESTORE_QUEUE.add(
-                                    new DiskRestore(restoreWorldId, generation, tile)));
-        }
-
+                        enqueueDiskRestore(restoreWorldId, generation, tile, scheduled));
     }
 
     private static void resetDiskRestores() {
@@ -136,9 +109,30 @@ public final class MapClientCache {
         DISK_RESTORE_QUEUE.clear();
     }
 
+    private static void enqueueDiskRestore(
+            java.util.UUID restoreWorldId,
+            long generation,
+            SurfaceTile tile,
+            Set<ChunkKey> scheduled) {
+        DiskRestore restore = new DiskRestore(restoreWorldId, generation, tile);
+        try {
+            while (generation == diskRestoreGeneration) {
+                if (DISK_RESTORE_QUEUE.offer(
+                        restore, 25, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    return;
+                }
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        scheduled.remove(tile.key());
+    }
+
     private static void drainDiskRestores() {
         int restored = 0;
-        while (restored < MAX_DISK_RESTORES_PER_TICK) {
+        long deadline = System.nanoTime() + MAX_DISK_RESTORE_NANOS_PER_TICK;
+        while (restored < MAX_DISK_RESTORES_PER_TICK
+                && System.nanoTime() < deadline) {
             DiskRestore next = DISK_RESTORE_QUEUE.poll();
             if (next == null) break;
             if (!Objects.equals(worldId, next.worldId())
@@ -228,8 +222,7 @@ public final class MapClientCache {
             }
             worldId = next;
             MapMarkerStore.ensureWorld(worldId);
-            preloadCurrentDimensionFromDisk(current);
-            LOG.info("V3_WORLD_ID world={} dimension={} cache_preload=started",
+            LOG.info("V3_WORLD_ID world={} dimension={} cache_restore=on_demand",
                     worldId, current);
         } catch (IllegalArgumentException invalid) {
             worldId = null;
