@@ -224,6 +224,12 @@ tasks.register('verifyV31FrontendThemes') {
             }
         }
         ['record HandDrawnMapData(', 'static final int CELL_SIZE = 4;',
+         'private enum TerrainClass', 'TerrainClass.VEGETATION',
+         'classes[cell] = waterPct >= 25 ? TerrainClass.WATER : dominant(votes);',
+         'Arrays.sort(heights, 0, heightCount);',
+         'relief[cell] = heights[heightCount / 2];',
+         'classes = smoothClasses(classes, water);',
+         'relief = smoothRelief(relief);', 'range = smoothRanges(range);',
          'static HandDrawnMapData from(SurfaceTile tile)',
          'int[] abstractPixels(int stride)'].each { token ->
             if (!handData.contains(token)) {

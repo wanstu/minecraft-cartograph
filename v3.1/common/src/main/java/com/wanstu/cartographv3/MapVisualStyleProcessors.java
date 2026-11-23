@@ -134,7 +134,7 @@ final class MapVisualStyleProcessors {
                 int sx = Math.min(SurfaceTile.SIZE - 1, x * stride + sampleOffset);
                 int sz = Math.min(SurfaceTile.SIZE - 1, z * stride + sampleOffset);
                 int relief = data.averageReliefAtPixel(sx, sz);
-                boolean water = data.waterPercentAtPixel(sx, sz) >= 45;
+                boolean water = data.waterPercentAtPixel(sx, sz) >= 25;
                 int color = pixels[z * edge + x];
                 color = applyStyle(color, water, baseX + sx, baseZ + sz, style, true);
 
@@ -163,21 +163,28 @@ final class MapVisualStyleProcessors {
         int result = mix(rgb, paper, water ? (handDrawn ? 38 : 18) : (handDrawn ? 32 : 12));
         result = desaturate(result, handDrawn ? 25 : 10);
         result = adjust(result, handDrawn ? 1.06 : 1.02);
-        return offset(result, noise(worldX, worldZ, handDrawn ? 5 : 3) - (handDrawn ? 2 : 1));
+        return handDrawn ? result : offset(result, noise(worldX, worldZ, 3) - 1);
     }
 
     private static int ancient(
             int rgb, boolean water, int worldX, int worldZ, boolean handDrawn) {
         int result;
         if (water) {
-            result = mix(rgb, 0x789895, handDrawn ? 68 : 52);
-            result = desaturate(result, handDrawn ? 45 : 32);
+            result = mix(rgb, 0x789895, handDrawn ? 62 : 52);
+            result = desaturate(result, handDrawn ? 32 : 32);
+        } else if (handDrawn) {
+            // Hand-drawn data is already categorical. Keep those terrain hues
+            // readable and age them instead of flattening every land class into
+            // the same parchment brown.
+            result = mix(rgb, sepia(rgb), 42);
+            result = mix(result, 0xd1b47b, 22);
+            result = desaturate(result, 18);
         } else {
-            result = mix(sepia(rgb), 0xd1b47b, handDrawn ? 48 : 32);
-            result = desaturate(result, handDrawn ? 28 : 18);
+            result = mix(sepia(rgb), 0xd1b47b, 32);
+            result = desaturate(result, 18);
         }
-        result = quantizeColor(result, handDrawn ? 16 : 12);
-        return offset(result, noise(worldX, worldZ, 7) - 3);
+        result = quantizeColor(result, handDrawn ? 18 : 12);
+        return handDrawn ? result : offset(result, noise(worldX, worldZ, 7) - 3);
     }
 
     private static int anime(
@@ -187,7 +194,7 @@ final class MapVisualStyleProcessors {
         result = saturate(result, handDrawn ? 32 : 18);
         result = adjust(result, handDrawn ? 1.08 : 1.04);
         result = quantizeColor(result, handDrawn ? 18 : 10);
-        return offset(result, noise(worldX, worldZ, 5) - 2);
+        return handDrawn ? result : offset(result, noise(worldX, worldZ, 5) - 2);
     }
 
     private static int applyRelief(
@@ -214,12 +221,12 @@ final class MapVisualStyleProcessors {
 
     private static int applyAbstractRelief(
             int color, int relief, int range, StyleKind style) {
-        if (range <= 2) return color;
-        int amount = Math.min(36, 8 + range * 2);
+        if (range <= 5) return color;
+        int amount = Math.min(24, 4 + range);
         return switch (style) {
-            case MODERN -> mix(color, 0x5d7065, amount / 2);
-            case ANCIENT -> mix(color, 0x59422d, amount);
-            case ANIME -> mix(color, 0x395766, Math.min(30, amount));
+            case MODERN -> mix(color, 0x5d7065, amount / 3);
+            case ANCIENT -> mix(color, 0x59422d, Math.min(22, amount));
+            case ANIME -> mix(color, 0x395766, Math.min(18, amount));
         };
     }
 
