@@ -16,6 +16,7 @@ $server = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'CartographWebUiS
 $dialogs = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'InGameMapDialogs.java')
 $nativeUi = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'InGameMapUi.java')
 $nativeTiles = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'InGameMapTiles.java')
+$renderedAtlasStore = Get-Content -Raw -Encoding UTF8 (Join-Path $javaRoot 'PersistentRenderedAtlasStore.java')
 $errors = [System.Collections.Generic.List[string]]::new()
 
 function Require-Contains([string]$text,[string]$needle,[string]$message) {
@@ -125,6 +126,28 @@ foreach ($token in @(
     $errors.Add("native presentation integration missing: $token")
   }
 }
+
+foreach ($token in @(
+  'private record TextureKey(Region region, int stride, long signature) {}',
+  'private long targetSignature;',
+  'private long displaySignature;',
+  'targetSignature = appearance;',
+  'if (allTargetReady && !visible.isEmpty()) displaySignature = targetSignature;',
+  'PersistentRenderedAtlasStore.load(',
+  'PersistentRenderedAtlasStore.save(',
+  'long fingerprint = tile.fingerprint64();',
+  'if (atlas.fingerprints[index] == fingerprint) continue;',
+  'Keep the last fully rendered presentation visible'
+)) { Require-Contains $nativeTiles $token "native rendered-atlas cache contract missing: $token" }
+Require-Absent $nativeTiles 'appearance != signature) {' 'legacy style-switch close path must not return'
+foreach ($token in @(
+  'final class PersistentRenderedAtlasStore',
+  'record Snapshot(long[] fingerprints, int[] pixels)',
+  'cartograph-v31-rendered-atlas-v1',
+  'static Optional<Snapshot> load(',
+  'static void save(',
+  'StandardCopyOption.ATOMIC_MOVE'
+)) { Require-Contains $renderedAtlasStore $token "persistent rendered-atlas store incomplete: $token" }
 
 foreach ($token in @(
   "const DRAWING_MODES = Object.freeze({",

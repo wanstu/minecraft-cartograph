@@ -180,6 +180,7 @@ tasks.register('verifyV31FrontendThemes') {
         def dialogs = file("$commonMain/java/com/wanstu/cartographv3/InGameMapDialogs.java").text
         def nativeUi = file("$commonMain/java/com/wanstu/cartographv3/InGameMapUi.java").text
         def nativeTiles = file("$commonMain/java/com/wanstu/cartographv3/InGameMapTiles.java").text
+        def renderedAtlasStore = file("$commonMain/java/com/wanstu/cartographv3/PersistentRenderedAtlasStore.java").text
 
         ['SATELLITE("satellite", "卫星")',
          'HAND_DRAWN("hand_drawn", "手绘")',
@@ -272,6 +273,30 @@ tasks.register('verifyV31FrontendThemes') {
         if (!nativeUi.contains('MapVisualStyleProcessor.Palette palette = MapPresentationRenderer.palette();')
                 || !nativeTiles.contains('MapPresentationRenderer.renderPixels(tile, stride)')) {
             throw new GradleException('Native frontend is not consuming the split presentation model')
+        }
+
+        ['private record TextureKey(Region region, int stride, long signature) {}',
+         'private long targetSignature;', 'private long displaySignature;',
+         'targetSignature = appearance;',
+         'if (allTargetReady && !visible.isEmpty()) displaySignature = targetSignature;',
+         'PersistentRenderedAtlasStore.load(', 'PersistentRenderedAtlasStore.save(',
+         'long fingerprint = tile.fingerprint64();',
+         'if (atlas.fingerprints[index] == fingerprint) continue;',
+         'Keep the last fully rendered presentation visible'].each { token ->
+            if (!nativeTiles.contains(token)) {
+                throw new GradleException('Native rendered-atlas cache contract is incomplete: ' + token)
+            }
+        }
+        if (nativeTiles.contains('appearance != signature) {')) {
+            throw new GradleException('Legacy style-switch close path must not return')
+        }
+        ['final class PersistentRenderedAtlasStore',
+         'record Snapshot(long[] fingerprints, int[] pixels)',
+         'cartograph-v31-rendered-atlas-v1', 'static Optional<Snapshot> load(',
+         'static void save(', 'StandardCopyOption.ATOMIC_MOVE'].each { token ->
+            if (!renderedAtlasStore.contains(token)) {
+                throw new GradleException('Persistent rendered-atlas store is incomplete: ' + token)
+            }
         }
 
         ['satellite','hand_drawn'].each { id ->

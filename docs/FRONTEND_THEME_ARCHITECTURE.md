@@ -142,6 +142,26 @@ SatelliteMapData      HandDrawnMapData
 3. 读取当前 VisualStyle。
 4. 调用该风格对应的数据结构处理入口。
 
+## 成图缓存
+
+游戏内原生地图区分两类缓存：
+
+- `PersistentTileStore`：权威的 SurfaceTile 世界事实缓存。
+- `PersistentRenderedAtlasStore`：可丢弃、可重建的表现层 Atlas 缓存。
+
+成图缓存的 key 至少包含：世界、维度、区域、stride、`renderSignature`。其中 `renderSignature` 已包含绘图方式、绘图风格、资源包相关卫星渲染签名和表现管线版本，因此不同组合不会互相污染。
+
+每个持久化 Atlas 同时保存：
+
+- 完整像素结果。
+- 组成该 Atlas 的每个 SurfaceTile fingerprint。
+
+重新进入游戏时，原生地图可以先直接恢复 Atlas 像素并立即显示；随后 SurfaceTile 世界事实异步恢复时，再按 fingerprint 增量校验，只重画真正变化的区块。
+
+切换绘图方式或绘图风格时，不允许先清空当前 Atlas。运行时保留 `displaySignature` 对应的最后一套完整地图，同时后台构建新的 `targetSignature`；当前视野的新 Atlas 全部准备完成后再整体切换。已经生成过的组合优先从磁盘成图缓存恢复。
+
+磁盘区域存在性使用内存索引，禁止在超大视野下每帧逐区域执行文件系统探测。
+
 ## 数据边界
 
 VisualStyle / DrawingMode 永远不得拥有或复制：

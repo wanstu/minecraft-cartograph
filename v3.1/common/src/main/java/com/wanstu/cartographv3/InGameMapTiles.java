@@ -4,10 +4,13 @@ import com.mojang.blaze3d.platform.NativeImage;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** Draws cached surface facts at the resolution appropriate for the current view. */
 final class InGameMapTiles implements AutoCloseable {
@@ -21,32 +24,56 @@ final class InGameMapTiles implements AutoCloseable {
     private static final long CPU_BUDGET_NS = 4_000_000L;
 
     private record Region(int x, int z) {}
-    private record TextureKey(Region region, int stride) {}
+    private record TextureKey(Region region, int stride, long signature) {}
     private record DrawTile(Region region, Atlas atlas) {}
+    private record PersistentRegionKey(Region region, long signature) {}
 
     private static final class Atlas {
-        final SurfaceTile[] rendered = new SurfaceTile[REGION_TILES];
+        final long[] fingerprints = new long[REGION_TILES];
+        final boolean[] seenFacts = new boolean[REGION_TILES];
+        final int[] pixels;
         final MapGraphics.Texture texture;
         final int size;
+        final long signature;
         int next = REGION_TILES;
         long revision = Long.MIN_VALUE;
         boolean hasPixels;
         boolean complete;
+        boolean dirtyForSave;
 
-        Atlas(int stride) {
+        Atlas(int stride, long signature, PersistentRenderedAtlasStore.Snapshot restored) {
+            this.signature = signature;
             size = REGION_SIZE / stride;
             texture = new MapGraphics.Texture(size);
+            pixels = new int[size * size];
+
+            if (restored != null) {
+                System.arraycopy(restored.fingerprints(), 0, fingerprints, 0, REGION_TILES);
+                System.arraycopy(restored.pixels(), 0, pixels, 0, pixels.length);
+                NativeImage image = texture.getPixels();
+                for (int y = 0; y < size; y++) {
+                    for (int x = 0; x < size; x++) {
+                        int pixel = pixels[y * size + x];
+                        MapGraphics.writeAbgr(image, x, y, pixel);
+                        hasPixels |= pixel != 0;
+                    }
+                }
+                texture.upload();
+                complete = true;
+            }
         }
 
         long texels() { return (long) size * size; }
     }
 
     private final LinkedHashMap<TextureKey, Atlas> atlases = new LinkedHashMap<>(16, .75f, true);
+    private final Map<PersistentRegionKey, Boolean> persistentRegionPresence = new HashMap<>();
     private final CartographBackendApi backend;
     private List<DrawTile> frame = List.of();
     private long allocatedTexels;
     private String dimension = "";
-    private long signature;
+    private long targetSignature;
+    private long displaySignature;
 
     InGameMapTiles(CartographBackendApi backend) {
         this.backend = backend;
@@ -55,13 +82,20 @@ final class InGameMapTiles implements AutoCloseable {
     void update(InGameMapCamera camera) {
         String dim = backend.dimension();
         long appearance = MapPresentationRenderer.renderSignature();
-        if (!dim.equals(dimension) || appearance != signature) {
+        if (!dim.equals(dimension)) {
             close();
             dimension = dim;
-            signature = appearance;
+            targetSignature = appearance;
+            displaySignature = appearance;
+        } else if (targetSignature != appearance) {
+            // Keep the last fully rendered presentation visible while the new
+            // drawing mode/style is prepared in parallel.
+            targetSignature = appearance;
+            if (displaySignature == 0L) displaySignature = appearance;
         }
         if (dim.isBlank()) return;
 
+        UUID worldId = backend.worldId();
         List<Region> visible = new ArrayList<>();
         int minX = region(camera.worldX(0));
         int maxX = region(camera.worldX(camera.width()));
@@ -70,7 +104,11 @@ final class InGameMapTiles implements AutoCloseable {
         for (int z = minZ; z <= maxZ; z++) {
             for (int x = minX; x <= maxX; x++) {
                 Region key = new Region(x, z);
-                if (hasTiles(dim, key)) visible.add(key);
+                if (hasTiles(dim, key)
+                        || hasInMemoryAtlas(key)
+                        || hasPersistentAtlas(worldId, dim, key, targetSignature)) {
+                    visible.add(key);
+                }
             }
         }
         int middleX = region(camera.worldX(camera.middleX()));
@@ -80,40 +118,104 @@ final class InGameMapTiles implements AutoCloseable {
         int stride = overviewStride(camera.zoom(), visible.size());
         int remaining = MAX_PAINTED_TILES * Math.max(1, stride * stride / 4);
         long deadline = System.nanoTime() + CPU_BUDGET_NS;
+
+        boolean allTargetReady = true;
+        Set<TextureKey> keep = new HashSet<>();
         for (Region region : visible) {
-            if (remaining == 0 || System.nanoTime() >= deadline) break;
-            TextureKey key = new TextureKey(region, stride);
+            TextureKey key = new TextureKey(region, stride, targetSignature);
             Atlas atlas = atlases.get(key);
             if (atlas == null) {
-                atlas = new Atlas(stride);
+                atlas = createAtlas(worldId, dim, region, stride, targetSignature);
                 atlases.put(key, atlas);
                 allocatedTexels += atlas.texels();
             }
-            remaining -= updateAtlas(dim, region, atlas, stride, remaining, deadline);
+            keep.add(key);
+            if (remaining > 0 && System.nanoTime() < deadline) {
+                remaining -= updateAtlas(worldId, dim, region, atlas, stride, remaining, deadline);
+            }
+            allTargetReady &= atlas.complete && atlas.hasPixels;
         }
 
+        if (allTargetReady && !visible.isEmpty()) displaySignature = targetSignature;
+
         List<DrawTile> drawing = new ArrayList<>(visible.size());
-        Set<TextureKey> keep = new HashSet<>();
         for (Region region : visible) {
-            TextureKey key = new TextureKey(region, stride);
-            Atlas atlas = atlases.get(key);
-            if (atlas != null) keep.add(key);
-            if (atlas == null || !atlas.complete) {
-                // Keep displaying cached terrain while another resolution is prepared.
-                for (int alternate = 1; alternate <= CHUNK; alternate *= 2) {
-                    if (alternate == stride) continue;
-                    TextureKey fallback = new TextureKey(region, alternate);
-                    Atlas candidate = atlases.get(fallback);
-                    if (candidate == null || !candidate.complete || !candidate.hasPixels) continue;
-                    keep.add(fallback);
-                    atlas = candidate;
-                    break;
-                }
+            Atlas atlas = findDisplayAtlas(
+                    worldId, dim, region, stride, displaySignature, keep);
+            if (atlas == null && displaySignature != targetSignature) {
+                atlas = findDisplayAtlas(
+                        worldId, dim, region, stride, targetSignature, keep);
             }
             if (atlas != null && atlas.hasPixels) drawing.add(new DrawTile(region, atlas));
         }
+
         frame = drawing;
         evictOffscreen(keep);
+    }
+
+    private Atlas createAtlas(
+            UUID worldId, String dimension, Region region, int stride, long signature) {
+        int size = REGION_SIZE / stride;
+        PersistentRenderedAtlasStore.Snapshot restored = PersistentRenderedAtlasStore.load(
+                worldId, dimension, signature, region.x, region.z, stride, size, REGION_TILES)
+                .orElse(null);
+        if (restored != null) {
+            persistentRegionPresence.put(new PersistentRegionKey(region, signature), true);
+        }
+        return new Atlas(stride, signature, restored);
+    }
+
+    private Atlas findDisplayAtlas(
+            UUID worldId,
+            String dimension,
+            Region region,
+            int stride,
+            long signature,
+            Set<TextureKey> keep) {
+        TextureKey exact = new TextureKey(region, stride, signature);
+        Atlas atlas = atlases.get(exact);
+        if (atlas != null && atlas.complete && atlas.hasPixels) {
+            keep.add(exact);
+            return atlas;
+        }
+        for (int alternate = 1; alternate <= CHUNK; alternate *= 2) {
+            if (alternate == stride) continue;
+            TextureKey key = new TextureKey(region, alternate, signature);
+            Atlas candidate = atlases.get(key);
+            if (candidate == null && worldId != null) {
+                int size = REGION_SIZE / alternate;
+                PersistentRenderedAtlasStore.Snapshot restored = PersistentRenderedAtlasStore.load(
+                        worldId, dimension, signature,
+                        region.x, region.z, alternate, size, REGION_TILES).orElse(null);
+                if (restored != null) {
+                    candidate = new Atlas(alternate, signature, restored);
+                    atlases.put(key, candidate);
+                    allocatedTexels += candidate.texels();
+                    persistentRegionPresence.put(
+                            new PersistentRegionKey(region, signature), true);
+                }
+            }
+            if (candidate == null || !candidate.complete || !candidate.hasPixels) continue;
+            keep.add(key);
+            return candidate;
+        }
+        return null;
+    }
+
+    private boolean hasInMemoryAtlas(Region region) {
+        for (TextureKey key : atlases.keySet()) {
+            if (key.region.equals(region)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasPersistentAtlas(
+            UUID worldId, String dimension, Region region, long signature) {
+        if (worldId == null) return false;
+        PersistentRegionKey key = new PersistentRegionKey(region, signature);
+        return persistentRegionPresence.computeIfAbsent(key,
+                ignored -> PersistentRenderedAtlasStore.existsAnyStride(
+                        worldId, dimension, signature, region.x, region.z));
     }
 
     private static int overviewStride(double zoom, int regions) {
@@ -127,7 +229,13 @@ final class InGameMapTiles implements AutoCloseable {
     }
 
     private int updateAtlas(
-            String dimension, Region key, Atlas atlas, int stride, int remaining, long deadline) {
+            UUID worldId,
+            String dimension,
+            Region key,
+            Atlas atlas,
+            int stride,
+            int remaining,
+            long deadline) {
         if (atlas.next == REGION_TILES) {
             long current = revision(dimension, key);
             if (atlas.revision == current) return 0;
@@ -142,36 +250,64 @@ final class InGameMapTiles implements AutoCloseable {
         int maxX = -1;
         int maxZ = -1;
         int painted = 0;
+
         while (atlas.next < REGION_TILES && painted < remaining && System.nanoTime() < deadline) {
             int index = atlas.next++;
             int localX = index % REGION_CHUNKS;
             int localZ = index / REGION_CHUNKS;
-            SurfaceTile tile = backend.tile(new ChunkKey(dimension,
-                    key.x * REGION_CHUNKS + localX, key.z * REGION_CHUNKS + localZ));
+            ChunkKey tileKey = new ChunkKey(
+                    dimension,
+                    key.x * REGION_CHUNKS + localX,
+                    key.z * REGION_CHUNKS + localZ);
+            SurfaceTile tile = backend.tile(tileKey);
             if (tile != null && !tile.hasSurfaceFacts()) tile = null;
-            if (tile == atlas.rendered[index]) continue;
 
-            paint(atlas.texture.getPixels(), localX, localZ, tile, stride, edge);
-            atlas.rendered[index] = tile;
-            atlas.hasPixels |= tile != null;
+            if (tile == null) {
+                // A disk-restored atlas is allowed to stay visible before its
+                // corresponding facts have been restored this session.
+                if (!atlas.seenFacts[index]) continue;
+                if (atlas.fingerprints[index] == 0L) continue;
+                paint(atlas, localX, localZ, null, stride, edge);
+                atlas.fingerprints[index] = 0L;
+                atlas.dirtyForSave = true;
+            } else {
+                atlas.seenFacts[index] = true;
+                long fingerprint = tile.fingerprint64();
+                if (atlas.fingerprints[index] == fingerprint) continue;
+                paint(atlas, localX, localZ, tile, stride, edge);
+                atlas.fingerprints[index] = fingerprint;
+                atlas.hasPixels = true;
+                atlas.dirtyForSave = true;
+            }
+
             minX = Math.min(minX, localX);
             minZ = Math.min(minZ, localZ);
             maxX = Math.max(maxX, localX);
             maxZ = Math.max(maxZ, localZ);
             painted++;
         }
-        atlas.complete |= atlas.next == REGION_TILES;
-        if (painted == 0) return 0;
 
-        if (firstUpload) {
-            // Initialize transparent regions on the GPU before uploading individual updates.
-            atlas.texture.upload();
-        } else {
-            int x = minX * edge;
-            int z = minZ * edge;
-            int width = (maxX - minX + 1) * edge;
-            int height = (maxZ - minZ + 1) * edge;
-            atlas.texture.upload(x, z, width, height);
+        atlas.complete |= atlas.next == REGION_TILES;
+        if (painted > 0) {
+            if (firstUpload) {
+                atlas.texture.upload();
+            } else {
+                int x = minX * edge;
+                int z = minZ * edge;
+                int width = (maxX - minX + 1) * edge;
+                int height = (maxZ - minZ + 1) * edge;
+                atlas.texture.upload(x, z, width, height);
+            }
+        }
+
+        if (atlas.next == REGION_TILES && atlas.dirtyForSave && atlas.hasPixels && worldId != null) {
+            PersistentRenderedAtlasStore.save(
+                    worldId, dimension, atlas.signature,
+                    key.x, key.z, stride, atlas.size,
+                    atlas.fingerprints, atlas.pixels);
+            persistentRegionPresence.put(
+                    new PersistentRegionKey(key, atlas.signature), true);
+            atlas.dirtyForSave = false;
         }
         return painted;
     }
@@ -211,12 +347,17 @@ final class InGameMapTiles implements AutoCloseable {
         return newest;
     }
 
-    private static void paint(NativeImage image, int x, int z, SurfaceTile tile, int stride, int edge) {
+    private static void paint(
+            Atlas atlas, int x, int z, SurfaceTile tile, int stride, int edge) {
         int[] colors = tile == null ? null : MapPresentationRenderer.renderPixels(tile, stride);
+        NativeImage image = atlas.texture.getPixels();
         for (int row = 0; row < edge; row++) {
             for (int column = 0; column < edge; column++) {
                 int pixel = colors == null ? 0 : opaqueAbgr(colors[row * edge + column]);
-                MapGraphics.writeAbgr(image, x * edge + column, z * edge + row, pixel);
+                int pixelX = x * edge + column;
+                int pixelZ = z * edge + row;
+                atlas.pixels[pixelZ * atlas.size + pixelX] = pixel;
+                MapGraphics.writeAbgr(image, pixelX, pixelZ, pixel);
             }
         }
     }
@@ -244,9 +385,14 @@ final class InGameMapTiles implements AutoCloseable {
 
     @Override
     public void close() {
+        PersistentRenderedAtlasStore.flush();
         for (Atlas atlas : atlases.values()) atlas.texture.close();
         atlases.clear();
+        persistentRegionPresence.clear();
         frame = List.of();
         allocatedTexels = 0;
+        dimension = "";
+        targetSignature = 0L;
+        displaySignature = 0L;
     }
 }

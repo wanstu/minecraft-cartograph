@@ -58,6 +58,11 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     }
 
     @Override
+    public UUID worldId() {
+        return MapClientCache.worldId();
+    }
+
+    @Override
     public SurfaceTile tile(ChunkKey key) {
         return MapClientCache.tile(key);
     }

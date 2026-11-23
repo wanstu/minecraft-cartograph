@@ -33,6 +33,8 @@ interface CartographBackendApi extends AutoCloseable {
 
     String dimension();
 
+    UUID worldId();
+
     SurfaceTile tile(ChunkKey key);
 
     boolean hasTilesInRegion(String dimension, int regionX, int regionZ);
