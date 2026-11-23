@@ -17,13 +17,18 @@ record HandDrawnMapData(
         int[] forestPercent,
         int[] canopyHeight,
         int[] averageRelief,
-        int[] reliefRange) {
+        int[] reliefRange,
+        int[] slopeStrength,
+        int[] hillshade,
+        int[] landform) {
 
     static final int CELL_SIZE = 4;
     static final int GRID = SurfaceTile.SIZE / CELL_SIZE;
     static final int CELLS = GRID * GRID;
     static final int WATER_THRESHOLD = 19;
     static final int FOREST_THRESHOLD = 31;
+    private static final int[] CARDINAL_DX = {-1, 1, 0, 0};
+    private static final int[] CARDINAL_DZ = {0, 0, -1, 1};
 
     private enum TerrainClass {
         UNKNOWN(0),
@@ -53,6 +58,9 @@ record HandDrawnMapData(
         int[] canopy = new int[CELLS];
         int[] relief = new int[CELLS];
         int[] range = new int[CELLS];
+        int[] slope = new int[CELLS];
+        int[] shade = new int[CELLS];
+        int[] form = new int[CELLS];
 
         for (int cellZ = 0; cellZ < GRID; cellZ++) {
             for (int cellX = 0; cellX < GRID; cellX++) {
@@ -126,10 +134,15 @@ record HandDrawnMapData(
         canopy = smoothCanopyHeight(canopy, forest);
         relief = smoothRelief(relief);
         range = smoothRanges(range);
+        slope = deriveSlopeStrength(relief, water);
+        shade = deriveHillshade(relief, water);
+        form = deriveLandform(relief, water);
         int[] colors = new int[CELLS];
         for (int i = 0; i < CELLS; i++) colors[i] = classes[i].color;
 
-        return new HandDrawnMapData(tile.key(), colors, water, depth, forest, canopy, relief, range);
+        return new HandDrawnMapData(
+                tile.key(), colors, water, depth, forest, canopy,
+                relief, range, slope, shade, form);
     }
 
     /**
@@ -360,6 +373,98 @@ record HandDrawnMapData(
         return smoothed;
     }
 
+    /**
+     * Map-scale slope strength derived from the already smoothed relief field.
+     * It intentionally ignores water and single-block spikes.
+     */
+    private static int[] deriveSlopeStrength(int[] relief, int[] waterPercent) {
+        int[] out = new int[relief.length];
+        for (int z = 0; z < GRID; z++) {
+            for (int x = 0; x < GRID; x++) {
+                int index = z * GRID + x;
+                if (waterPercent[index] >= WATER_THRESHOLD
+                        || relief[index] == SurfaceTile.UNKNOWN_HEIGHT) continue;
+
+                int left = relief[z * GRID + Math.max(0, x - 1)];
+                int right = relief[z * GRID + Math.min(GRID - 1, x + 1)];
+                int up = relief[Math.max(0, z - 1) * GRID + x];
+                int down = relief[Math.min(GRID - 1, z + 1) * GRID + x];
+                if (left == SurfaceTile.UNKNOWN_HEIGHT) left = relief[index];
+                if (right == SurfaceTile.UNKNOWN_HEIGHT) right = relief[index];
+                if (up == SurfaceTile.UNKNOWN_HEIGHT) up = relief[index];
+                if (down == SurfaceTile.UNKNOWN_HEIGHT) down = relief[index];
+
+                int dx = right - left;
+                int dz = down - up;
+                int magnitude = (int) Math.round(Math.sqrt(dx * dx + dz * dz));
+                out[index] = Math.min(100, magnitude * 9);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Signed hillshade under a fixed north-west light. Positive values are
+     * brighter faces; negative values are shadowed faces.
+     */
+    private static int[] deriveHillshade(int[] relief, int[] waterPercent) {
+        int[] out = new int[relief.length];
+        for (int z = 0; z < GRID; z++) {
+            for (int x = 0; x < GRID; x++) {
+                int index = z * GRID + x;
+                if (waterPercent[index] >= WATER_THRESHOLD
+                        || relief[index] == SurfaceTile.UNKNOWN_HEIGHT) continue;
+
+                int left = relief[z * GRID + Math.max(0, x - 1)];
+                int right = relief[z * GRID + Math.min(GRID - 1, x + 1)];
+                int up = relief[Math.max(0, z - 1) * GRID + x];
+                int down = relief[Math.min(GRID - 1, z + 1) * GRID + x];
+                if (left == SurfaceTile.UNKNOWN_HEIGHT) left = relief[index];
+                if (right == SurfaceTile.UNKNOWN_HEIGHT) right = relief[index];
+                if (up == SurfaceTile.UNKNOWN_HEIGHT) up = relief[index];
+                if (down == SurfaceTile.UNKNOWN_HEIGHT) down = relief[index];
+
+                int dx = right - left;
+                int dz = down - up;
+                out[index] = Math.clamp(-(dx + dz) * 7, -100, 100);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Signed local form. Positive means ridge/peak-like, negative means
+     * valley/basin-like. This is deliberately broad and is not a block-level
+     * contour detector.
+     */
+    private static int[] deriveLandform(int[] relief, int[] waterPercent) {
+        int[] out = new int[relief.length];
+        for (int z = 0; z < GRID; z++) {
+            for (int x = 0; x < GRID; x++) {
+                int index = z * GRID + x;
+                int center = relief[index];
+                if (waterPercent[index] >= WATER_THRESHOLD
+                        || center == SurfaceTile.UNKNOWN_HEIGHT) continue;
+
+                int sum = 0;
+                int count = 0;
+                for (int direction = 0; direction < CARDINAL_DX.length; direction++) {
+                    int sampleX = x + CARDINAL_DX[direction];
+                    int sampleZ = z + CARDINAL_DZ[direction];
+                    if (sampleX < 0 || sampleX >= GRID || sampleZ < 0 || sampleZ >= GRID) continue;
+                    int value = relief[sampleZ * GRID + sampleX];
+                    if (value == SurfaceTile.UNKNOWN_HEIGHT) continue;
+                    sum += value;
+                    count++;
+                }
+                if (count == 0) continue;
+                int delta = center - Math.round((float) sum / count);
+                out[index] = Math.clamp(delta * 14, -100, 100);
+            }
+        }
+        return out;
+    }
+
     int[] abstractPixels(int stride) {
         int edge = SurfaceTile.SIZE / stride;
         int[] out = new int[edge * edge];
@@ -448,6 +553,18 @@ record HandDrawnMapData(
 
     int reliefRangeAtPixel(int localX, int localZ) {
         return interpolateScalar(reliefRange, localX, localZ, Integer.MIN_VALUE);
+    }
+
+    int slopeStrengthAtPixel(int localX, int localZ) {
+        return interpolateScalar(slopeStrength, localX, localZ, Integer.MIN_VALUE);
+    }
+
+    int hillshadeAtPixel(int localX, int localZ) {
+        return interpolateScalar(hillshade, localX, localZ, Integer.MIN_VALUE);
+    }
+
+    int landformAtPixel(int localX, int localZ) {
+        return interpolateScalar(landform, localX, localZ, Integer.MIN_VALUE);
     }
 
     private int interpolateScalar(int[] values, double localX, double localZ, int unknown) {

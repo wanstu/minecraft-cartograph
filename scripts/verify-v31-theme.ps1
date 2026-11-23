@@ -86,6 +86,12 @@ foreach ($token in @(
   'classes = smoothClasses(classes, water);',
   'relief = smoothRelief(relief);',
   'range = smoothRanges(range);',
+  'slope = deriveSlopeStrength(relief, water);',
+  'shade = deriveHillshade(relief, water);',
+  'form = deriveLandform(relief, water);',
+  'int slopeStrengthAtPixel(int localX, int localZ)',
+  'int hillshadeAtPixel(int localX, int localZ)',
+  'int landformAtPixel(int localX, int localZ)',
   'static HandDrawnMapData from(SurfaceTile tile)',
   'int[] abstractPixels(int stride)',
   'interpolateColor(localX, localZ)'
@@ -101,11 +107,13 @@ foreach ($token in @(
   'applyHandDrawnForest(color, forestPercent, canopyHeight, style)',
   'applyHandDrawnForestEdge(color, forestEdge, style)',
   'private static int applyHandDrawnForest(',
-  'private static int applyHandDrawnForestEdge('
-)) { Require-Contains $processors $token "hand-drawn water presentation incomplete: $token" }
+  'private static int applyHandDrawnForestEdge(',
+  'applyHandDrawnRelief(',
+  'private static int applyHandDrawnRelief('
+)) { Require-Contains $processors $token "hand-drawn semantic presentation incomplete: $token" }
 
 foreach ($token in @(
-  'private static final long PIPELINE_VERSION = 5L;',
+  'private static final long PIPELINE_VERSION = 6L;',
   'MapVisualStyleProcessor processor = CartographSettings.visualStyle().processor();',
   'switch (CartographSettings.drawingMode())',
   'case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);',

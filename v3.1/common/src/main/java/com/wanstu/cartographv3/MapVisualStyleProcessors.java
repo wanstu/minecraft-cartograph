@@ -152,7 +152,11 @@ final class MapVisualStyleProcessors {
                     int relief = data.averageReliefAtPixel(sx, sz);
                     if (relief != SurfaceTile.UNKNOWN_HEIGHT) {
                         int range = data.reliefRangeAtPixel(sx, sz);
-                        color = applyAbstractRelief(color, relief, range, style);
+                        int slope = data.slopeStrengthAtPixel(sx, sz);
+                        int shade = data.hillshadeAtPixel(sx, sz);
+                        int form = data.landformAtPixel(sx, sz);
+                        color = applyHandDrawnRelief(
+                                color, range, slope, shade, form, style);
                     }
 
                     int forestEdge = data.forestEdgeStrengthAtPixel(sx, sz, shorelineRadius);
@@ -294,15 +298,66 @@ final class MapVisualStyleProcessors {
         };
     }
 
-    private static int applyAbstractRelief(
-            int color, int relief, int range, StyleKind style) {
-        if (range <= 5) return color;
-        int amount = Math.min(24, 4 + range);
-        return switch (style) {
-            case MODERN -> mix(color, 0x5d7065, amount / 3);
-            case ANCIENT -> mix(color, 0x59422d, Math.min(22, amount));
-            case ANIME -> mix(color, 0x395766, Math.min(18, amount));
-        };
+    private static int applyHandDrawnRelief(
+            int color,
+            int range,
+            int slope,
+            int shade,
+            int form,
+            StyleKind style) {
+        if (slope == Integer.MIN_VALUE || shade == Integer.MIN_VALUE
+                || form == Integer.MIN_VALUE) return color;
+        if (slope < 14 && range <= 5 && Math.abs(form) < 18) return color;
+
+        int result = color;
+        switch (style) {
+            case MODERN -> {
+                if (shade > 10) {
+                    result = mix(result, 0xeaf0e8, Math.min(18, 4 + shade / 7));
+                } else if (shade < -10) {
+                    result = mix(result, 0x46564e, Math.min(24, 5 + (-shade) / 6));
+                }
+                if (slope > 35) {
+                    result = mix(result, 0x52645a, Math.min(16, 4 + slope / 10));
+                }
+                if (form > 34) {
+                    result = mix(result, 0xdde7dc, Math.min(15, 4 + form / 10));
+                } else if (form < -34) {
+                    result = mix(result, 0x536058, Math.min(13, 3 + (-form) / 12));
+                }
+            }
+            case ANCIENT -> {
+                if (shade < -8) {
+                    result = mix(result, 0x654c34, Math.min(28, 7 + (-shade) / 5));
+                } else if (shade > 12) {
+                    result = mix(result, 0xe0c791, Math.min(13, 3 + shade / 10));
+                }
+                if (form > 26) {
+                    result = mix(result, 0x493522, Math.min(32, 10 + form / 4));
+                } else if (form < -30) {
+                    result = mix(result, 0x8f7757, Math.min(20, 5 + (-form) / 7));
+                }
+                if (slope > 45 && range > 5) {
+                    result = mix(result, 0x5b432e, Math.min(18, 4 + slope / 9));
+                }
+            }
+            case ANIME -> {
+                if (shade > 10) {
+                    result = mix(result, 0xd9f0cf, Math.min(20, 5 + shade / 7));
+                } else if (shade < -10) {
+                    result = mix(result, 0x456a5e, Math.min(24, 6 + (-shade) / 6));
+                }
+                if (form > 30) {
+                    result = mix(result, 0xe4f5d6, Math.min(18, 5 + form / 8));
+                } else if (form < -30) {
+                    result = mix(result, 0x3e6659, Math.min(18, 4 + (-form) / 8));
+                }
+                if (slope > 52) {
+                    result = mix(result, 0x35564f, Math.min(14, 3 + slope / 12));
+                }
+            }
+        }
+        return result;
     }
 
     private static int sepia(int rgb) {
