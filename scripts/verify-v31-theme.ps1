@@ -84,11 +84,15 @@ foreach ($token in @(
   'Arrays.sort(heights, 0, heightCount);',
   'relief[cell] = heights[heightCount / 2];',
   'classes = smoothClasses(classes, water);',
-  'relief = smoothRelief(relief);',
+  'relief = reliefNeighborhood.smoothedCenterRelief();',
   'range = smoothRanges(range);',
-  'slope = deriveSlopeStrength(relief, water);',
-  'shade = deriveHillshade(relief, water);',
-  'form = deriveLandform(relief, water);',
+  'ReliefNeighborhood reliefNeighborhood = ReliefNeighborhood.from(',
+  'slope = deriveSlopeStrength(reliefNeighborhood, water);',
+  'shade = deriveHillshade(reliefNeighborhood, water);',
+  'form = deriveLandform(reliefNeighborhood, water);',
+  'private static final class ReliefNeighborhood',
+  'private static ReliefGrid summarizeRelief(SurfaceTile tile)',
+  'private static double blendedGradient(',
   'int slopeStrengthAtPixel(int localX, int localZ)',
   'int hillshadeAtPixel(int localX, int localZ)',
   'int landformAtPixel(int localX, int localZ)',
@@ -113,11 +117,13 @@ foreach ($token in @(
 )) { Require-Contains $processors $token "hand-drawn semantic presentation incomplete: $token" }
 
 foreach ($token in @(
-  'private static final long PIPELINE_VERSION = 6L;',
+  'private static final long PIPELINE_VERSION = 7L;',
   'MapVisualStyleProcessor processor = CartographSettings.visualStyle().processor();',
   'switch (CartographSettings.drawingMode())',
   'case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);',
-  'case HAND_DRAWN -> processor.renderHandDrawn(HandDrawnMapData.from(tile), stride);'
+  'HandDrawnMapData.from(tile, tileLookup)',
+  'static long dependencyFingerprint(',
+  'MapDrawingMode.HAND_DRAWN'
 )) { Require-Contains $renderer $token "presentation renderer composition missing: $token" }
 
 foreach ($token in @(
@@ -140,7 +146,7 @@ foreach ($token in @(
   'MapDrawingMode.parse(settings.drawingMode())',
   'CartographSettings.setVisualStyle(settings.visualStyle())',
   'MapPresentationRenderer.renderSignature()',
-  'MapPresentationRenderer.render(facts).rgb()'
+  'MapPresentationRenderer.render(facts, backend::tile).rgb()'
 )) { Require-Contains $server $token "runtime presentation bridge incomplete: $token" }
 
 foreach ($token in @(
@@ -153,7 +159,7 @@ foreach ($token in @(
 foreach ($token in @(
   'MapVisualStyleProcessor.Palette palette = MapPresentationRenderer.palette();',
   'MapPresentationRenderer.renderSignature()',
-  'MapPresentationRenderer.renderPixels(tile, stride)'
+  'MapPresentationRenderer.renderPixels(tile, stride, backend::tile)'
 )) {
   if (-not ($nativeUi.Contains($token) -or $nativeTiles.Contains($token))) {
     $errors.Add("native presentation integration missing: $token")
@@ -169,7 +175,7 @@ foreach ($token in @(
   'targetSignature, keep',
   'PersistentRenderedAtlasStore.load(',
   'PersistentRenderedAtlasStore.save(',
-  'long fingerprint = tile.fingerprint64();',
+  'long fingerprint = MapPresentationRenderer.dependencyFingerprint(',
   'if (atlas.fingerprints[index] == fingerprint) continue;',
   'Never keep drawing the previous presentation',
   'Never cross signatures here'

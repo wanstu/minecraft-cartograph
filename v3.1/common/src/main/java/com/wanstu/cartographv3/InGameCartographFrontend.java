@@ -31,7 +31,7 @@ final class InGameCartographFrontend implements CartographFrontend {
             lastPosition = null;
         }
         if (preferences == null) preferences = new InGameMapPreferences();
-        SatelliteSurfaceRenderer.beginMapSession();
+        MapPresentationRenderer.beginMapSession();
         if (tiles == null) tiles = new InGameMapTiles(runtime.api());
         InGameMapScreen next = new InGameMapScreen(runtime.api(), preferences, tiles, lastPosition,
                 viewport -> runtime.updateViewport(target().id(), viewport, false),

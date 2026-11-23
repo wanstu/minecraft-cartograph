@@ -241,10 +241,14 @@ tasks.register('verifyV31FrontendThemes') {
          'Arrays.sort(heights, 0, heightCount);',
          'relief[cell] = heights[heightCount / 2];',
          'classes = smoothClasses(classes, water);',
-         'relief = smoothRelief(relief);', 'range = smoothRanges(range);',
-         'slope = deriveSlopeStrength(relief, water);',
-         'shade = deriveHillshade(relief, water);',
-         'form = deriveLandform(relief, water);',
+         'range = smoothRanges(range);', 'relief = reliefNeighborhood.smoothedCenterRelief();',
+         'ReliefNeighborhood reliefNeighborhood = ReliefNeighborhood.from(',
+         'slope = deriveSlopeStrength(reliefNeighborhood, water);',
+         'shade = deriveHillshade(reliefNeighborhood, water);',
+         'form = deriveLandform(reliefNeighborhood, water);',
+         'private static final class ReliefNeighborhood',
+         'private static ReliefGrid summarizeRelief(SurfaceTile tile)',
+         'private static double blendedGradient(',
          'int slopeStrengthAtPixel(int localX, int localZ)',
          'int hillshadeAtPixel(int localX, int localZ)',
          'int landformAtPixel(int localX, int localZ)',
@@ -269,14 +273,30 @@ tasks.register('verifyV31FrontendThemes') {
                 throw new GradleException('Hand-drawn semantic presentation is incomplete: ' + token)
             }
         }
-        if (!renderer.contains('private static final long PIPELINE_VERSION = 6L;')) {
-            throw new GradleException('Presentation pipeline version must invalidate pre-relief-semantics atlases')
+        if (!renderer.contains('private static final long PIPELINE_VERSION = 7L;')) {
+            throw new GradleException('Presentation pipeline version must invalidate chunk-local relief atlases')
         }
         ['switch (CartographSettings.drawingMode())',
          'case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);',
-         'case HAND_DRAWN -> processor.renderHandDrawn(HandDrawnMapData.from(tile), stride);'].each { token ->
+         'HandDrawnMapData.from(tile, tileLookup)',
+         'static long dependencyFingerprint(',
+         'MapDrawingMode.HAND_DRAWN'].each { token ->
             if (!renderer.contains(token)) {
                 throw new GradleException('Presentation renderer composition is incomplete: ' + token)
+            }
+        }
+
+        ['MapPresentationRenderer.dependencyFingerprint(',
+         'MapPresentationRenderer.renderPixels(tile, stride, backend::tile)',
+         'backend.regionRevision(dimension, x + dx, z + dz)'].each { token ->
+            if (!nativeTiles.contains(token)) {
+                throw new GradleException('Native cross-chunk relief invalidation is incomplete: ' + token)
+            }
+        }
+        ['MapPresentationRenderer.dependencyFingerprint(',
+         'MapPresentationRenderer.render(facts, backend::tile)'].each { token ->
+            if (!server.contains(token)) {
+                throw new GradleException('Web cross-chunk relief invalidation is incomplete: ' + token)
             }
         }
 
@@ -294,7 +314,7 @@ tasks.register('verifyV31FrontendThemes') {
         ['"drawingMode", CartographSettings.drawingMode().id()',
          '"visualStyle", CartographSettings.visualStyle().id()',
          'MapPresentationRenderer.renderSignature()',
-         'MapPresentationRenderer.render(facts).rgb()'].each { token ->
+         'MapPresentationRenderer.render(facts, backend::tile).rgb()'].each { token ->
             if (!server.contains(token)) {
                 throw new GradleException('WebUI presentation bridge is incomplete: ' + token)
             }
@@ -306,7 +326,7 @@ tasks.register('verifyV31FrontendThemes') {
             }
         }
         if (!nativeUi.contains('MapVisualStyleProcessor.Palette palette = MapPresentationRenderer.palette();')
-                || !nativeTiles.contains('MapPresentationRenderer.renderPixels(tile, stride)')) {
+                || !nativeTiles.contains('MapPresentationRenderer.renderPixels(tile, stride, backend::tile)')) {
             throw new GradleException('Native frontend is not consuming the split presentation model')
         }
 
@@ -315,7 +335,7 @@ tasks.register('verifyV31FrontendThemes') {
          'targetSignature = appearance;',
          'findDisplayAtlas(', 'targetSignature, keep',
          'PersistentRenderedAtlasStore.load(', 'PersistentRenderedAtlasStore.save(',
-         'long fingerprint = tile.fingerprint64();',
+         'long fingerprint = MapPresentationRenderer.dependencyFingerprint(',
          'if (atlas.fingerprints[index] == fingerprint) continue;',
          'Never keep drawing the previous presentation',
          'Never cross signatures here'].each { token ->

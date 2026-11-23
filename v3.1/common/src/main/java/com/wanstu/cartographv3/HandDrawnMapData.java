@@ -1,6 +1,9 @@
 package com.wanstu.cartographv3;
 
 import java.util.Arrays;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Abstract map representation derived from SurfaceTile facts.
@@ -29,6 +32,9 @@ record HandDrawnMapData(
     static final int FOREST_THRESHOLD = 31;
     private static final int[] CARDINAL_DX = {-1, 1, 0, 0};
     private static final int[] CARDINAL_DZ = {0, 0, -1, 1};
+    private static final int RELIEF_SUMMARY_CACHE_LIMIT = 8192;
+    private static final Map<SurfaceTile, ReliefGrid> RELIEF_SUMMARY_CACHE =
+            new IdentityHashMap<>();
 
     private enum TerrainClass {
         UNKNOWN(0),
@@ -49,7 +55,19 @@ record HandDrawnMapData(
         }
     }
 
+    static void beginMapSession() {
+        synchronized (RELIEF_SUMMARY_CACHE) {
+            RELIEF_SUMMARY_CACHE.clear();
+        }
+    }
+
     static HandDrawnMapData from(SurfaceTile tile) {
+        return from(tile, ignored -> null);
+    }
+
+    static HandDrawnMapData from(
+            SurfaceTile tile,
+            Function<ChunkKey, SurfaceTile> tileLookup) {
         int[] source = SatelliteSurfaceRenderer.renderPixels(tile, 1);
         TerrainClass[] classes = new TerrainClass[CELLS];
         int[] water = new int[CELLS];
@@ -132,11 +150,13 @@ record HandDrawnMapData(
         depth = smoothWaterDepth(depth, water);
         forest = smoothForestPercent(forest, water);
         canopy = smoothCanopyHeight(canopy, forest);
-        relief = smoothRelief(relief);
         range = smoothRanges(range);
-        slope = deriveSlopeStrength(relief, water);
-        shade = deriveHillshade(relief, water);
-        form = deriveLandform(relief, water);
+        ReliefNeighborhood reliefNeighborhood = ReliefNeighborhood.from(
+                tile.key(), relief, water, tileLookup);
+        relief = reliefNeighborhood.smoothedCenterRelief();
+        slope = deriveSlopeStrength(reliefNeighborhood, water);
+        shade = deriveHillshade(reliefNeighborhood, water);
+        form = deriveLandform(reliefNeighborhood, water);
         int[] colors = new int[CELLS];
         for (int i = 0; i < CELLS; i++) colors[i] = classes[i].color;
 
@@ -323,32 +343,6 @@ record HandDrawnMapData(
         return smoothed;
     }
 
-    private static int[] smoothRelief(int[] source) {
-        int[] smoothed = new int[source.length];
-        for (int z = 0; z < GRID; z++) {
-            for (int x = 0; x < GRID; x++) {
-                int sum = 0;
-                int weight = 0;
-                for (int dz = -1; dz <= 1; dz++) {
-                    int sampleZ = z + dz;
-                    if (sampleZ < 0 || sampleZ >= GRID) continue;
-                    for (int dx = -1; dx <= 1; dx++) {
-                        int sampleX = x + dx;
-                        if (sampleX < 0 || sampleX >= GRID) continue;
-                        int value = source[sampleZ * GRID + sampleX];
-                        if (value == SurfaceTile.UNKNOWN_HEIGHT) continue;
-                        int w = dx == 0 && dz == 0 ? 4 : 1;
-                        sum += value * w;
-                        weight += w;
-                    }
-                }
-                smoothed[z * GRID + x] = weight == 0
-                        ? SurfaceTile.UNKNOWN_HEIGHT : Math.round((float) sum / weight);
-            }
-        }
-        return smoothed;
-    }
-
     private static int[] smoothRanges(int[] source) {
         int[] smoothed = new int[source.length];
         for (int z = 0; z < GRID; z++) {
@@ -373,93 +367,260 @@ record HandDrawnMapData(
         return smoothed;
     }
 
+    private record ReliefGrid(int[] relief, int[] waterPercent) {}
+
     /**
-     * Map-scale slope strength derived from the already smoothed relief field.
-     * It intentionally ignores water and single-block spikes.
+     * A one-chunk semantic halo around the tile being rendered. Relief
+     * derivatives can therefore cross chunk boundaries without falling back to
+     * a clamped edge sample.
      */
-    private static int[] deriveSlopeStrength(int[] relief, int[] waterPercent) {
-        int[] out = new int[relief.length];
-        for (int z = 0; z < GRID; z++) {
-            for (int x = 0; x < GRID; x++) {
-                int index = z * GRID + x;
-                if (waterPercent[index] >= WATER_THRESHOLD
-                        || relief[index] == SurfaceTile.UNKNOWN_HEIGHT) continue;
+    private static final class ReliefNeighborhood {
+        private final ReliefGrid[] grids = new ReliefGrid[9];
 
-                int left = relief[z * GRID + Math.max(0, x - 1)];
-                int right = relief[z * GRID + Math.min(GRID - 1, x + 1)];
-                int up = relief[Math.max(0, z - 1) * GRID + x];
-                int down = relief[Math.min(GRID - 1, z + 1) * GRID + x];
-                if (left == SurfaceTile.UNKNOWN_HEIGHT) left = relief[index];
-                if (right == SurfaceTile.UNKNOWN_HEIGHT) right = relief[index];
-                if (up == SurfaceTile.UNKNOWN_HEIGHT) up = relief[index];
-                if (down == SurfaceTile.UNKNOWN_HEIGHT) down = relief[index];
+        private ReliefNeighborhood() {}
 
-                int dx = right - left;
-                int dz = down - up;
-                int magnitude = (int) Math.round(Math.sqrt(dx * dx + dz * dz));
-                out[index] = Math.min(100, magnitude * 9);
+        static ReliefNeighborhood from(
+                ChunkKey centerKey,
+                int[] centerRelief,
+                int[] centerWater,
+                Function<ChunkKey, SurfaceTile> tileLookup) {
+            ReliefNeighborhood out = new ReliefNeighborhood();
+            out.grids[4] = new ReliefGrid(centerRelief, centerWater);
+            if (tileLookup == null) return out;
+
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dz == 0) continue;
+                    SurfaceTile tile = tileLookup.apply(new ChunkKey(
+                            centerKey.dimension(), centerKey.x() + dx, centerKey.z() + dz));
+                    if (tile == null || !tile.hasSurfaceFacts()) continue;
+                    out.grids[(dz + 1) * 3 + dx + 1] = cachedReliefSummary(tile);
+                }
             }
+            return out;
         }
-        return out;
+
+        int landRelief(int cellX, int cellZ, int fallback) {
+            int center = rawLandRelief(cellX, cellZ);
+            if (center == SurfaceTile.UNKNOWN_HEIGHT) return fallback;
+
+            int sum = 0;
+            int weight = 0;
+            for (int dz = -1; dz <= 1; dz++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    int value = rawLandRelief(cellX + dx, cellZ + dz);
+                    if (value == SurfaceTile.UNKNOWN_HEIGHT) continue;
+                    int sampleWeight = dx == 0 && dz == 0 ? 4 : 1;
+                    sum += value * sampleWeight;
+                    weight += sampleWeight;
+                }
+            }
+            return weight == 0 ? center : Math.round((float) sum / weight);
+        }
+
+        int[] smoothedCenterRelief() {
+            int[] out = new int[CELLS];
+            ReliefGrid center = grids[4];
+            for (int z = 0; z < GRID; z++) {
+                for (int x = 0; x < GRID; x++) {
+                    int index = z * GRID + x;
+                    int fallback = center.relief[index];
+                    out[index] = landRelief(x, z, fallback);
+                }
+            }
+            return out;
+        }
+
+        private int rawLandRelief(int cellX, int cellZ) {
+            int tileX = Math.floorDiv(cellX, GRID);
+            int tileZ = Math.floorDiv(cellZ, GRID);
+            if (tileX < -1 || tileX > 1 || tileZ < -1 || tileZ > 1) {
+                return SurfaceTile.UNKNOWN_HEIGHT;
+            }
+
+            ReliefGrid grid = grids[(tileZ + 1) * 3 + tileX + 1];
+            if (grid == null) return SurfaceTile.UNKNOWN_HEIGHT;
+
+            int localX = Math.floorMod(cellX, GRID);
+            int localZ = Math.floorMod(cellZ, GRID);
+            int index = localZ * GRID + localX;
+            if (grid.waterPercent[index] >= WATER_THRESHOLD) {
+                return SurfaceTile.UNKNOWN_HEIGHT;
+            }
+            return grid.relief[index];
+        }
     }
 
     /**
-     * Signed hillshade under a fixed north-west light. Positive values are
-     * brighter faces; negative values are shadowed faces.
+     * Only the relief/water summary is needed from neighboring chunks. Keeping
+     * this separate avoids running the full terrain/forest/style semantic pass
+     * eight extra times for every rendered tile.
      */
-    private static int[] deriveHillshade(int[] relief, int[] waterPercent) {
-        int[] out = new int[relief.length];
-        for (int z = 0; z < GRID; z++) {
-            for (int x = 0; x < GRID; x++) {
-                int index = z * GRID + x;
-                if (waterPercent[index] >= WATER_THRESHOLD
-                        || relief[index] == SurfaceTile.UNKNOWN_HEIGHT) continue;
+    private static ReliefGrid cachedReliefSummary(SurfaceTile tile) {
+        synchronized (RELIEF_SUMMARY_CACHE) {
+            ReliefGrid cached = RELIEF_SUMMARY_CACHE.get(tile);
+            if (cached != null) return cached;
+            if (RELIEF_SUMMARY_CACHE.size() >= RELIEF_SUMMARY_CACHE_LIMIT) {
+                RELIEF_SUMMARY_CACHE.clear();
+            }
+            ReliefGrid summary = summarizeRelief(tile);
+            RELIEF_SUMMARY_CACHE.put(tile, summary);
+            return summary;
+        }
+    }
 
-                int left = relief[z * GRID + Math.max(0, x - 1)];
-                int right = relief[z * GRID + Math.min(GRID - 1, x + 1)];
-                int up = relief[Math.max(0, z - 1) * GRID + x];
-                int down = relief[Math.min(GRID - 1, z + 1) * GRID + x];
-                if (left == SurfaceTile.UNKNOWN_HEIGHT) left = relief[index];
-                if (right == SurfaceTile.UNKNOWN_HEIGHT) right = relief[index];
-                if (up == SurfaceTile.UNKNOWN_HEIGHT) up = relief[index];
-                if (down == SurfaceTile.UNKNOWN_HEIGHT) down = relief[index];
+    private static ReliefGrid summarizeRelief(SurfaceTile tile) {
+        int[] water = new int[CELLS];
+        int[] relief = new int[CELLS];
 
-                int dx = right - left;
-                int dz = down - up;
-                out[index] = Math.clamp(-(dx + dz) * 7, -100, 100);
+        for (int cellZ = 0; cellZ < GRID; cellZ++) {
+            for (int cellX = 0; cellX < GRID; cellX++) {
+                int[] heights = new int[CELL_SIZE * CELL_SIZE];
+                int heightCount = 0;
+                int waterCount = 0;
+
+                for (int dz = 0; dz < CELL_SIZE; dz++) {
+                    for (int dx = 0; dx < CELL_SIZE; dx++) {
+                        int x = cellX * CELL_SIZE + dx;
+                        int z = cellZ * CELL_SIZE + dz;
+                        int index = z * SurfaceTile.SIZE + x;
+                        if (tile.waterDepthAt(index) > 0) waterCount++;
+
+                        int height = tile.reliefHeightAt(index);
+                        if (height != SurfaceTile.UNKNOWN_HEIGHT) {
+                            heights[heightCount++] = height;
+                        }
+                    }
+                }
+
+                int cell = cellZ * GRID + cellX;
+                water[cell] = waterCount * 100 / (CELL_SIZE * CELL_SIZE);
+                if (heightCount == 0) {
+                    relief[cell] = SurfaceTile.UNKNOWN_HEIGHT;
+                } else {
+                    Arrays.sort(heights, 0, heightCount);
+                    relief[cell] = heights[heightCount / 2];
+                }
             }
         }
-        return out;
+        return new ReliefGrid(relief, water);
     }
 
     /**
-     * Signed local form. Positive means ridge/peak-like, negative means
-     * valley/basin-like. This is deliberately broad and is not a block-level
-     * contour detector.
+     * Map-scale slope strength blends a near (8 block) gradient with a broad
+     * (16 block) gradient. The semantic halo keeps both samples continuous at
+     * chunk boundaries.
      */
-    private static int[] deriveLandform(int[] relief, int[] waterPercent) {
-        int[] out = new int[relief.length];
+    private static int[] deriveSlopeStrength(
+            ReliefNeighborhood neighborhood,
+            int[] waterPercent) {
+        int[] out = new int[CELLS];
         for (int z = 0; z < GRID; z++) {
             for (int x = 0; x < GRID; x++) {
                 int index = z * GRID + x;
-                int center = relief[index];
+                int center = neighborhood.landRelief(x, z, SurfaceTile.UNKNOWN_HEIGHT);
                 if (waterPercent[index] >= WATER_THRESHOLD
                         || center == SurfaceTile.UNKNOWN_HEIGHT) continue;
 
-                int sum = 0;
-                int count = 0;
+                double dx = blendedGradient(neighborhood, x, z, center, true);
+                double dz = blendedGradient(neighborhood, x, z, center, false);
+                double magnitude = Math.sqrt(dx * dx + dz * dz);
+                out[index] = Math.min(100, (int) Math.round(magnitude * 8.0));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Signed hillshade under a fixed north-west light. Because it uses the same
+     * broad gradient as slope strength, lighting now flows across chunk seams.
+     */
+    private static int[] deriveHillshade(
+            ReliefNeighborhood neighborhood,
+            int[] waterPercent) {
+        int[] out = new int[CELLS];
+        for (int z = 0; z < GRID; z++) {
+            for (int x = 0; x < GRID; x++) {
+                int index = z * GRID + x;
+                int center = neighborhood.landRelief(x, z, SurfaceTile.UNKNOWN_HEIGHT);
+                if (waterPercent[index] >= WATER_THRESHOLD
+                        || center == SurfaceTile.UNKNOWN_HEIGHT) continue;
+
+                double dx = blendedGradient(neighborhood, x, z, center, true);
+                double dz = blendedGradient(neighborhood, x, z, center, false);
+                out[index] = Math.clamp(
+                        (int) Math.round(-(dx + dz) * 6.0), -100, 100);
+            }
+        }
+        return out;
+    }
+
+    private static double blendedGradient(
+            ReliefNeighborhood neighborhood,
+            int x,
+            int z,
+            int center,
+            boolean horizontal) {
+        int nearLow = neighborhood.landRelief(
+                x + (horizontal ? -1 : 0),
+                z + (horizontal ? 0 : -1),
+                center);
+        int nearHigh = neighborhood.landRelief(
+                x + (horizontal ? 1 : 0),
+                z + (horizontal ? 0 : 1),
+                center);
+        int farLow = neighborhood.landRelief(
+                x + (horizontal ? -2 : 0),
+                z + (horizontal ? 0 : -2),
+                center);
+        int farHigh = neighborhood.landRelief(
+                x + (horizontal ? 2 : 0),
+                z + (horizontal ? 0 : 2),
+                center);
+
+        double near = nearHigh - nearLow;
+        // Radius two spans twice the distance, so normalize it before blending.
+        double broad = (farHigh - farLow) * 0.5;
+        return near * 0.68 + broad * 0.32;
+    }
+
+    /**
+     * Signed broad landform. Positive values indicate ridge/peak-like terrain,
+     * negative values valley/basin-like terrain. Two radii and diagonal
+     * samples prevent the result from degenerating into a per-chunk edge tint.
+     */
+    private static int[] deriveLandform(
+            ReliefNeighborhood neighborhood,
+            int[] waterPercent) {
+        int[] out = new int[CELLS];
+        for (int z = 0; z < GRID; z++) {
+            for (int x = 0; x < GRID; x++) {
+                int index = z * GRID + x;
+                int center = neighborhood.landRelief(x, z, SurfaceTile.UNKNOWN_HEIGHT);
+                if (waterPercent[index] >= WATER_THRESHOLD
+                        || center == SurfaceTile.UNKNOWN_HEIGHT) continue;
+
+                int weightedSum = 0;
+                int weight = 0;
                 for (int direction = 0; direction < CARDINAL_DX.length; direction++) {
-                    int sampleX = x + CARDINAL_DX[direction];
-                    int sampleZ = z + CARDINAL_DZ[direction];
-                    if (sampleX < 0 || sampleX >= GRID || sampleZ < 0 || sampleZ >= GRID) continue;
-                    int value = relief[sampleZ * GRID + sampleX];
-                    if (value == SurfaceTile.UNKNOWN_HEIGHT) continue;
-                    sum += value;
-                    count++;
+                    int dx = CARDINAL_DX[direction];
+                    int dz = CARDINAL_DZ[direction];
+                    weightedSum += neighborhood.landRelief(x + dx, z + dz, center) * 2;
+                    weight += 2;
+                    weightedSum += neighborhood.landRelief(x + dx * 2, z + dz * 2, center);
+                    weight++;
                 }
-                if (count == 0) continue;
-                int delta = center - Math.round((float) sum / count);
-                out[index] = Math.clamp(delta * 14, -100, 100);
+                for (int dz = -2; dz <= 2; dz += 4) {
+                    for (int dx = -2; dx <= 2; dx += 4) {
+                        weightedSum += neighborhood.landRelief(x + dx, z + dz, center);
+                        weight++;
+                    }
+                }
+
+                double surrounding = weight == 0 ? center : (double) weightedSum / weight;
+                out[index] = Math.clamp(
+                        (int) Math.round((center - surrounding) * 12.0),
+                        -100, 100);
             }
         }
         return out;
