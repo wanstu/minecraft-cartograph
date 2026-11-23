@@ -192,7 +192,7 @@ final class CartographWebUiServer implements AutoCloseable {
         }
 
         if (next != null && !backendOpen) {
-            SatelliteSurfaceRenderer.beginMapSession();
+            MapPresentationRenderer.beginMapSession();
             backendRuntime.acquire(FRONTEND_SESSION);
             backendOpen = true;
         }
@@ -488,13 +488,14 @@ final class CartographWebUiServer implements AutoCloseable {
         SurfaceTile facts = backend.tile(key);
         if (facts == null || !facts.hasSurfaceFacts()) return null;
 
-        long fingerprint = facts.fingerprint64();
+        long fingerprint = MapPresentationRenderer.dependencyFingerprint(
+                facts, backend::tile);
         long signature = MapPresentationRenderer.renderSignature();
         CachedTile cached = renderedTiles.get(key);
         if (cached == null
                 || cached.fingerprint() != fingerprint
                 || cached.styleSignature() != signature) {
-            int[] rgb = MapPresentationRenderer.render(facts).rgb();
+            int[] rgb = MapPresentationRenderer.render(facts, backend::tile).rgb();
             byte[] body = new byte[SurfaceTile.PIXELS * 3];
             for (int i = 0; i < SurfaceTile.PIXELS; i++) {
                 int color = rgb[i];

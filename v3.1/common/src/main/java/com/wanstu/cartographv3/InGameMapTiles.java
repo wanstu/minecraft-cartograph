@@ -273,7 +273,8 @@ final class InGameMapTiles implements AutoCloseable {
                 atlas.dirtyForSave = true;
             } else {
                 atlas.seenFacts[index] = true;
-                long fingerprint = tile.fingerprint64();
+                long fingerprint = MapPresentationRenderer.dependencyFingerprint(
+                        tile, backend::tile);
                 if (atlas.fingerprints[index] == fingerprint) continue;
                 paint(atlas, localX, localZ, tile, stride, edge);
                 atlas.fingerprints[index] = fingerprint;
@@ -340,17 +341,23 @@ final class InGameMapTiles implements AutoCloseable {
         int x = atlas.x * CACHE_REGIONS_PER_ATLAS;
         int z = atlas.z * CACHE_REGIONS_PER_ATLAS;
         long newest = 0;
-        for (int dz = 0; dz < CACHE_REGIONS_PER_ATLAS; dz++) {
-            for (int dx = 0; dx < CACHE_REGIONS_PER_ATLAS; dx++) {
+        // Hand-drawn relief consumes a one-chunk halo. Include adjacent
+        // backend regions only for that mode; satellite rendering stays
+        // strictly chunk-local and should not rescan an atlas for neighbor-only
+        // changes.
+        int halo = CartographSettings.drawingMode() == MapDrawingMode.HAND_DRAWN ? 1 : 0;
+        for (int dz = -halo; dz < CACHE_REGIONS_PER_ATLAS + halo; dz++) {
+            for (int dx = -halo; dx < CACHE_REGIONS_PER_ATLAS + halo; dx++) {
                 newest = Math.max(newest, backend.regionRevision(dimension, x + dx, z + dz));
             }
         }
         return newest;
     }
 
-    private static void paint(
+    private void paint(
             Atlas atlas, int x, int z, SurfaceTile tile, int stride, int edge) {
-        int[] colors = tile == null ? null : MapPresentationRenderer.renderPixels(tile, stride);
+        int[] colors = tile == null ? null
+                : MapPresentationRenderer.renderPixels(tile, stride, backend::tile);
         NativeImage image = atlas.texture.getPixels();
         for (int row = 0; row < edge; row++) {
             for (int column = 0; column < edge; column++) {
