@@ -13,6 +13,8 @@ public final class FabricCartographClient implements ClientModInitializer {
         });
         ClientPlayNetworking.registerGlobalReceiver(MapProtocol.WorldInfo.TYPE,
                 (packet, context) -> MapClientCache.accept(packet));
+        ClientPlayNetworking.registerGlobalReceiver(MapProtocol.BackfillCheckpoint.TYPE,
+                (packet, context) -> MapClientCache.accept(packet));
         ClientPlayNetworking.registerGlobalReceiver(MapProtocol.Tile.TYPE,
                 (packet, context) -> MapClientCache.accept(packet));
 

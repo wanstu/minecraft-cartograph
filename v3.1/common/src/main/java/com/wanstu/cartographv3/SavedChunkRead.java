@@ -13,7 +13,7 @@ import java.util.function.BiConsumer;
 
 final class SavedChunkRead {
     private static final AtomicInteger THREAD_COUNT = new AtomicInteger();
-    private static final ExecutorService DISK = Executors.newFixedThreadPool(8, task -> {
+    private static final ExecutorService DISK = Executors.newFixedThreadPool(2, task -> {
         Thread thread = new Thread(task, "cartograph-v3-mca-" + THREAD_COUNT.incrementAndGet());
         thread.setDaemon(true);
         return thread;

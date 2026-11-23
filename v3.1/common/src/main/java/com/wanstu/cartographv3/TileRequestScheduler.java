@@ -21,10 +21,13 @@ import java.util.UUID;
  */
 final class TileRequestScheduler {
     private static final int MAX_QUEUED_PER_PLAYER = 1024;
-    private static final int MAX_STARTED_PER_TICK = 32;
-    private static final int MAX_STARTED_PER_PLAYER_PER_TICK = 8;
+    private static final int MAX_STARTED_PER_TICK = 8;
+    private static final int MAX_STARTED_PER_PLAYER_PER_TICK = 4;
     private static final int MAX_QUEUE_SCAN_PER_PLAYER_PER_TICK = 64;
-    private static final int MAX_LOADED_CAPTURES_PER_TICK = 2;
+    private static final int MAX_LOADED_CAPTURES_PER_TICK = 1;
+    private static final int MAX_IN_FLIGHT_PER_PLAYER = 16;
+    private static final int MAX_BACKGROUND_STARTED_PER_TICK = 1;
+    private static final int MAX_BACKGROUND_IN_FLIGHT_PER_PLAYER = 4;
 
     private static final class PlayerQueue {
         final LinkedHashMap<ChunkKey, MapProtocol.RequestTile> pending =
@@ -44,11 +47,11 @@ final class TileRequestScheduler {
 
     private TileRequestScheduler() {}
 
-    static void open(ServerPlayer player) {
+    static void open(ServerPlayer player, long backgroundCheckpointMillis) {
         if (player == null) return;
         OPEN_PLAYERS.add(player.getUUID());
         QUEUES.computeIfAbsent(player.getUUID(), ignored -> new PlayerQueue());
-        GeneratedChunkBackfill.open(player);
+        GeneratedChunkBackfill.open(player, backgroundCheckpointMillis);
     }
 
     static void enqueue(ServerPlayer player, MapProtocol.RequestTile request) {
@@ -126,6 +129,7 @@ final class TileRequestScheduler {
 
         int started = 0;
         int heavy = 0;
+        int backgroundStarted = 0;
         int visitedPlayers = 0;
 
         // Explicit viewport requests always win. Background generated-chunk
@@ -149,6 +153,7 @@ final class TileRequestScheduler {
             while (iterator.hasNext()
                     && started < MAX_STARTED_PER_TICK
                     && playerStarts < MAX_STARTED_PER_PLAYER_PER_TICK
+                    && queue.inFlight.size() < MAX_IN_FLIGHT_PER_PLAYER
                     && scanned < MAX_QUEUE_SCAN_PER_PLAYER_PER_TICK) {
                 var entry = iterator.next();
                 scanned++;
@@ -181,8 +186,11 @@ final class TileRequestScheduler {
             }
 
             int backgroundAttempts = 0;
-            while (started < MAX_STARTED_PER_TICK
+            while (queue.pending.isEmpty()
+                    && started < MAX_STARTED_PER_TICK
+                    && backgroundStarted < MAX_BACKGROUND_STARTED_PER_TICK
                     && playerStarts < MAX_STARTED_PER_PLAYER_PER_TICK
+                    && queue.inFlight.size() < MAX_BACKGROUND_IN_FLIGHT_PER_PLAYER
                     && backgroundAttempts < MAX_QUEUE_SCAN_PER_PLAYER_PER_TICK) {
                 ChunkKey key = GeneratedChunkBackfill.poll(player);
                 if (key == null) break;
@@ -198,6 +206,7 @@ final class TileRequestScheduler {
                         knownFingerprint != null,
                         knownFingerprint == null ? 0L : knownFingerprint);
                 started++;
+                backgroundStarted++;
                 playerStarts++;
                 start(player, queue, key, background, false);
             }

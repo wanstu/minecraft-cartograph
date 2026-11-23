@@ -54,16 +54,30 @@ final class GeneratedChunkBackfill {
         final Set<String> readyLogged = ConcurrentHashMap.newKeySet();
         final Set<ChunkKey> initialPending = ConcurrentHashMap.newKeySet();
         final Map<ChunkKey, Long> knownFingerprints = new ConcurrentHashMap<>();
+        final Map<String, Long> checkpoints = new ConcurrentHashMap<>();
+        final Map<String, Long> scanStartedAt = new ConcurrentHashMap<>();
     }
 
     private static final Map<UUID, State> STATES = new ConcurrentHashMap<>();
 
     private GeneratedChunkBackfill() {}
 
-    static void open(ServerPlayer player) {
+    static void open(ServerPlayer player, long checkpointMillis) {
         if (player == null) return;
         State state = STATES.computeIfAbsent(player.getUUID(), ignored -> new State());
+        boolean wasActive = state.active;
         state.active = true;
+
+        String dimension = MapGameAccess.dimension(MapGameAccess.level(player));
+        long checkpoint = Math.max(0L, checkpointMillis);
+        Long previousCheckpoint = state.checkpoints.put(dimension, checkpoint);
+        boolean needsScan = !wasActive
+                || previousCheckpoint == null
+                || previousCheckpoint.longValue() != checkpoint;
+        if (needsScan) {
+            state.readyLogged.remove(dimension);
+            if (!state.scanning.contains(dimension)) state.scanned.remove(dimension);
+        }
         ensureCurrent(player);
     }
 
@@ -88,9 +102,14 @@ final class GeneratedChunkBackfill {
         Path regionDirectory = MapGameAccess.regionDirectory(level);
         int centerX = MapGameAccess.chunkX(player.chunkPosition());
         int centerZ = MapGameAccess.chunkZ(player.chunkPosition());
+        long checkpointMillis = state.checkpoints.getOrDefault(dimension, 0L);
+        long scanStartedMillis = System.currentTimeMillis();
+        state.scanStartedAt.put(dimension, scanStartedMillis);
         UUID playerId = player.getUUID();
+        MinecraftServer server = MapGameAccess.server(player);
         SCANNER.execute(() ->
-                scan(playerId, state, dimension, regionDirectory, centerX, centerZ));
+                scan(server, playerId, state, dimension, regionDirectory,
+                        centerX, centerZ, checkpointMillis, scanStartedMillis));
     }
 
     static ChunkKey poll(ServerPlayer player) {
@@ -125,14 +144,14 @@ final class GeneratedChunkBackfill {
         State state = STATES.get(player.getUUID());
         if (state == null) return;
         state.knownFingerprints.put(tile.key(), tile.fingerprint64());
-        completeAttempt(state, tile.key());
+        completeAttempt(player, state, tile.key());
     }
 
     static void markEmpty(ServerPlayer player, ChunkKey key) {
         if (player == null || key == null) return;
         State state = STATES.get(player.getUUID());
         if (state == null) return;
-        completeAttempt(state, key);
+        completeAttempt(player, state, key);
     }
 
     static void chunkSaved(ServerLevel level, ChunkPos pos) {
@@ -165,12 +184,15 @@ final class GeneratedChunkBackfill {
     }
 
     private static void scan(
+            MinecraftServer server,
             UUID playerId,
             State state,
             String dimension,
             Path regionDirectory,
             int centerX,
-            int centerZ) {
+            int centerZ,
+            long checkpointMillis,
+            long scanStartedMillis) {
         List<ChunkKey> discovered = new ArrayList<>();
         try {
             if (Files.isDirectory(regionDirectory)) {
@@ -180,6 +202,14 @@ final class GeneratedChunkBackfill {
                         Matcher matcher = REGION_FILE.matcher(
                                 regionFile.getFileName().toString());
                         if (!matcher.matches()) continue;
+                        if (checkpointMillis > 0L) {
+                            try {
+                                if (Files.getLastModifiedTime(regionFile).toMillis()
+                                        <= checkpointMillis) continue;
+                            } catch (Exception ignored) {
+                                // If metadata cannot be read, scan conservatively.
+                            }
+                        }
                         int regionX = Integer.parseInt(matcher.group(1));
                         int regionZ = Integer.parseInt(matcher.group(2));
                         discoverRegion(regionFile, dimension, regionX, regionZ, discovered);
@@ -198,8 +228,12 @@ final class GeneratedChunkBackfill {
             for (ChunkKey key : discovered) add(state, key);
             state.scanned.add(dimension);
             LOG.info(
-                    "V31_BACKGROUND_INDEX player={} dimension={} region_candidates={}",
-                    playerId, dimension, discovered.size());
+                    "V31_BACKGROUND_INDEX player={} dimension={} region_candidates={} checkpoint={}",
+                    playerId, dimension, discovered.size(), checkpointMillis);
+            if (discovered.isEmpty()) {
+                publishCheckpoint(
+                        server, playerId, state, dimension, scanStartedMillis);
+            }
         } catch (Exception failure) {
             LOG.warn(
                     "Unable to scan generated chunks for dimension {}", dimension, failure);
@@ -234,23 +268,45 @@ final class GeneratedChunkBackfill {
         }
     }
 
-    private static void completeAttempt(State state, ChunkKey key) {
+    private static void completeAttempt(ServerPlayer player, State state, ChunkKey key) {
         Set<ChunkKey> queued = state.queued.get(key.dimension());
         if (queued != null) queued.remove(key);
         state.initialPending.remove(key);
 
         boolean dimensionPending = state.initialPending.stream()
                 .anyMatch(candidate -> candidate.dimension().equals(key.dimension()));
-        if (!dimensionPending
-                && state.scanned.contains(key.dimension())
-                && state.readyLogged.add(key.dimension())) {
+        if (!dimensionPending && state.scanned.contains(key.dimension())) {
+            publishCheckpoint(
+                    MapGameAccess.server(player),
+                    player.getUUID(),
+                    state,
+                    key.dimension(),
+                    state.scanStartedAt.getOrDefault(
+                            key.dimension(), System.currentTimeMillis()));
+        }
+    }
+
+    private static void publishCheckpoint(
+            MinecraftServer server,
+            UUID playerId,
+            State state,
+            String dimension,
+            long checkpointMillis) {
+        if (server == null || checkpointMillis <= 0L) return;
+        server.execute(() -> {
+            if (STATES.get(playerId) != state || !state.active) return;
+            ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+            if (player == null || !state.readyLogged.add(dimension)) return;
+
             long full = state.knownFingerprints.keySet().stream()
-                    .filter(candidate -> candidate.dimension().equals(key.dimension()))
+                    .filter(candidate -> candidate.dimension().equals(dimension))
                     .count();
             LOG.info(
-                    "V31_BACKGROUND_READY dimension={} full_chunks={}",
-                    key.dimension(), full);
-        }
+                    "V31_BACKGROUND_READY dimension={} full_chunks={} checkpoint={}",
+                    dimension, full, checkpointMillis);
+            MapTransport.sendToPlayer(
+                    player, new MapProtocol.BackfillCheckpoint(dimension, checkpointMillis));
+        });
     }
 
     private static void add(State state, ChunkKey key) {

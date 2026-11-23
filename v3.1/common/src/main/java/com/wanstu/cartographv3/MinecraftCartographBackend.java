@@ -19,6 +19,8 @@ final class MinecraftCartographBackend implements CartographBackendApi {
 
     private Viewport viewport;
     private boolean opened;
+    private boolean viewStateSent;
+    private String viewStateDimension = "";
     private int requestTicks;
 
     private int lastRequestMinChunkX = Integer.MIN_VALUE;
@@ -34,15 +36,18 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     public void open() {
         if (opened) return;
         opened = true;
+        viewStateSent = false;
+        viewStateDimension = "";
         MapClientCache.ensureWorld(minecraft.level);
         MapClientCache.beginMapSession();
-        MapTransport.sendToServer(new MapProtocol.MapViewState(
-                true, CartographSettings.liveScanIntervalTicks()));
+        ensureViewState();
     }
 
     @Override
     public void tick() {
         if (!opened) return;
+        ensureViewState();
+        if (!viewStateSent) return;
         requestTicks++;
         if (viewport == null || viewport.dragging()) return;
         int pendingLimit = maxPendingRequests();
@@ -102,6 +107,8 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     public void updateViewport(Viewport viewport, boolean force) {
         this.viewport = viewport;
         if (!opened || viewport == null) return;
+        ensureViewState();
+        if (!viewStateSent) return;
         requestVisible(force);
     }
 
@@ -206,7 +213,12 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     public void setLiveScanInterval(int ticks) {
         CartographSettings.setLiveScanIntervalTicks(ticks);
         if (opened) {
-            MapTransport.sendToServer(new MapProtocol.MapViewState(true, ticks));
+            ensureViewState();
+            if (viewStateSent) {
+                String dim = dimension();
+                MapTransport.sendToServer(new MapProtocol.MapViewState(
+                        true, ticks, MapClientCache.backgroundCheckpoint(dim)));
+            }
         }
     }
 
@@ -217,10 +229,26 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         viewport = null;
 
         var connection = minecraft.getConnection();
-        if (connection != null && connection.getConnection().isConnected()) {
+        if (connection != null && connection.getConnection().isConnected() && viewStateSent) {
             MapTransport.sendToServer(new MapProtocol.MapViewState(
-                    false, CartographSettings.liveScanIntervalTicks()));
+                    false, CartographSettings.liveScanIntervalTicks(), 0L));
         }
+        viewStateSent = false;
+        viewStateDimension = "";
+    }
+
+    private void ensureViewState() {
+        if (!opened || minecraft.level == null || MapClientCache.worldId() == null) return;
+        String dim = dimension();
+        if (dim.isBlank()) return;
+        if (viewStateSent && dim.equals(viewStateDimension)) return;
+
+        MapTransport.sendToServer(new MapProtocol.MapViewState(
+                true,
+                CartographSettings.liveScanIntervalTicks(),
+                MapClientCache.backgroundCheckpoint(dim)));
+        viewStateSent = true;
+        viewStateDimension = dim;
     }
 
     private int maxPendingRequests() {
