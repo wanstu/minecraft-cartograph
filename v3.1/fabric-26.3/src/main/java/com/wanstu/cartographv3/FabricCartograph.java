@@ -29,6 +29,8 @@ public final class FabricCartograph implements ModInitializer {
 
         var toClient = PayloadTypeRegistry.clientboundPlay();
         toClient.register(MapProtocol.WorldInfo.TYPE, MapProtocol.WorldInfo.CODEC);
+        toClient.register(
+                MapProtocol.BackfillCheckpoint.TYPE, MapProtocol.BackfillCheckpoint.CODEC);
         toClient.register(MapProtocol.Tile.TYPE, MapProtocol.Tile.CODEC);
 
         ServerPlayNetworking.registerGlobalReceiver(MapProtocol.MapViewState.TYPE,

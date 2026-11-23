@@ -238,6 +238,21 @@ public final class MapClientCache {
         }
     }
 
+    public static void accept(MapProtocol.BackfillCheckpoint packet) {
+        if (world == null || worldId == null || packet == null) return;
+        String current = MapGameAccess.dimension(world);
+        if (!current.equals(packet.dimension())) return;
+        PersistentTileStore.saveBackgroundCheckpoint(
+                worldId, packet.dimension(), packet.checkpointMillis());
+        LOG.info("V31_BACKGROUND_CHECKPOINT dimension={} checkpoint={}",
+                packet.dimension(), packet.checkpointMillis());
+    }
+
+    static long backgroundCheckpoint(String dimension) {
+        if (world == null || worldId == null || dimension == null || dimension.isBlank()) return 0L;
+        return PersistentTileStore.backgroundCheckpoint(worldId, dimension);
+    }
+
     public static void accept(MapProtocol.Tile packet) {
         if (world == null) return;
         String current = MapGameAccess.dimension(world);

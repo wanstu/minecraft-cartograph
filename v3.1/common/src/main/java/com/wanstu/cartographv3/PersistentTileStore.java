@@ -150,6 +150,44 @@ final class PersistentTileStore {
         }
     }
 
+    static long backgroundCheckpoint(UUID worldId, String dimensionId) {
+        if (worldId == null || dimensionId == null || dimensionId.isBlank()) return 0L;
+        Path file = checkpointFile(worldId, dimensionId);
+        if (!Files.isRegularFile(file)) return 0L;
+        try {
+            return Math.max(0L, Long.parseLong(Files.readString(file).trim()));
+        } catch (IOException | NumberFormatException invalid) {
+            return 0L;
+        }
+    }
+
+    static void saveBackgroundCheckpoint(UUID worldId, String dimensionId, long checkpointMillis) {
+        if (worldId == null || dimensionId == null || dimensionId.isBlank()
+                || checkpointMillis <= 0L) return;
+
+        WRITER.execute(() -> {
+            Path target = checkpointFile(worldId, dimensionId);
+            Path tmp = target.resolveSibling(
+                    target.getFileName() + ".tmp-" + UUID.randomUUID());
+            try {
+                Files.createDirectories(target.getParent());
+                Files.writeString(
+                        tmp, Long.toString(checkpointMillis),
+                        StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+                try {
+                    Files.move(
+                            tmp, target,
+                            StandardCopyOption.REPLACE_EXISTING,
+                            StandardCopyOption.ATOMIC_MOVE);
+                } catch (AtomicMoveNotSupportedException unsupported) {
+                    Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (IOException failure) {
+                try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
+            }
+        });
+    }
+
     static void delete(UUID worldId, ChunkKey key) {
         Path target = file(directory(worldId, key.dimension()), key);
         try {
@@ -335,6 +373,10 @@ final class PersistentTileStore {
 
     private static Path file(Path directory, ChunkKey key) {
         return directory.resolve(key.x() + "_" + key.z() + ".ct31");
+    }
+
+    private static Path checkpointFile(UUID worldId, String dimensionId) {
+        return directory(worldId, dimensionId).resolve(".background-checkpoint");
     }
 
     private static Path directory(UUID worldId, String dimensionId) {

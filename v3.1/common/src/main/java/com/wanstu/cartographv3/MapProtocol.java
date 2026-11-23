@@ -21,10 +21,14 @@ public final class MapProtocol {
         }
     }
 
-    public record MapViewState(boolean open, int liveScanIntervalTicks)
+    public record MapViewState(
+            boolean open,
+            int liveScanIntervalTicks,
+            long backgroundCheckpointMillis)
             implements CustomPacketPayload {
         public MapViewState {
             liveScanIntervalTicks = Math.max(5, Math.min(100, liveScanIntervalTicks));
+            backgroundCheckpointMillis = Math.max(0L, backgroundCheckpointMillis);
         }
         public static final Type<MapViewState> TYPE = new Type<>(
                 MapGameAccess.id(MOD_ID, "map_view_state"));
@@ -33,8 +37,10 @@ public final class MapProtocol {
                         (buf, value) -> {
                             buf.writeBoolean(value.open());
                             buf.writeVarInt(value.liveScanIntervalTicks());
+                            buf.writeLong(value.backgroundCheckpointMillis());
                         },
-                        buf -> new MapViewState(buf.readBoolean(), buf.readVarInt()));
+                        buf -> new MapViewState(
+                                buf.readBoolean(), buf.readVarInt(), buf.readLong()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
@@ -56,6 +62,25 @@ public final class MapProtocol {
                             buf.writeUtf(value.dimension(), 128);
                         },
                         buf -> new WorldInfo(buf.readUtf(36), buf.readUtf(128)));
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    public record BackfillCheckpoint(String dimension, long checkpointMillis)
+            implements CustomPacketPayload {
+        public BackfillCheckpoint {
+            if (dimension == null || dimension.isBlank() || dimension.length() > 128)
+                throw new IllegalArgumentException("Invalid dimension");
+            checkpointMillis = Math.max(0L, checkpointMillis);
+        }
+        public static final Type<BackfillCheckpoint> TYPE = new Type<>(
+                MapGameAccess.id(MOD_ID, "backfill_checkpoint"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, BackfillCheckpoint> CODEC =
+                StreamCodec.of(
+                        (buf, value) -> {
+                            buf.writeUtf(value.dimension(), 128);
+                            buf.writeLong(value.checkpointMillis());
+                        },
+                        buf -> new BackfillCheckpoint(buf.readUtf(128), buf.readLong()));
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
@@ -280,7 +305,7 @@ public final class MapProtocol {
 
     static void handleViewState(ServerPlayer player, MapViewState request) {
         if (request.open()) {
-            TileRequestScheduler.open(player);
+            TileRequestScheduler.open(player, request.backgroundCheckpointMillis());
             LiveSurfaceUpdates.open(player, request.liveScanIntervalTicks());
         } else {
             LiveSurfaceUpdates.close(player);
