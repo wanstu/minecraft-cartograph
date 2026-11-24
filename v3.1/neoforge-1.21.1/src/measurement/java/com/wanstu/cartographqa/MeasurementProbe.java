@@ -23,8 +23,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** Measurement and controlled fixture edits stay in an isolated copied world. */
 @Mod("cartograph_perf_probe")
 public final class MeasurementProbe {
+    private static final boolean WEB_TOGGLE = Boolean.getBoolean("cartograph.measurementKubeWebToggle");
+    private static final boolean CROSSOVER = Boolean.getBoolean("cartograph.measurementCrossover");
     private static final boolean IDLE_MODE = Boolean.getBoolean("cartograph.measurementIdle");
-    private static final String[] PHASES = IDLE_MODE
+    private static final String[] PHASES = WEB_TOGGLE
+            ? new String[]{"warmup_mapping", "web_on_1", "web_off_1", "web_off_2", "web_on_2",
+                "web_off_3", "web_on_3"}
+            : CROSSOVER
+            ? new String[]{"warmup_mapping", "control_1", "mapping_1", "mapping_2", "control_2",
+                "mapping_3", "control_3", "control_4", "mapping_4"}
+            : IDLE_MODE
             ? new String[]{"control_warmup", "mapping_overworld", "control_overworld", "warmup_nether",
                 "mapping_nether", "control_nether", "mapping_nether_tail", "warmup_return", "mapping_overworld_tail"}
             : Boolean.getBoolean("cartograph.measurementQuick")
@@ -48,6 +56,8 @@ public final class MeasurementProbe {
     private volatile Throwable phaseFailure;
     private boolean netherSaveRequested;
     private volatile boolean netherSaveFinished;
+    private boolean cachePrimed;
+    private boolean cacheRestoreRequested;
     private volatile int editStage;
     private volatile long editStarted;
     private net.minecraft.core.BlockPos editPos;
@@ -57,6 +67,19 @@ public final class MeasurementProbe {
     private final Set<String> screenshots = new HashSet<>();
 
     public MeasurementProbe() { NeoForge.EVENT_BUS.register(this); }
+
+    private record Gap(long end_epoch_ms, long duration_ns) {}
+    private record ThreadUsage(String name, long cpu, long allocated) {}
+    private static Map<Long, ThreadUsage> threadUsage() {
+        var bean = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
+        Map<Long, ThreadUsage> usage = new HashMap<>();
+        for (long id : bean.getAllThreadIds()) {
+            var info = bean.getThreadInfo(id);
+            if (info != null) usage.put(id, new ThreadUsage(info.getThreadName(),
+                    bean.getThreadCpuTime(id), bean.getThreadAllocatedBytes(id)));
+        }
+        return usage;
+    }
 
     private static final class Samples {
         final String name;
@@ -68,6 +91,9 @@ public final class MeasurementProbe {
         final List<Long> frames = new ArrayList<>();
         final List<Long> clients = new ArrayList<>();
         final ConcurrentLinkedQueue<Long> servers = new ConcurrentLinkedQueue<>();
+        final List<Gap> longFrames = new ArrayList<>();
+        final ConcurrentLinkedQueue<Gap> longServers = new ConcurrentLinkedQueue<>();
+        final Map<Long, ThreadUsage> threadStart = CROSSOVER ? threadUsage() : Map.of();
         final long diskStart = counter("SurfaceService", "DISK_HITS");
         final long loadedStart = counter("SurfaceService", "LOADED_HITS");
         final long captureStart = longCounter("LoadedSurfaceReader", "capturesStarted");
@@ -150,6 +176,19 @@ public final class MeasurementProbe {
                 if (!netherSaveFinished) return;
                 functionalChecks.put("nether_snapshot_saved_before_measurement", true);
             }
+            if (WEB_TOGGLE && samples.name.equals("warmup_mapping") && elapsed > 5 && !cacheRestoreRequested) {
+                cacheRestoreRequested = true;
+                int x = Math.floorDiv((int) Math.floor(homeX), 16);
+                int z = Math.floorDiv((int) Math.floor(homeZ), 16);
+                invoke(type("MapClientCache"), null, "restoreVisibleFromDisk",
+                        mc.level.dimension().location().toString(), x - 128, x + 128, z - 128, z + 128);
+            }
+            if (WEB_TOGGLE && samples.name.equals("warmup_mapping") && elapsed > 45 && !cachePrimed) {
+                mc.setScreen(null);
+                cachePrimed = true;
+                functionalChecks.put("cartograph_closed_after_cache_priming", true);
+                functionalChecks.put("cartograph_cached_at_close", callStatic("MapClientCache", "cachedCount"));
+            }
             if (elapsed < phaseSeconds(samples.name)) return;
             finishPhase(samples);
             if (++phaseIndex < PHASES.length) switchPhase(phaseIndex);
@@ -195,7 +234,8 @@ public final class MeasurementProbe {
             field(backend.getClass(), "worldActive").setBoolean(backend, false);
             call(backend, "setWorldActive", true);
         }
-        mc.getSingleplayerServer().execute(() -> {
+        if (WEB_TOGGLE && index > 0) setKubeWeb(name.startsWith("web_on_"));
+        if (!CROSSOVER || index == 0) mc.getSingleplayerServer().execute(() -> {
             try {
                 boolean nether = IDLE_MODE && name.contains("nether");
                 var target = IDLE_MODE ? mc.getSingleplayerServer().getLevel(nether
@@ -221,12 +261,20 @@ public final class MeasurementProbe {
                 call(camera, "restore", value);
             }
         }
+        if (WEB_TOGGLE && index == 0) {
+            Object inGame = Enum.valueOf((Class) type("CartographFrontendTarget"), "IN_GAME");
+            call(runtime, "openFrontend", inGame);
+        }
         current = new Samples(name);
         previousFrame = 0;
         System.out.println("CARTOGRAPH_MEASUREMENT_PHASE " + name + " " + Instant.now());
     }
 
     private static double phaseSeconds(String name) {
+        if (WEB_TOGGLE) return name.equals("warmup_mapping") ? 180 : 45;
+        if (CROSSOVER) return name.equals("warmup_mapping")
+                ? Double.parseDouble(System.getProperty("cartograph.measurementWarmupSeconds", "180"))
+                : Double.parseDouble(System.getProperty("cartograph.measurementBlockSeconds", "60"));
         if (!IDLE_MODE) return name.equals("warmup_control") ? 20 : 25;
         return switch (name) {
             case "control_warmup", "warmup_return" -> 30;
@@ -237,6 +285,27 @@ public final class MeasurementProbe {
         };
     }
 
+    private static Object kubeWeb() throws Exception {
+        Class<?> owner = Class.forName("dev.latvian.mods.kubejs.web.LocalWebServer");
+        Object instance = owner.getMethod("instance").invoke(null);
+        if (instance == null) {
+            Method start = Arrays.stream(owner.getMethods()).filter(method ->
+                    method.getName().equals("start") && method.getParameterCount() == 2).findFirst().orElseThrow();
+            start.invoke(null, Minecraft.getInstance(), true);
+            instance = owner.getMethod("instance").invoke(null);
+        }
+        if (instance == null) throw new IllegalStateException("KubeJS local Web server did not start");
+        return owner.getMethod("server").invoke(instance);
+    }
+
+    private static void setKubeWeb(boolean enabled) throws Exception {
+        Object server = kubeWeb();
+        boolean running = (boolean) server.getClass().getMethod("isRunning").invoke(server);
+        if (enabled != running) server.getClass().getMethod(enabled ? "start" : "stop").invoke(server);
+        if ((boolean) server.getClass().getMethod("isRunning").invoke(server) != enabled)
+            throw new AssertionError("KubeJS Web state did not match the requested test block");
+    }
+
     @SubscribeEvent
     public void framePre(RenderFrameEvent.Pre event) {
         Samples samples = current;
@@ -245,7 +314,12 @@ public final class MeasurementProbe {
         if (org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(Minecraft.getInstance().getWindow().getWindow(),
                 org.lwjgl.glfw.GLFW.GLFW_FOCUSED) != 0) samples.focusedFrames++;
         else samples.unfocusedFrames++;
-        if (previousFrame != 0) samples.frames.add(now - previousFrame);
+        if (previousFrame != 0) {
+            long gap = now - previousFrame;
+            samples.frames.add(gap);
+            if (CROSSOVER && gap > 50_000_000L)
+                samples.longFrames.add(new Gap(System.currentTimeMillis(), gap));
+        }
         previousFrame = now;
     }
 
@@ -256,7 +330,10 @@ public final class MeasurementProbe {
     public void serverPost(ServerTickEvent.Post event) {
         Samples samples = current;
         if (samples == null || finished) return;
-        samples.servers.add(System.nanoTime() - serverTickStarted);
+        long elapsed = System.nanoTime() - serverTickStarted;
+        samples.servers.add(elapsed);
+        if (CROSSOVER && elapsed > 50_000_000L)
+            samples.longServers.add(new Gap(System.currentTimeMillis(), elapsed));
         if (event.getServer().getTickCount() % 20 != 0) return;
         try {
             Map<?, ?> queues = (Map<?, ?>) read(type("TileRequestScheduler"), null, "QUEUES");
@@ -300,6 +377,31 @@ public final class MeasurementProbe {
         long worldFrames = delta("MapWorldRenderPolicy", "worldFrames", samples.worldFrameStart);
         long skippedFrames = delta("MapWorldRenderPolicy", "skippedWorldFrames", samples.skippedWorldStart);
         result.put("world_render_frames", worldFrames); result.put("world_render_skipped_frames", skippedFrames);
+        if (CROSSOVER) {
+            result.put("mapping_enabled", !samples.name.startsWith("control_"));
+            result.put("long_frames", samples.longFrames);
+            result.put("long_server_ticks", new ArrayList<>(samples.longServers));
+            Map<String, long[]> totals = new TreeMap<>();
+            threadUsage().forEach((id, usage) -> {
+                ThreadUsage start = samples.threadStart.get(id);
+                long cpu = start == null ? usage.cpu() : usage.cpu() - start.cpu();
+                long allocated = start == null ? usage.allocated() : usage.allocated() - start.allocated();
+                long[] total = totals.computeIfAbsent(usage.name(), ignored -> new long[2]);
+                total[0] += Math.max(0, cpu); total[1] += Math.max(0, allocated);
+            });
+            Map<String, Object> usage = new TreeMap<>();
+            totals.forEach((name, total) -> {
+                if (total[0] >= 1_000_000L || total[1] >= 65_536L)
+                    usage.put(name, Map.of("cpu_ms", total[0] / 1e6, "allocated_bytes", total[1]));
+            });
+            result.put("thread_usage", usage);
+        }
+        if (WEB_TOGGLE && !samples.name.startsWith("warmup_")) {
+            try {
+                Object server = kubeWeb();
+                result.put("kubejs_web_running", server.getClass().getMethod("isRunning").invoke(server));
+            } catch (Exception failure) { throw new RuntimeException(failure); }
+        }
         if (worldFrames >= 0 && samples.name.equals("map_near_idle"))
             functionalChecks.put("world_render_suppressed_under_map", worldFrames == 0 && skippedFrames > 0);
         if (worldFrames >= 0 && samples.name.equals("map_closed_idle"))
@@ -337,9 +439,11 @@ public final class MeasurementProbe {
     }
     private static double percentile(long[] values, double p) { return values[Math.min(values.length - 1, (int) Math.ceil(p * values.length) - 1)] / 1e6; }
     private void writeResults(boolean complete) throws Exception {
-        Map<String, Object> root = new LinkedHashMap<>(); root.put("schema_version", 3); root.put("complete", complete);
-        root.put("measurement_mode", IDLE_MODE ? "idle_actual_world" : "map");
-        root.put("control", "CartographBackendRuntime closed; worldActive latched true to keep collection paused");
+        Map<String, Object> root = new LinkedHashMap<>(); root.put("schema_version", CROSSOVER ? 4 : 3); root.put("complete", complete);
+        root.put("measurement_mode", WEB_TOGGLE ? "idle_kube_web_toggle" : CROSSOVER ? "idle_crossover" : IDLE_MODE ? "idle_actual_world" : "map");
+        root.put("control", WEB_TOGGLE
+                ? "Cartograph collection stays active; toggle only KubeJS LocalWebServer server start/stop in this copied instance"
+                : "CartographBackendRuntime closed; worldActive latched true to keep collection paused");
         root.put("jvm_available_processors", OS.getAvailableProcessors()); root.put("os", System.getProperty("os.name"));
         root.put("java", System.getProperty("java.version")); root.put("phases", RESULTS);
         root.put("functional_checks", functionalChecks);

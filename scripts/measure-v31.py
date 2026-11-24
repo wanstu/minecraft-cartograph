@@ -50,6 +50,7 @@ def prepare(args):
     print(json.dumps({'prepared':True,'instance':str(instance),'world':args.world}),flush=True)
 
 def run(args):
+    if args.kube_web_toggle: args.crossover=True
     lab=args.lab.resolve()
     if json.loads((lab/'owner.json').read_text())['owner'] != OWNER: raise RuntimeError('Invalid owner')
     instance=lab/'instance'
@@ -79,9 +80,11 @@ def run(args):
     rewritten[0:0]=['-XX:StartFlightRecording=name=cartograph,settings=profile,dumponexit=true,filename='+str(lab/'trace.jfr')+',maxsize=128m',
                     '-Xlog:gc*:file='+str(lab/'gc.log')+':time,uptime,level,tags']
     if args.quick: rewritten.insert(0, '-Dcartograph.measurementQuick=true')
-    if args.idle:
+    if args.idle or args.crossover:
         if not args.scene: raise RuntimeError('Idle mode requires an explicit scene')
         rewritten[0:0]=['-Dcartograph.measurementIdle=true','-Dcartograph.measurementScene='+str(args.scene.resolve())]
+    if args.crossover: rewritten.insert(0, '-Dcartograph.measurementCrossover=true')
+    if args.kube_web_toggle: rewritten.insert(0, '-Dcartograph.measurementKubeWebToggle=true')
     rewritten.extend(('--quickPlaySingleplayer','BenchWorld'))
     display=args.display or ':135'
     env=os.environ.copy();env.update(DISPLAY=display,ALSOFT_DRIVERS='null')
@@ -152,6 +155,8 @@ if __name__=='__main__':
     parser.add_argument('--lab',type=pathlib.Path,required=True);parser.add_argument('--source',type=pathlib.Path,required=True)
     parser.add_argument('--quick',action='store_true');parser.add_argument('--world',default='UnificationSmoke');parser.add_argument('--java',type=pathlib.Path)
     parser.add_argument('--link-facts',action='store_true');parser.add_argument('--idle',action='store_true');parser.add_argument('--scene',type=pathlib.Path)
+    parser.add_argument('--crossover',action='store_true',help='Long warmup followed by balanced collection on/off blocks')
+    parser.add_argument('--kube-web-toggle',action='store_true',help='Toggle only the copied instance KubeJS development Web server')
     parser.add_argument('--timeout',type=int,default=720)
     parser.add_argument('--display',help='Use an existing display without starting or stopping its server')
     parser.add_argument('--xvfb',type=pathlib.Path);parser.add_argument('--cartograph-jar',type=pathlib.Path);parser.add_argument('--probe-jar',type=pathlib.Path)

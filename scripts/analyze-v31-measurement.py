@@ -5,6 +5,31 @@ import argparse, bisect, collections, datetime, json, pathlib, re, subprocess
 CARTOGRAPH='com.wanstu.cartographv3.'
 GAME_THREADS=('main','Render thread','Server thread')
 SAMPLE_TYPES=('jdk.ExecutionSample','jdk.NativeMethodSample')
+MOD_PREFIXES=('com.wanstu.cartographv3.','xaero.','dev.ryanhcode.sable.')
+
+def sampled_owner(methods):
+    for method in methods:
+        if method.startswith(CARTOGRAPH): return 'Cartograph'
+        if method.startswith('xaero.'): return 'Xaero'
+        if method.startswith('dev.ryanhcode.sable.'): return 'Sable'
+    return 'other'
+
+def long_frame_gc(frames, pauses):
+    result={}
+    for threshold in (50,100):
+        gaps=[gap for gap in frames if gap['duration_ns']/1e6>threshold]
+        overlaps=[]
+        for gap in gaps:
+            end=gap['end_epoch_ms'];duration=gap['duration_ns']/1e6
+            overlap=sum(max(0,min(end,start+length)-max(end-duration,start))
+                        for start,length in pauses)
+            overlaps.append(min(duration,overlap))
+        result[str(threshold)]={
+            'frames':len(gaps),'any_gc_overlap':sum(x>=1 for x in overlaps),
+            'gc_covers_half_gap':sum(x>=gap['duration_ns']/2e6 for x,gap in zip(overlaps,gaps)),
+            'overlapping_gc_ms':sum(overlaps),
+        }
+    return result
 
 def main():
     parser=argparse.ArgumentParser()
@@ -18,6 +43,7 @@ def main():
     groups={phase['phase']:{
         'threads':{},'gc_pauses_ms':[],'slow_io':[],'monitor_blocks':[],'parks':[],
         'sampled_allocation_bytes':collections.Counter(),'sampled_allocations_by_thread':{},
+        'sampled_allocation_owners_by_thread':{},
     } for phase in report['phases']}
     helper=pathlib.Path(__file__).with_name('JfrPhaseEvents.java')
     command=[str(args.java),'-Xmx256m',str(helper),str(lab/'trace.jfr'),'0','9999999999999']
@@ -25,7 +51,7 @@ def main():
     # Cross-check JFR's TSC timestamps against this JVM's unified GC wall-clock log.
     # On this older dadm CPU, the JFR clock runs at a different rate from wall time.
     starts={}
-    pauses=[]
+    pause_intervals=[]
     for line in (lab/'gc.log').read_text().splitlines():
         match=re.search(r'^\[([^]]+)\].*\[gc,start\s*\] GC\((\d+)\) Pause Young',line)
         if match:
@@ -34,7 +60,7 @@ def main():
         if match:
             end=datetime.datetime.fromisoformat(match[1]).timestamp()*1000
             duration=float(match[3])
-            pauses.append((end-duration,duration))
+            pause_intervals.append((end-duration,duration))
     calibration=subprocess.run(command+['gc'],capture_output=True,text=True,check=True)
     anchors=sorted((event['time'],starts[event['gc_id']])
                    for event in map(json.loads,calibration.stdout.splitlines())
@@ -51,7 +77,7 @@ def main():
     def phase_at(time):
         return next((phase['phase'] for phase in report['phases']
                      if phase['start_epoch_ms']<=time<=phase['end_epoch_ms']),None)
-    for time,duration in pauses:
+    for time,duration in pause_intervals:
         phase=phase_at(time)
         if phase:
             groups[phase]['gc_pauses_ms'].append(duration)
@@ -75,6 +101,7 @@ def main():
                     'top_methods':collections.Counter(),
                     'top_cartograph_methods':collections.Counter(),
                     'inclusive_cartograph_methods':collections.Counter(),
+                    'inclusive_mod_methods':collections.Counter(),
                 })
                 data['samples']+=1
                 data['java_samples' if kind==SAMPLE_TYPES[0] else 'native_samples']+=1
@@ -85,6 +112,8 @@ def main():
                     data['top_cartograph_methods'][cart]+=1
                 for method in set(method for method in methods if method.startswith(CARTOGRAPH)):
                     data['inclusive_cartograph_methods'][method]+=1
+                for method in set(method for method in methods if method.startswith(MOD_PREFIXES)):
+                    data['inclusive_mod_methods'][method]+=1
                 if any(method.startswith('com.wanstu.cartographqa.') for method in methods):
                     data['measurement_samples']+=1
             elif kind in ('jdk.FileRead','jdk.FileWrite') and name in GAME_THREADS:
@@ -103,12 +132,14 @@ def main():
                 if name in GAME_THREADS:
                     allocations=group['sampled_allocations_by_thread'].setdefault(name,collections.Counter())
                     allocations[cart or (methods[0] if methods else '?')]+=event['weight']
+                    owners=group['sampled_allocation_owners_by_thread'].setdefault(name,collections.Counter())
+                    owners[sampled_owner(methods)]+=event['weight']
         if proc.wait()!=0:
             raise SystemExit('JFR stream failed')
     summary={}
     for name,group in groups.items():
         for data in group['threads'].values():
-            for key in ('top_methods','top_cartograph_methods','inclusive_cartograph_methods'):
+            for key in ('top_methods','top_cartograph_methods','inclusive_cartograph_methods','inclusive_mod_methods'):
                 data[key]=data[key].most_common(15)
             data['cartograph_sample_percent']=100*data['cartograph_samples']/data['samples']
         pauses=group['gc_pauses_ms']
@@ -121,7 +152,11 @@ def main():
             'top_sampled_allocations_by_thread':{
                 thread:counts.most_common(15)
                 for thread,counts in group['sampled_allocations_by_thread'].items()},
+            'sampled_allocation_owners_by_thread':group['sampled_allocation_owners_by_thread'],
         }
+        phase=next(phase for phase in report['phases'] if phase['phase']==name)
+        if 'long_frames' in phase:
+            summary[name]['long_frame_gc_overlap']=long_frame_gc(phase['long_frames'],pause_intervals)
     summary['_clock_calibration']={
         'young_gc_anchors':len(anchors),'wall_per_jfr_time':scale,
         'method':'Piecewise interpolation of matching young-GC IDs; GC durations from unified gc.log',
