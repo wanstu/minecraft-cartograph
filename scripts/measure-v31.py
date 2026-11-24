@@ -76,12 +76,18 @@ def run(args):
         rewritten.append(value);i+=1
     rewritten[0:0]=['-XX:StartFlightRecording=name=cartograph,settings=profile,dumponexit=true,filename='+str(lab/'trace.jfr')+',maxsize=128m',
                     '-Xlog:gc*:file='+str(lab/'gc.log')+':time,uptime,level,tags']
+    if args.quick: rewritten.insert(0, '-Dcartograph.measurementQuick=true')
     rewritten.extend(('--quickPlaySingleplayer','BenchWorld'))
-    display=':135'
-    if pathlib.Path('/tmp/.X135-lock').exists():raise RuntimeError('Private display is occupied')
-    env=os.environ.copy();env.update(DISPLAY=display,ALSOFT_DRIVERS='null',LIBGL_ALWAYS_SOFTWARE='1',LP_NUM_THREADS='2')
-    stdout=(lab/'client.log').open('w');xlog=(lab/'xvfb.log').open('w')
-    xvfb=subprocess.Popen([str(args.xvfb),display,'-screen','0','1280x720x24','-nolisten','tcp','-noreset','-ac'],stdout=xlog,stderr=subprocess.STDOUT)
+    display=args.display or ':135'
+    env=os.environ.copy();env.update(DISPLAY=display,ALSOFT_DRIVERS='null')
+    stdout=(lab/'client.log').open('w');xlog=None;xvfb=None
+    if args.display:
+        env.pop('LIBGL_ALWAYS_SOFTWARE', None);env.pop('LP_NUM_THREADS', None)
+    else:
+        if pathlib.Path('/tmp/.X135-lock').exists():raise RuntimeError('Private display is occupied')
+        env.update(LIBGL_ALWAYS_SOFTWARE='1',LP_NUM_THREADS='2')
+        xlog=(lab/'xvfb.log').open('w')
+        xvfb=subprocess.Popen([str(args.xvfb),display,'-screen','0','1280x720x24','-nolisten','tcp','-noreset','-ac'],stdout=xlog,stderr=subprocess.STDOUT)
     client=None
     def stop(*_):
         if client and client.poll() is None:os.killpg(client.pid,signal.SIGTERM)
@@ -129,14 +135,17 @@ def run(args):
             else:
                 try: os.killpg(client.pid, signal.SIGKILL)
                 except ProcessLookupError: pass
-        xvfb.terminate()
-        try:xvfb.wait(timeout=10)
-        except subprocess.TimeoutExpired:xvfb.kill();xvfb.wait()
-        stdout.close();xlog.close()
+        if xvfb:
+            xvfb.terminate()
+            try:xvfb.wait(timeout=10)
+            except subprocess.TimeoutExpired:xvfb.kill();xvfb.wait()
+        stdout.close()
+        if xlog:xlog.close()
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('action',choices=('prepare','run'))
     parser.add_argument('--lab',type=pathlib.Path,required=True);parser.add_argument('--source',type=pathlib.Path,required=True)
-    parser.add_argument('--world',default='UnificationSmoke');parser.add_argument('--java',type=pathlib.Path)
+    parser.add_argument('--quick',action='store_true');parser.add_argument('--world',default='UnificationSmoke');parser.add_argument('--java',type=pathlib.Path)
+    parser.add_argument('--display',help='Use an existing display without starting or stopping its server')
     parser.add_argument('--xvfb',type=pathlib.Path);parser.add_argument('--cartograph-jar',type=pathlib.Path);parser.add_argument('--probe-jar',type=pathlib.Path)
     options=parser.parse_args();prepare(options) if options.action=='prepare' else run(options)

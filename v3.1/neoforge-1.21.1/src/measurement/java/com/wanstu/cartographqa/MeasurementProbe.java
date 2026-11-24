@@ -23,7 +23,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** Read-only measurement of mapping behavior; fixtures and movement stay in an isolated copied world. */
 @Mod("cartograph_perf_probe")
 public final class MeasurementProbe {
-    private static final String[] PHASES = {"warmup_control", "control_still", "mapping_still",
+    private static final String[] PHASES = Boolean.getBoolean("cartograph.measurementQuick")
+            ? new String[]{"warmup_control", "mapping_still", "map_handdrawn", "map_live_edit"}
+            : new String[]{"warmup_control", "control_still", "mapping_still",
             "control_move", "mapping_move", "map_near", "map_near_idle", "map_far", "map_handdrawn",
             "map_closed_idle", "control_tail", "map_live_edit"};
     private static final List<Map<String, Object>> RESULTS = new ArrayList<>();
@@ -65,7 +67,7 @@ public final class MeasurementProbe {
         final long refreshStart = longCounter("LiveSurfaceUpdates", "refreshStarts");
         volatile int serverPendingPeak, serverInFlightPeak, liveWatchersPeak, loadedCapturePeak;
         long heapPeak;
-        int cachedPeak, pendingPeak;
+        int cachedPeak, pendingPeak, focusedFrames, unfocusedFrames;
         Samples(String name) { this.name = name; }
     }
 
@@ -131,6 +133,7 @@ public final class MeasurementProbe {
     private void switchPhase(int index) throws Exception {
         Minecraft mc = Minecraft.getInstance();
         String name = PHASES[index];
+        org.lwjgl.glfw.GLFW.glfwFocusWindow(mc.getWindow().getWindow());
         if (name.equals("map_near_idle")) {
             current = new Samples(name);
             previousFrame = 0;
@@ -174,6 +177,9 @@ public final class MeasurementProbe {
         Samples samples = current;
         if (samples == null || finished) return;
         long now = System.nanoTime();
+        if (org.lwjgl.glfw.GLFW.glfwGetWindowAttrib(Minecraft.getInstance().getWindow().getWindow(),
+                org.lwjgl.glfw.GLFW.GLFW_FOCUSED) != 0) samples.focusedFrames++;
+        else samples.unfocusedFrames++;
         if (previousFrame != 0) samples.frames.add(now - previousFrame);
         previousFrame = now;
     }
@@ -210,6 +216,7 @@ public final class MeasurementProbe {
         result.put("phase", samples.name); result.put("start_epoch_ms", samples.wallMillis);
         result.put("end_epoch_ms", System.currentTimeMillis()); result.put("seconds", seconds);
         result.put("frame", distribution(samples.frames)); result.put("client_tick", distribution(samples.clients));
+        result.put("focused_frames", samples.focusedFrames); result.put("unfocused_frames", samples.unfocusedFrames);
         result.put("server_tick", distribution(samples.servers));
         double cpuCores = (double) (OS.getProcessCpuTime() - samples.cpu) / (ended - samples.started);
         result.put("process_cpu_core_equivalents", cpuCores);
@@ -318,9 +325,15 @@ public final class MeasurementProbe {
         } else if (editStage == 3) {
             mc.setScreen(null);
             editStage = 4;
-        } else if (editStage == 4 && !(boolean) callStatic("LiveSurfaceUpdates", "active")) {
+        } else if (editStage == 4) {
             editStage = -4;
             mc.getSingleplayerServer().execute(() -> {
+                try {
+                    if (!((Map<?, ?>) read(type("LiveSurfaceUpdates"), null, "WATCHERS")).isEmpty()) {
+                        editStage = 4;
+                        return;
+                    }
+                } catch (Exception failure) { throw new RuntimeException(failure); }
                 var level = mc.getSingleplayerServer().getPlayerList().getPlayers().getFirst().serverLevel();
                 level.setBlock(editPos, net.minecraft.world.level.block.Blocks.GOLD_BLOCK.defaultBlockState(), 3);
                 editStarted = System.nanoTime(); editStage = 5;

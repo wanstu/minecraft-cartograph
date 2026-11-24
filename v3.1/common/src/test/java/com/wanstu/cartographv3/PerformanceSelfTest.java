@@ -24,6 +24,7 @@ public final class PerformanceSelfTest {
         memoryBoundAndEviction();
         knownAtlasBounds();
         missingCacheLifecycleAndScale();
+        selectiveSurfaceNbt();
         System.out.println("Cartograph performance regressions: " + checks + " checks passed");
     }
 
@@ -159,6 +160,45 @@ public final class PerformanceSelfTest {
         require((boolean) known.invoke(null, new ChunkKey("qa:missing", 262143, -262143)),
                 "the newest absent tile keeps its validation");
         missing.clear(); validated.clear(); session.setLong(null, originalSession);
+    }
+
+
+    private static void selectiveSurfaceNbt() throws Exception {
+        var root = new net.minecraft.nbt.CompoundTag();
+        root.putString("Status", "minecraft:full"); root.putInt("xPos", -3); root.putInt("zPos", 7);
+        var heightmaps = new net.minecraft.nbt.CompoundTag(); heightmaps.putLongArray("WORLD_SURFACE", new long[]{2, 7});
+        root.put("Heightmaps", heightmaps);
+        var section = new net.minecraft.nbt.CompoundTag(); section.putByte("Y", (byte) -4);
+        section.putByteArray("SkyLight", new byte[2048]); section.putByteArray("BlockLight", new byte[2048]);
+        var states = new net.minecraft.nbt.CompoundTag(); states.putString("SkyLight", "keep-string-property");
+        states.putLongArray("data", new long[]{3, 5}); section.put("block_states", states);
+        var sections = new net.minecraft.nbt.ListTag(); sections.add(section); root.put("sections", sections);
+        var structures = new net.minecraft.nbt.CompoundTag(); structures.putIntArray("BB", new int[]{1,2,3,4,5,6});
+        root.put("structures", structures); root.put("Structures", structures.copy());
+        root.putByteArray("unused_entity_payload", new byte[1024 * 1024]);
+        var bytes = new java.io.ByteArrayOutputStream();
+        net.minecraft.nbt.NbtIo.write(root, new java.io.DataOutputStream(bytes));
+        var read = RegionNbtReader.readSurfaceData(new java.io.ByteArrayInputStream(bytes.toByteArray()));
+        var expected = root.copy(); expected.remove("unused_entity_payload");
+        var expectedSection = MapNbt.compound(MapNbt.list(expected, "sections", net.minecraft.nbt.Tag.TAG_COMPOUND), 0);
+        expectedSection.remove("SkyLight"); expectedSection.remove("BlockLight");
+        require(read.equals(expected), "selective NBT preserves every terrain and structure field");
+        require(MapNbt.string(MapNbt.compound(MapNbt.compound(MapNbt.list(read, "sections", net.minecraft.nbt.Tag.TAG_COMPOUND),0), "block_states"), "SkyLight")
+                .equals("keep-string-property"), "only unused byte-array lighting is skipped");
+        boolean rejected = false;
+        try { RegionNbtReader.readSurfaceData(new java.io.ByteArrayInputStream(new byte[]{7,0,0,0,0,0,0})); }
+        catch (java.io.IOException invalid) { rejected = true; }
+        require(rejected, "non-compound chunk roots remain invalid");
+        rejected = false;
+        try { RegionNbtReader.readSurfaceData(new java.io.ByteArrayInputStream(new byte[]{0})); }
+        catch (java.io.IOException invalid) { rejected = true; }
+        require(rejected, "empty NBT roots remain invalid");
+        root.putByteArray("oversized_unused_payload", new byte[17 * 1024 * 1024]);
+        bytes.reset(); net.minecraft.nbt.NbtIo.write(root, new java.io.DataOutputStream(bytes));
+        rejected = false;
+        try { RegionNbtReader.readSurfaceData(new java.io.ByteArrayInputStream(bytes.toByteArray())); }
+        catch (java.io.IOException invalid) { rejected = true; }
+        require(rejected, "skipped data cannot bypass the decompressed-byte limit");
     }
 
     private static void require(boolean condition, String message) {

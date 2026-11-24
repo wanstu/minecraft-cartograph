@@ -1,0 +1,14 @@
+allprojects {
+    afterEvaluate {
+        if (sourceSets.findByName('performanceVerification') != null) {
+            tasks.register('measureV31SurfaceNbt', JavaExec) {
+                dependsOn tasks.named('performanceVerificationClasses')
+                classpath = sourceSets.performanceVerification.runtimeClasspath
+                mainClass = 'com.wanstu.cartographv3.SurfaceNbtBenchmark'
+                maxHeapSize = '512m'
+                args rootProject.file('../../build/surface-nbt-samples').absolutePath,
+                     rootProject.file('../../build/surface-nbt-results.json').absolutePath
+            }
+        }
+    }
+}
