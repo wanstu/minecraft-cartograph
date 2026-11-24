@@ -23,6 +23,7 @@ public final class CartographV3Mod {
         MapTransport.bindServerSender(PacketDistributor::sendToPlayer);
         modBus.addListener(CartographV3Mod::registerPayloads);
         NeoForge.EVENT_BUS.addListener(CartographV3Mod::chunkSaved);
+        NeoForge.EVENT_BUS.addListener(CartographV3Mod::chunkLoaded);
         NeoForge.EVENT_BUS.addListener(CartographV3Mod::tick);
         NeoForge.EVENT_BUS.addListener(CartographV3Mod::stopped);
     }
@@ -31,6 +32,11 @@ public final class CartographV3Mod {
         if (event.getLevel() instanceof ServerLevel level) {
             CartographServerEvents.chunkSaved(level, event.getChunk().getPos());
         }
+    }
+
+    private static void chunkLoaded(net.neoforged.neoforge.event.level.ChunkEvent.Load event) {
+        if (event.getLevel() instanceof ServerLevel level)
+            CartographServerEvents.chunkLoaded(level, event.getChunk().getPos());
     }
 
     private static void tick(ServerTickEvent.Post event) {

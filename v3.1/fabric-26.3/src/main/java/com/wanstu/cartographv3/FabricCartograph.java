@@ -10,6 +10,8 @@ public final class FabricCartograph implements ModInitializer {
     @Override
     public void onInitialize() {
         registerPayloads();
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD.register(
+                (level, chunk, newlyGenerated) -> CartographServerEvents.chunkLoaded(level, chunk.getPos()));
         ServerTickEvents.END_SERVER_TICK.register(CartographServerEvents::tick);
         ServerLifecycleEvents.SERVER_STOPPED.register(CartographServerEvents::stopped);
     }

@@ -11,6 +11,19 @@ public final class CartographServerEvents {
         SurfaceService.invalidate(level, pos);
         StructureDiscovery.invalidate(level, pos);
         GeneratedChunkBackfill.chunkSaved(level, pos);
+        // A save is the fallback for biome edits and mods bypassing block mutation hooks.
+        chunkLoaded(level, pos);
+    }
+
+    public static void chunkChanged(net.minecraft.world.level.chunk.LevelChunk chunk) {
+        if (!LiveSurfaceUpdates.active() || !(chunk.getLevel() instanceof ServerLevel level)) return;
+        chunkLoaded(level, chunk.getPos());
+    }
+
+    public static void chunkLoaded(ServerLevel level, ChunkPos pos) {
+        if (!LiveSurfaceUpdates.active()) return;
+        if (level.getServer().isSameThread()) LiveSurfaceUpdates.changed(level, pos);
+        else level.getServer().execute(() -> LiveSurfaceUpdates.changed(level, pos));
     }
 
     static void tick(MinecraftServer server) {

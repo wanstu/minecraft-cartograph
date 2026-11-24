@@ -20,6 +20,8 @@ final class LoadedSurfaceReader {
     private record Key(ServerLevel level, int x, int z) {}
     private static final LinkedHashMap<Key, Capture> PENDING = new LinkedHashMap<>();
     private static final TickWorkQueue WORK = new TickWorkQueue();
+    private static long capturesStarted;
+    private static long columnsSampled;
 
     private LoadedSurfaceReader() {}
 
@@ -33,6 +35,7 @@ final class LoadedSurfaceReader {
         LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
         if (chunk == null) return CompletableFuture.failedFuture(
                 new IllegalStateException("Surface chunk is no longer loaded"));
+        capturesStarted++;
         Capture capture = new Capture(key, chunk);
         PENDING.put(key, capture);
         WORK.add(capture);
@@ -102,6 +105,7 @@ final class LoadedSurfaceReader {
         }
 
         private void sampleColumn(ServerLevel level, int index) {
+            columnsSampled++;
             int x = index & 15;
             int z = index >>> 4;
             int worldX = key.x() * 16 + x;

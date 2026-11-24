@@ -23,6 +23,7 @@ public final class PerformanceSelfTest {
         viewStateRoundTrip();
         memoryBoundAndEviction();
         knownAtlasBounds();
+        missingCacheLifecycleAndScale();
         System.out.println("Cartograph performance regressions: " + checks + " checks passed");
     }
 
@@ -130,6 +131,34 @@ public final class PerformanceSelfTest {
         Map<?, Integer> counts = (Map<?, Integer>) field.get(null);
         require(counts.values().stream().mapToInt(Integer::intValue).sum() == 8192,
                 "region accounting follows RAM eviction");
+    }
+
+
+    @SuppressWarnings("unchecked")
+    private static void missingCacheLifecycleAndScale() throws Exception {
+        var mark = MapClientCache.class.getDeclaredMethod("markMissing", ChunkKey.class);
+        var known = MapClientCache.class.getDeclaredMethod("knownMissingThisSession", ChunkKey.class);
+        var session = MapClientCache.class.getDeclaredField("mapSession");
+        var missingField = MapClientCache.class.getDeclaredField("MISSING_AT");
+        var validatedField = MapClientCache.class.getDeclaredField("VALIDATED_SESSION");
+        for (var member : new java.lang.reflect.AccessibleObject[]{mark, known, session, missingField, validatedField})
+            member.setAccessible(true);
+        long originalSession = session.getLong(null);
+        Map<ChunkKey, Integer> missing = (Map<ChunkKey, Integer>) missingField.get(null);
+        Map<ChunkKey, Long> validated = (Map<ChunkKey, Long>) validatedField.get(null);
+        missing.clear(); validated.clear();
+        ChunkKey first = new ChunkKey("qa:missing", 0, 0);
+        mark.invoke(null, first);
+        require((boolean) known.invoke(null, first), "confirmed absent terrain is not polled in the same map session");
+        session.setLong(null, originalSession + 1);
+        require(!(boolean) known.invoke(null, first), "a new map session revalidates absent terrain");
+        for (int i = 0; i < 262144; i++) mark.invoke(null, new ChunkKey("qa:missing", i, -i));
+        require(missing.size() == 8192, "262144 absent tiles leave only the bounded negative cache");
+        require(validated.size() == 8192, "negative validation metadata is bounded as the view travels");
+        require(!missing.containsKey(first), "old absent tiles can be retried after LRU eviction");
+        require((boolean) known.invoke(null, new ChunkKey("qa:missing", 262143, -262143)),
+                "the newest absent tile keeps its validation");
+        missing.clear(); validated.clear(); session.setLong(null, originalSession);
     }
 
     private static void require(boolean condition, String message) {

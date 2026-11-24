@@ -235,8 +235,6 @@ final class TileRequestScheduler {
     private static void start(
             ServerPlayer player, PlayerQueue queue, ChunkKey key,
             MapProtocol.RequestTile request, boolean watchLive) {
-        if (watchLive) LiveSurfaceUpdates.watch(player, key);
-
         var level = MapGameAccess.level(player);
         var saved = new SavedChunkRead();
         var surfaceFuture = SurfaceService.request(
@@ -281,6 +279,8 @@ final class TileRequestScheduler {
 
         SurfaceTile tile = combined.getKey().orElse(null);
         var structures = combined.getValue();
+        if (tile != null && watchLive && VIEWING_PLAYERS.contains(player.getUUID()))
+            LiveSurfaceUpdates.watch(player, key);
         MapProtocol.Tile reply;
         if (tile == null) {
             reply = MapProtocol.Tile.status(

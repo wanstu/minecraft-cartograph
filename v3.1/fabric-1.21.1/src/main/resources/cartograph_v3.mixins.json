@@ -2,7 +2,10 @@
   "required": true,
   "package": "com.wanstu.cartographv3.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": ["ChunkMapMixin"],
+  "mixins": [
+    "ChunkMapMixin",
+    "LevelChunkMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

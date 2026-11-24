@@ -24,8 +24,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Mod("cartograph_perf_probe")
 public final class MeasurementProbe {
     private static final String[] PHASES = {"warmup_control", "control_still", "mapping_still",
-            "control_move", "mapping_move", "map_near", "map_far", "map_handdrawn",
-            "map_closed_idle", "control_tail"};
+            "control_move", "mapping_move", "map_near", "map_near_idle", "map_far", "map_handdrawn",
+            "map_closed_idle", "control_tail", "map_live_edit"};
     private static final List<Map<String, Object>> RESULTS = new ArrayList<>();
     private static final OperatingSystemMXBean OS = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
     private static volatile Samples current;
@@ -39,6 +39,12 @@ public final class MeasurementProbe {
     private long clientTickStarted;
     private long serverTickStarted;
     private double homeX, homeY, homeZ;
+    private volatile int editStage;
+    private volatile long editStarted;
+    private net.minecraft.core.BlockPos editPos;
+    private net.minecraft.world.level.block.state.BlockState originalBlock;
+    private int originalStateId, originalHeight;
+    private final Map<String, Object> functionalChecks = new LinkedHashMap<>();
 
     public MeasurementProbe() { NeoForge.EVENT_BUS.register(this); }
 
@@ -54,6 +60,9 @@ public final class MeasurementProbe {
         final ConcurrentLinkedQueue<Long> servers = new ConcurrentLinkedQueue<>();
         final long diskStart = counter("SurfaceService", "DISK_HITS");
         final long loadedStart = counter("SurfaceService", "LOADED_HITS");
+        final long captureStart = longCounter("LoadedSurfaceReader", "capturesStarted");
+        final long columnsStart = longCounter("LoadedSurfaceReader", "columnsSampled");
+        final long refreshStart = longCounter("LiveSurfaceUpdates", "refreshStarts");
         volatile int serverPendingPeak, serverInFlightPeak, liveWatchersPeak, loadedCapturePeak;
         long heapPeak;
         int cachedPeak, pendingPeak;
@@ -96,6 +105,9 @@ public final class MeasurementProbe {
                             .forEach(player -> player.teleportTo(player.serverLevel(), homeX + offset, homeY, homeZ, 0, 30)));
                 }
             }
+            if (samples.name.equals("map_live_edit")) checkLiveEdit(mc, elapsed);
+            if (samples.name.equals("map_handdrawn") && elapsed > 8
+                    && !functionalChecks.containsKey("hand_drawn_cache_reused")) checkDerivedCache(mc);
             if (elapsed < (phaseIndex == 0 ? 20 : 25)) return;
             finishPhase(samples);
             if (++phaseIndex < PHASES.length) switchPhase(phaseIndex);
@@ -119,6 +131,12 @@ public final class MeasurementProbe {
     private void switchPhase(int index) throws Exception {
         Minecraft mc = Minecraft.getInstance();
         String name = PHASES[index];
+        if (name.equals("map_near_idle")) {
+            current = new Samples(name);
+            previousFrame = 0;
+            System.out.println("CARTOGRAPH_MEASUREMENT_PHASE " + name + " " + Instant.now());
+            return;
+        }
         if (mc.screen != null) mc.setScreen(null);
         boolean control = name.startsWith("control_") || name.equals("warmup_control");
         if (control) {
@@ -138,7 +156,7 @@ public final class MeasurementProbe {
             Object inGame = Enum.valueOf((Class) type("CartographFrontendTarget"), "IN_GAME");
             call(runtime, "openFrontend", inGame);
             Object camera = read(mc.screen.getClass(), mc.screen, "camera");
-            if (!name.equals("map_near")) {
+            if (name.equals("map_far") || name.equals("map_handdrawn")) {
                 Class<?> position = type("InGameMapCamera$Position");
                 Constructor<?> constructor = position.getDeclaredConstructors()[0];
                 constructor.setAccessible(true);
@@ -185,7 +203,7 @@ public final class MeasurementProbe {
         } catch (Exception failure) { throw new RuntimeException(failure); }
     }
 
-    private static void finishPhase(Samples samples) {
+    private void finishPhase(Samples samples) {
         long ended = System.nanoTime();
         double seconds = (ended - samples.started) / 1e9;
         Map<String, Object> result = new LinkedHashMap<>();
@@ -203,6 +221,9 @@ public final class MeasurementProbe {
         result.put("loaded_capture_peak", samples.loadedCapturePeak);
         result.put("disk_reads", counter("SurfaceService", "DISK_HITS") - samples.diskStart);
         result.put("loaded_reads", counter("SurfaceService", "LOADED_HITS") - samples.loadedStart);
+        result.put("loaded_capture_starts", delta("LoadedSurfaceReader", "capturesStarted", samples.captureStart));
+        result.put("sampled_columns", delta("LoadedSurfaceReader", "columnsSampled", samples.columnsStart));
+        result.put("live_refresh_starts", delta("LiveSurfaceUpdates", "refreshStarts", samples.refreshStart));
         RESULTS.add(result);
         try { writeResults(false); } catch (Exception failure) { throw new RuntimeException(failure); }
         System.out.println("CARTOGRAPH_MEASUREMENT_RESULT " + new GsonBuilder().create().toJson(result));
@@ -219,14 +240,98 @@ public final class MeasurementProbe {
         return result;
     }
     private static double percentile(long[] values, double p) { return values[Math.min(values.length - 1, (int) Math.ceil(p * values.length) - 1)] / 1e6; }
-    private static void writeResults(boolean complete) throws Exception {
+    private void writeResults(boolean complete) throws Exception {
         Map<String, Object> root = new LinkedHashMap<>(); root.put("schema_version", 2); root.put("complete", complete);
         root.put("control", "CartographBackendRuntime closed; worldActive latched true to keep collection paused");
         root.put("jvm_available_processors", OS.getAvailableProcessors()); root.put("os", System.getProperty("os.name"));
         root.put("java", System.getProperty("java.version")); root.put("phases", RESULTS);
+        root.put("functional_checks", functionalChecks);
         Files.writeString(Minecraft.getInstance().gameDirectory.toPath().resolve("performance-results.json"),
                 new GsonBuilder().setPrettyPrinting().create().toJson(root));
     }
+
+    private void checkDerivedCache(Minecraft mc) throws Exception {
+        long before = longCounter("MapPresentationRenderer", "handDrawnBuilds");
+        if (before < 0) { functionalChecks.put("hand_drawn_cache_reused", "unavailable in baseline"); return; }
+        Object key = type("ChunkKey").getConstructor(String.class, int.class, int.class).newInstance(
+                mc.level.dimension().location().toString(), Math.floorDiv((int) Math.floor(homeX), 16),
+                Math.floorDiv((int) Math.floor(homeZ), 16));
+        Object tile = invoke(type("MapClientCache"), null, "tile", key);
+        if (tile == null) return;
+        invoke(type("MapPresentationRenderer"), null, "renderPixels", tile, 1);
+        long first = longCounter("MapPresentationRenderer", "handDrawnBuilds");
+        int[] actual = (int[]) invoke(type("MapPresentationRenderer"), null, "renderPixels", tile, 4);
+        long second = longCounter("MapPresentationRenderer", "handDrawnBuilds");
+        Object derived = invoke(type("HandDrawnMapData"), null, "from", tile);
+        Object style = callStatic("CartographSettings", "visualStyle");
+        Object processor = call(style, "processor");
+        int[] reference = (int[]) invoke(type("MapVisualStyleProcessor"), processor,
+                "renderHandDrawn", derived, 4);
+        if (second != first || first - before > 1 || !Arrays.equals(reference, actual))
+            throw new AssertionError("derived cache did not preserve pixels and reuse across strides");
+        functionalChecks.put("hand_drawn_cache_reused", true);
+        functionalChecks.put("hand_drawn_cached_pixels_match_reference", true);
+    }
+
+    private void checkLiveEdit(Minecraft mc, double elapsed) throws Exception {
+        if (elapsed < 2) return;
+        Object key = type("ChunkKey").getConstructor(String.class, int.class, int.class).newInstance(
+                mc.level.dimension().location().toString(), Math.floorDiv((int) Math.floor(homeX), 16),
+                Math.floorDiv((int) Math.floor(homeZ), 16));
+        Object tile = invoke(type("MapClientCache"), null, "tile", key);
+        if (tile == null) {
+            if (elapsed > 23) functionalChecks.put("live_edit_error", "center surface never arrived");
+            return;
+        }
+        int column = Math.floorMod((int) Math.floor(homeZ), 16) * 16
+                + Math.floorMod((int) Math.floor(homeX), 16);
+        if (editStage == 0) {
+            originalStateId = (int) call(tile, "stateIdAt", column);
+            originalHeight = (int) call(tile, "surfaceHeightAt", column);
+            int y = Math.max(originalHeight + 8, mc.level.getHeight(
+                    net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE,
+                    (int) Math.floor(homeX), (int) Math.floor(homeZ)) + 8);
+            editPos = new net.minecraft.core.BlockPos((int) Math.floor(homeX), y, (int) Math.floor(homeZ));
+            editStage = -1;
+            mc.getSingleplayerServer().execute(() -> {
+                var level = mc.getSingleplayerServer().getPlayerList().getPlayers().getFirst().serverLevel();
+                originalBlock = level.getBlockState(editPos);
+                level.setBlock(editPos, net.minecraft.world.level.block.Blocks.GOLD_BLOCK.defaultBlockState(), 3);
+                editStarted = System.nanoTime(); editStage = 1;
+            });
+        } else if (editStage == 1
+                && (int) call(tile, "surfaceHeightAt", column) == editPos.getY()
+                && (int) call(tile, "stateIdAt", column) == net.minecraft.world.level.block.Block.getId(
+                        net.minecraft.world.level.block.Blocks.GOLD_BLOCK.defaultBlockState())) {
+            functionalChecks.put("place_to_client_ms", (System.nanoTime() - editStarted) / 1e6);
+            editStage = -2;
+            mc.getSingleplayerServer().execute(() -> {
+                var level = mc.getSingleplayerServer().getPlayerList().getPlayers().getFirst().serverLevel();
+                level.setBlock(editPos, originalBlock, 3);
+                editStarted = System.nanoTime(); editStage = 2;
+            });
+        } else if (editStage == 2
+                && (int) call(tile, "surfaceHeightAt", column) == originalHeight
+                && (int) call(tile, "stateIdAt", column) == originalStateId) {
+            functionalChecks.put("restore_to_client_ms", (System.nanoTime() - editStarted) / 1e6);
+            functionalChecks.put("live_edits_passed", true); editStage = 3;
+        }
+        if (elapsed > 23 && editStage != 3) {
+            functionalChecks.put("live_edits_passed", false);
+            if (editPos != null && originalBlock != null) mc.getSingleplayerServer().execute(() ->
+                mc.getSingleplayerServer().getPlayerList().getPlayers().getFirst().serverLevel()
+                    .setBlock(editPos, originalBlock, 3));
+        }
+    }
+
+    private static long longCounter(String owner, String name) {
+        try { return field(type(owner), name).getLong(null); }
+        catch (Exception unavailable) { return -1; }
+    }
+    private static long delta(String owner, String name, long before) {
+        return before < 0 ? -1 : longCounter(owner, name) - before;
+    }
+
     private static long gcMillis() { return ManagementFactory.getGarbageCollectorMXBeans().stream().mapToLong(v -> Math.max(0, v.getCollectionTime())).sum(); }
     private static long gcCount() { return ManagementFactory.getGarbageCollectorMXBeans().stream().mapToLong(v -> Math.max(0, v.getCollectionCount())).sum(); }
     private static Class<?> type(String name) throws ClassNotFoundException { return Class.forName("com.wanstu.cartographv3." + name); }

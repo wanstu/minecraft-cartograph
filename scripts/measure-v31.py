@@ -117,6 +117,18 @@ def run(args):
             stop()
             try:client.wait(timeout=30)
             except subprocess.TimeoutExpired:os.killpg(client.pid,signal.SIGKILL);client.wait()
+        # A bundled helper may outlive the JVM during an interrupted startup.
+        if client:
+            try: os.killpg(client.pid, signal.SIGTERM)
+            except ProcessLookupError: pass
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                try: os.killpg(client.pid, 0)
+                except ProcessLookupError: break
+                time.sleep(.1)
+            else:
+                try: os.killpg(client.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
         xvfb.terminate()
         try:xvfb.wait(timeout=10)
         except subprocess.TimeoutExpired:xvfb.kill();xvfb.wait()

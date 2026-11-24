@@ -13,7 +13,7 @@ public final class MapClientCache {
     private static final int MAX_CACHED_TILES = 8192;
     private static final Map<ChunkKey, CachedTile> TILES = new LinkedHashMap<>(256, .75f, true);
     private static final Set<ChunkKey> PENDING = new HashSet<>();
-    private static final Map<ChunkKey, Integer> MISSING_AT = new HashMap<>();
+    private static final Map<ChunkKey, Integer> MISSING_AT = new LinkedHashMap<>();
     private static final Map<ChunkKey, Long> VALIDATED_SESSION = new HashMap<>();
     private record RegionKey(String dimension, int x, int z) {}
     private static final Map<RegionKey, Integer> REGION_TILE_COUNTS = new HashMap<>();
@@ -193,8 +193,25 @@ public final class MapClientCache {
 
     public static boolean needsRequest(ChunkKey key) {
         if (world == null || worldId == null || PENDING.contains(key)) return false;
-        if (!TILES.containsKey(key)) return !DISK_RESTORE_SCHEDULED.contains(key);
+        if (!TILES.containsKey(key)) return !knownMissingThisSession(key)
+                && !DISK_RESTORE_SCHEDULED.contains(key);
         return VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) != mapSession;
+    }
+
+    private static boolean knownMissingThisSession(ChunkKey key) {
+        return MISSING_AT.containsKey(key)
+                && VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) == mapSession;
+    }
+
+    private static void markMissing(ChunkKey key) {
+        MISSING_AT.put(key, ticks);
+        VALIDATED_SESSION.put(key, mapSession);
+        while (MISSING_AT.size() > MAX_CACHED_TILES) {
+            var missing = MISSING_AT.keySet().iterator();
+            ChunkKey evicted = missing.next();
+            missing.remove();
+            if (!TILES.containsKey(evicted)) VALIDATED_SESSION.remove(evicted);
+        }
     }
 
     public static void request(ChunkKey key) {
@@ -209,8 +226,7 @@ public final class MapClientCache {
             return;
         }
 
-        Integer missing = MISSING_AT.get(key);
-        if (missing != null && ticks - missing < 40) return;
+        if (knownMissingThisSession(key)) return;
         Set<ChunkKey> scheduled = DISK_RESTORE_SCHEDULED;
         if (!scheduled.add(key)) return;
         long generation = diskRestoreGeneration;
@@ -222,8 +238,7 @@ public final class MapClientCache {
 
     private static void requestFromServer(ChunkKey key) {
         if (world == null || worldId == null || PENDING.contains(key)) return;
-        Integer missing = MISSING_AT.get(key);
-        if (missing != null && ticks - missing < 40) return;
+        if (knownMissingThisSession(key)) return;
         SurfaceTile inMemory = tile(key);
         if (inMemory != null
                 && VALIDATED_SESSION.getOrDefault(key, Long.MIN_VALUE) == mapSession) return;
@@ -290,8 +305,7 @@ public final class MapClientCache {
             return;
         }
         if (!packet.present()) {
-            MISSING_AT.put(key, ticks);
-            VALIDATED_SESSION.put(key, mapSession);
+            markMissing(key);
             if (TILES.remove(key) != null) {
                 removeRegionTile(key);
                 markRegionChanged(key);

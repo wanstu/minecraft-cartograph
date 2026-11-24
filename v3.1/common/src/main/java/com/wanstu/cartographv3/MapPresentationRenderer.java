@@ -11,9 +11,19 @@ final class MapPresentationRenderer {
     private static final Map<SurfaceTile, Long> FACT_FINGERPRINT_CACHE =
             new IdentityHashMap<>();
 
+    private record DerivedKey(ChunkKey key, long facts, long resources) {}
+    private static final Map<DerivedKey, HandDrawnMapData> HAND_DRAWN_DATA =
+            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>(128, .75f, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<DerivedKey, HandDrawnMapData> entry) {
+                    return size() > 1024;
+                }
+            });
+    private static long handDrawnBuilds;
+
     private MapPresentationRenderer() {}
 
     static void beginMapSession() {
+        HAND_DRAWN_DATA.clear();
         synchronized (FACT_FINGERPRINT_CACHE) {
             FACT_FINGERPRINT_CACHE.clear();
         }
@@ -58,8 +68,20 @@ final class MapPresentationRenderer {
         return switch (CartographSettings.drawingMode()) {
             case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), stride);
             case HAND_DRAWN -> processor.renderHandDrawn(
-                    HandDrawnMapData.from(tile, tileLookup), stride);
+                    handDrawnData(tile, tileLookup), stride);
         };
+    }
+
+    private static HandDrawnMapData handDrawnData(
+            SurfaceTile tile, Function<ChunkKey, SurfaceTile> tileLookup) {
+        DerivedKey key = new DerivedKey(tile.key(), dependencyFingerprint(tile, tileLookup),
+                SatelliteSurfaceRenderer.renderSignature());
+        HandDrawnMapData cached = HAND_DRAWN_DATA.get(key);
+        if (cached != null) return cached;
+        HandDrawnMapData derived = HandDrawnMapData.from(tile, tileLookup);
+        handDrawnBuilds++;
+        HAND_DRAWN_DATA.put(key, derived);
+        return derived;
     }
 
     /**
