@@ -1,0 +1,13 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="All Rights Reserved"
+[[mods]]
+modId="cartograph_perf_probe"
+version="0.0.1"
+displayName="Cartograph isolated performance measurement"
+[[dependencies.cartograph_perf_probe]]
+modId="cartograph_v3"
+type="required"
+versionRange="[0.3.2]"
+ordering="AFTER"
+side="CLIENT"

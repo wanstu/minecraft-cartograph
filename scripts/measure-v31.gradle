@@ -1,0 +1,16 @@
+allprojects {
+    plugins.withId('net.neoforged.moddev') {
+        def probe = sourceSets.create('measurementProbe') {
+            java.srcDir 'src/measurement/java'
+            resources.srcDir 'src/measurement/resources'
+            compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+            runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+        }
+        tasks.register('measurementProbeJar', Jar) {
+            dependsOn tasks.named('measurementProbeClasses')
+            from probe.output
+            archiveFileName = 'Cartograph-Performance-Probe.jar'
+            destinationDirectory = layout.buildDirectory.dir('measurement-tools')
+        }
+    }
+}
