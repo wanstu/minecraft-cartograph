@@ -10,7 +10,7 @@
     "main": ["com.wanstu.cartographv3.FabricCartograph"],
     "client": ["com.wanstu.cartographv3.FabricCartographClient"]
   },
-  "mixins": ["cartograph_v3.mixins.json"],
+  "mixins": ["cartograph_v3.mixins.json", "cartograph_v3.client.mixins.json"],
   "depends": {
     "fabricloader": ">=0.15.11",
     "fabric-api": "*",

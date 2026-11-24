@@ -36,6 +36,7 @@ final class MapClientAccess {
                 KeyMapping.Category.register(MapGameAccess.id("cartograph_v3", "map")));
     }
 
+    static boolean hasOverlay(Minecraft client) { return client.gui.overlay() != null; }
     static Screen screen(Minecraft client) { return client.gui.screen(); }
     static void setScreen(Minecraft client, Screen screen) { client.gui.setScreen(screen); }
     static void openUri(URI uri) { Blaze3D.openUri(uri); }

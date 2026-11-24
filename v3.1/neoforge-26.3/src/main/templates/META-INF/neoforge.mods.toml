@@ -24,3 +24,6 @@ side="BOTH"
 
 [[mixins]]
 config="cartograph_v3.surface.mixins.json"
+
+[[mixins]]
+config="cartograph_v3.client.mixins.json"

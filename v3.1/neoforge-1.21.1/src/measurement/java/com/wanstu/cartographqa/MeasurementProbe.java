@@ -47,6 +47,7 @@ public final class MeasurementProbe {
     private net.minecraft.world.level.block.state.BlockState originalBlock;
     private int originalStateId, originalHeight;
     private final Map<String, Object> functionalChecks = new LinkedHashMap<>();
+    private final Set<String> screenshots = new HashSet<>();
 
     public MeasurementProbe() { NeoForge.EVENT_BUS.register(this); }
 
@@ -65,6 +66,8 @@ public final class MeasurementProbe {
         final long captureStart = longCounter("LoadedSurfaceReader", "capturesStarted");
         final long columnsStart = longCounter("LoadedSurfaceReader", "columnsSampled");
         final long refreshStart = longCounter("LiveSurfaceUpdates", "refreshStarts");
+        final long worldFrameStart = longCounter("MapWorldRenderPolicy", "worldFrames");
+        final long skippedWorldStart = longCounter("MapWorldRenderPolicy", "skippedWorldFrames");
         volatile int serverPendingPeak, serverInFlightPeak, liveWatchersPeak, loadedCapturePeak;
         long heapPeak;
         int cachedPeak, pendingPeak, focusedFrames, unfocusedFrames;
@@ -110,6 +113,12 @@ public final class MeasurementProbe {
             if (samples.name.equals("map_live_edit")) checkLiveEdit(mc, elapsed);
             if (samples.name.equals("map_handdrawn") && elapsed > 8
                     && !functionalChecks.containsKey("hand_drawn_cache_reused")) checkDerivedCache(mc);
+            if (elapsed > 12 && Set.of("map_near", "map_handdrawn", "map_closed_idle").contains(samples.name)
+                    && screenshots.add(samples.name)) {
+                try (var image = net.minecraft.client.Screenshot.takeScreenshot(mc.getMainRenderTarget())) {
+                    image.writeToFile(mc.gameDirectory.toPath().resolve("performance-" + samples.name + ".png"));
+                }
+            }
             if (elapsed < (phaseIndex == 0 ? 20 : 25)) return;
             finishPhase(samples);
             if (++phaseIndex < PHASES.length) switchPhase(phaseIndex);
@@ -231,6 +240,13 @@ public final class MeasurementProbe {
         result.put("loaded_capture_starts", delta("LoadedSurfaceReader", "capturesStarted", samples.captureStart));
         result.put("sampled_columns", delta("LoadedSurfaceReader", "columnsSampled", samples.columnsStart));
         result.put("live_refresh_starts", delta("LiveSurfaceUpdates", "refreshStarts", samples.refreshStart));
+        long worldFrames = delta("MapWorldRenderPolicy", "worldFrames", samples.worldFrameStart);
+        long skippedFrames = delta("MapWorldRenderPolicy", "skippedWorldFrames", samples.skippedWorldStart);
+        result.put("world_render_frames", worldFrames); result.put("world_render_skipped_frames", skippedFrames);
+        if (worldFrames >= 0 && samples.name.equals("map_near_idle"))
+            functionalChecks.put("world_render_suppressed_under_map", worldFrames == 0 && skippedFrames > 0);
+        if (worldFrames >= 0 && samples.name.equals("map_closed_idle"))
+            functionalChecks.put("world_render_restored_after_map", worldFrames > 0 && skippedFrames == 0);
         RESULTS.add(result);
         try { writeResults(false); } catch (Exception failure) { throw new RuntimeException(failure); }
         System.out.println("CARTOGRAPH_MEASUREMENT_RESULT " + new GsonBuilder().create().toJson(result));

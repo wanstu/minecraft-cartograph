@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "com.wanstu.cartographv3.clientmixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "MapWorldRenderMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

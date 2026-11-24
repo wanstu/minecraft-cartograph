@@ -24,6 +24,8 @@ def verify_neoforge(archive, names, version, minecraft):
         "The JAR must contain one Cartograph V3 mod with the expected version",
     )
     require(metadata.get("modLoader") == "javafml", "Unexpected mod loader")
+    require("cartograph_v3.client.mixins.json" in {item.get("config") for item in metadata.get("mixins", [])},
+            "Missing the client rendering mixin registration")
     dependencies = {
         item["modId"]: item
         for item in metadata.get("dependencies", {}).get("cartograph_v3", [])
@@ -61,6 +63,8 @@ def verify_fabric(archive, names, version, minecraft):
         and "cartograph_v3.mixins.json" in names,
         "Missing the Fabric chunk save mixin config",
     )
+    require("cartograph_v3.client.mixins.json" in metadata.get("mixins", []),
+            "Missing the Fabric client rendering mixin registration")
     return ("FabricCartograph", "FabricCartographClient", "mixin/ChunkMapMixin")
 
 
@@ -87,8 +91,14 @@ def main():
             "assets/cartograph_v3/textures/gui/map-icons.png",
             "webui/index.html",
             "webui/app.js",
+            "com/wanstu/cartographv3/MapWorldRenderPolicy.class",
+            "com/wanstu/cartographv3/clientmixin/MapWorldRenderMixin.class",
+            "cartograph_v3.client.mixins.json",
         ):
             require(entry in names, f"The JAR is missing {entry}")
+        client_mixins = json.loads(archive.read("cartograph_v3.client.mixins.json"))
+        require(client_mixins.get("client") == ["MapWorldRenderMixin"] and not client_mixins.get("mixins"),
+                "Rendering mixins must only load on the client")
         require(
             not any(
                 name.startswith(

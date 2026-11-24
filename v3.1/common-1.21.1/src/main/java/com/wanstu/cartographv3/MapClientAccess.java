@@ -33,6 +33,7 @@ final class MapClientAccess {
         return new KeyMapping("key.cartograph_v3.open", GLFW.GLFW_KEY_M, "key.categories.cartograph_v3");
     }
 
+    static boolean hasOverlay(Minecraft client) { return client.getOverlay() != null; }
     static Screen screen(Minecraft client) { return client.screen; }
     static void setScreen(Minecraft client, Screen screen) { client.setScreen(screen); }
     static void openUri(URI uri) { Util.getPlatform().openUri(uri); }
