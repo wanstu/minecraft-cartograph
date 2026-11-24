@@ -1,0 +1,10 @@
+{
+  "extracted_entries": 265695,
+  "fact_files": 262046,
+  "world_bytes": 1993067557,
+  "generator_type": "geoworld:geoworld",
+  "mods": 56,
+  "archive_sha256": "fb5b955fd2db4d43a237f6794c0949b877cc4e2863c0830a04b508d438780ef8",
+  "archive_bytes": 1583852998,
+  "nether_scene_preexisting_full": false
+}

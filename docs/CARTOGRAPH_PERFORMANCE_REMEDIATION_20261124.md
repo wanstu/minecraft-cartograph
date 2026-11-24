@@ -160,3 +160,5 @@ JAVA_HOME=/path/to/jdk21 ./gradlew --offline --no-daemon -I ../../scripts/measur
 在仓库根目录，先用启动器 `prepare` 复制源实例，再运行 `run`；硬件测试指定 `--display :0`，软件隔离测试指定 `--xvfb /path/to/Xvfb`。QA JAR 仅用于测试副本。源存档、个人实例和其他项目未用于测试写入。
 
 当前尚未完成用户实际大存档的完整 GPU 游玩回归、长距离新地形探索、长时间运行及远程多人联机。明确区分已修复的重复工作和仍需用实际负载确认的体验。
+
+后续未开地图时的后台调查、真实整合包对照及其限制，见 [CARTOGRAPH_IDLE_PERFORMANCE_20261124.md](CARTOGRAPH_IDLE_PERFORMANCE_20261124.md)。该后续记录没有宣称整体周期卡顿已经解决。

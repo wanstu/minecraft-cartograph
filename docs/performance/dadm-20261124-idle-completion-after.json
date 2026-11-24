@@ -1,0 +1,46 @@
+{
+  "actual_header_keys": 312391,
+  "cases": [
+    {
+      "case": "completion_with_foreign_dimension_backlog",
+      "pending_keys": 0,
+      "pending_layout": "by_dimension",
+      "operations": 256,
+      "p50_ms": 0.001255,
+      "p95_ms": 0.003027,
+      "max_ms": 0.352678,
+      "java_allocated_bytes": 25200
+    },
+    {
+      "case": "completion_with_foreign_dimension_backlog",
+      "pending_keys": 4096,
+      "pending_layout": "by_dimension",
+      "operations": 256,
+      "p50_ms": 0.00207,
+      "p95_ms": 0.003093,
+      "max_ms": 0.050687,
+      "java_allocated_bytes": 10256
+    },
+    {
+      "case": "completion_with_foreign_dimension_backlog",
+      "pending_keys": 312391,
+      "pending_layout": "by_dimension",
+      "operations": 256,
+      "p50_ms": 0.000997,
+      "p95_ms": 0.00274,
+      "max_ms": 2.844416,
+      "java_allocated_bytes": 10256
+    },
+    {
+      "case": "completion_with_same_dimension_pending",
+      "pending_keys": 312391,
+      "pending_layout": "by_dimension",
+      "operations": 256,
+      "p50_ms": 0.000755,
+      "p95_ms": 0.001246,
+      "max_ms": 0.050261,
+      "java_allocated_bytes": 2064
+    }
+  ],
+  "scope": "Standalone timings of actual completeAttempt; not Minecraft frame times"
+}
