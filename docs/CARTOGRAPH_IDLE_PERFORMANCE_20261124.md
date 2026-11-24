@@ -103,3 +103,5 @@
 - `docs/performance/dadm-20261124-idle-actual-after-profile.json`
 
 原始世界和缓存不提交到 Git；完整 JFR、测试日志和隔离副本保留在 dadm 的本轮测试目录。
+
+后续同进程对照定位到 KubeJS 开发 Web 服务空转，并完成重复停开验证与实例配置处理，见 [CARTOGRAPH_PERIODIC_STALLS_20261124.md](CARTOGRAPH_PERIODIC_STALLS_20261124.md)。本记录中的前后帧时间数据保留原样。

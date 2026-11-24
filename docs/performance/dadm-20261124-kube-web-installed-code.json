@@ -1,0 +1,15 @@
+{
+  "key": "tiny-library",
+  "embedded_path": "META-INF/jarjar/tiny-java-server-1.0.0-build.33.jar",
+  "kubejs_jar_sha256": "07d8cb7ac1f7ef81f17ae00bfd84c92c18ac0398e83e64a27d91717969316bc0",
+  "embedded_jar_sha256": "e5eb5d6dd6444cf99ecbbda7db0345e13d619b1e7ca87db7561ddf605d68b6bc",
+  "installed_bytecode_observations": {
+    "start_configure_blocking": false,
+    "run_loop_has_idle_wait": false,
+    "empty_accept_returns_immediately": true
+  },
+  "evidence_commands": [
+    "javap -c -p -classpath <embedded-tiny-java-server.jar> dev.latvian.apps.tinyserver.HTTPServer",
+    "javap -c -p -classpath <kubejs.jar> dev.latvian.mods.kubejs.web.WebServerProperties"
+  ]
+}

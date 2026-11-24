@@ -1,0 +1,12 @@
+{
+  "applied": true,
+  "relative_path": "kubejs/config/web_server.json",
+  "enabled_before": true,
+  "enabled_after": false,
+  "before_sha256": "916cd25ad1d000bcddf2faa4c527c3295fe5470adf4f93788d125ae7167d7268",
+  "after_sha256": "0823e28c0174084a50685de6b020be2030befd91e5c430eeae681f7d53860170",
+  "effective_after_minecraft_restart": true,
+  "other_config_text_preserved": true,
+  "deployed_at_utc": "2026-11-24T11:49:26.4837993Z",
+  "backup": "D:\\projects\\minecraft-cartograph\\build\\idle-periodic-20261124\\backups\\kubejs-web_server-before-916cd25a.json"
+}

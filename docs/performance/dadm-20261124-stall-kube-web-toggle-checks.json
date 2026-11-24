@@ -1,0 +1,8 @@
+{
+  "complete": true,
+  "single_mc": true,
+  "source_fact_samples_unchanged": 32,
+  "world_always_rendered": true,
+  "fixed_dimension": "minecraft:overworld",
+  "source_jar_sha256": "e0eaad18dc0d6b91bf700a7e841b25b723a7bd476bd1e2b17b08ed5438a2b24f"
+}

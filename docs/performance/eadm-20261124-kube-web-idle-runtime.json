@@ -1,0 +1,25 @@
+{
+  "observed_at_utc": "2026-11-24T11:38:16.4665201Z",
+  "host": "eadm",
+  "process_id": 1668,
+  "operation": "Read-only Thread.print of the existing Minecraft process; no client was launched or stopped",
+  "thread_name": "KubeJS 2101.7.2-build.381",
+  "native_thread_id": 29128,
+  "java_priority": 10,
+  "cpu_ms": 1574218.75,
+  "elapsed_seconds": 1664.06,
+  "mean_logical_cpu_core_equivalents": 0.9460108109082606,
+  "web_server_enabled": true,
+  "config_sha256": "916cd25ad1d000bcddf2faa4c527c3295fe5470adf4f93788d125ae7167d7268",
+  "stack": [
+    "sun.nio.ch.Net.accept",
+    "sun.nio.ch.ServerSocketChannelImpl.implAccept",
+    "sun.nio.ch.ServerSocketChannelImpl.accept",
+    "dev.latvian.apps.tinyserver.HTTPServer.acceptClient",
+    "dev.latvian.apps.tinyserver.HTTPServer.run",
+    "java.lang.Thread.runWith",
+    "java.lang.Thread.run"
+  ],
+  "java": "21.0.12.1",
+  "tiny_java_server": "1.0.0-build.33"
+}
