@@ -315,9 +315,40 @@ public final class MeasurementProbe {
                 && (int) call(tile, "stateIdAt", column) == originalStateId) {
             functionalChecks.put("restore_to_client_ms", (System.nanoTime() - editStarted) / 1e6);
             functionalChecks.put("live_edits_passed", true); editStage = 3;
+        } else if (editStage == 3) {
+            mc.setScreen(null);
+            editStage = 4;
+        } else if (editStage == 4 && !(boolean) callStatic("LiveSurfaceUpdates", "active")) {
+            editStage = -4;
+            mc.getSingleplayerServer().execute(() -> {
+                var level = mc.getSingleplayerServer().getPlayerList().getPlayers().getFirst().serverLevel();
+                level.setBlock(editPos, net.minecraft.world.level.block.Blocks.GOLD_BLOCK.defaultBlockState(), 3);
+                editStarted = System.nanoTime(); editStage = 5;
+            });
+        } else if (editStage == 5 && System.nanoTime() - editStarted > 500_000_000L) {
+            Object inGame = Enum.valueOf((Class) type("CartographFrontendTarget"), "IN_GAME");
+            call(runtime, "openFrontend", inGame);
+            editStarted = System.nanoTime(); editStage = 6;
+        } else if (editStage == 6
+                && (int) call(tile, "surfaceHeightAt", column) == editPos.getY()
+                && (int) call(tile, "stateIdAt", column) == net.minecraft.world.level.block.Block.getId(
+                        net.minecraft.world.level.block.Blocks.GOLD_BLOCK.defaultBlockState())) {
+            functionalChecks.put("closed_edit_reopen_to_client_ms", (System.nanoTime() - editStarted) / 1e6);
+            editStage = -6;
+            mc.getSingleplayerServer().execute(() -> {
+                var level = mc.getSingleplayerServer().getPlayerList().getPlayers().getFirst().serverLevel();
+                level.setBlock(editPos, originalBlock, 3);
+                editStarted = System.nanoTime(); editStage = 7;
+            });
+        } else if (editStage == 7
+                && (int) call(tile, "surfaceHeightAt", column) == originalHeight
+                && (int) call(tile, "stateIdAt", column) == originalStateId) {
+            functionalChecks.put("closed_edit_restore_to_client_ms", (System.nanoTime() - editStarted) / 1e6);
+            functionalChecks.put("closed_edits_passed", true); editStage = 8;
         }
-        if (elapsed > 23 && editStage != 3) {
-            functionalChecks.put("live_edits_passed", false);
+        if (elapsed > 23 && editStage != 8) {
+            functionalChecks.put("closed_edits_passed", false);
+            if (editStage < 3) functionalChecks.put("live_edits_passed", false);
             if (editPos != null && originalBlock != null) mc.getSingleplayerServer().execute(() ->
                 mc.getSingleplayerServer().getPlayerList().getPlayers().getFirst().serverLevel()
                     .setBlock(editPos, originalBlock, 3));

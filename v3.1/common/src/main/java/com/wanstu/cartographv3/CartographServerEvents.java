@@ -16,8 +16,14 @@ public final class CartographServerEvents {
     }
 
     public static void chunkChanged(net.minecraft.world.level.chunk.LevelChunk chunk) {
-        if (!LiveSurfaceUpdates.active() || !(chunk.getLevel() instanceof ServerLevel level)) return;
-        chunkLoaded(level, chunk.getPos());
+        if (!(chunk.getLevel() instanceof ServerLevel level)) return;
+        if (level.getServer().isSameThread()) applyMutation(level, chunk);
+        else level.getServer().execute(() -> applyMutation(level, chunk));
+    }
+
+    private static void applyMutation(ServerLevel level, net.minecraft.world.level.chunk.LevelChunk chunk) {
+        SurfaceService.loadedChanged(chunk);
+        if (LiveSurfaceUpdates.active()) LiveSurfaceUpdates.changed(level, chunk.getPos(), true);
     }
 
     public static void chunkLoaded(ServerLevel level, ChunkPos pos) {

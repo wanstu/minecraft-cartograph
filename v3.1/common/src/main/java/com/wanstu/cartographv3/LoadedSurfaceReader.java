@@ -58,6 +58,7 @@ final class LoadedSurfaceReader {
     private static final class Capture implements TickWorkQueue.Work {
         final Key key;
         final LevelChunk chunk;
+        final long sourceRevision;
         final CompletableFuture<Optional<SurfaceTile>> result = new CompletableFuture<>();
         final int[] colors = new int[SurfaceTile.PIXELS];
         final short[] heights = new short[SurfaceTile.PIXELS];
@@ -73,6 +74,7 @@ final class LoadedSurfaceReader {
         Capture(Key key, LevelChunk chunk) {
             this.key = key;
             this.chunk = chunk;
+            this.sourceRevision = SurfaceService.loadedRevision(chunk);
             biomes = MapGameAccess.registry(key.level().registryAccess(), Registries.BIOME);
             Arrays.fill(heights, SurfaceColors.UNKNOWN_HEIGHT);
             Arrays.fill(stateIds, -1);
@@ -95,6 +97,7 @@ final class LoadedSurfaceReader {
                         new ChunkKey(MapGameAccess.dimension(level), key.x(), key.z()),
                         SurfaceColors.shade(colors, heights),
                         stateIds, biomeIds, surfaceHeights, reliefHeights, waterDepths);
+                SurfaceService.loadedCaptured(chunk, tile, sourceRevision);
                 PENDING.remove(key, this);
                 result.complete(Optional.of(tile));
             } catch (Throwable failure) {

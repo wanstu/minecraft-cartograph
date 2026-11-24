@@ -53,7 +53,8 @@ final class LiveSurfaceUpdates {
         boolean first = state.watched.remove(key) == null;
         state.watched.put(key, tickCounter);
         // One verification catches edits made while the frontend was closed.
-        if (first) state.dirty.putIfAbsent(key, tickCounter + MUTATION_DEBOUNCE_TICKS);
+        if (first && !SurfaceService.isLoadedCurrent(state.level, key.x(), key.z()))
+            state.dirty.putIfAbsent(key, tickCounter + MUTATION_DEBOUNCE_TICKS);
         while (state.watched.size() > MAX_WATCHED_PER_PLAYER) {
             Iterator<ChunkKey> it = state.watched.keySet().iterator();
             ChunkKey evicted = it.next();
@@ -62,7 +63,9 @@ final class LiveSurfaceUpdates {
         }
     }
 
-    static void changed(ServerLevel level, ChunkPos pos) {
+    static void changed(ServerLevel level, ChunkPos pos) { changed(level, pos, false); }
+
+    static void changed(ServerLevel level, ChunkPos pos, boolean direct) {
         if (!active) return;
         ChunkKey key = new ChunkKey(MapGameAccess.dimension(level),
                 MapGameAccess.chunkX(pos), MapGameAccess.chunkZ(pos));
@@ -82,8 +85,12 @@ final class LiveSurfaceUpdates {
                     }
                 }
                 // Never postpone indefinitely when a fluid or machine keeps changing.
-                if (state.dirty.putIfAbsent(key, tickCounter + MUTATION_DEBOUNCE_TICKS) == null)
-                    mutationEnqueues++;
+                Long pending = state.dirty.get(key);
+                long due = pending == null ? tickCounter + MUTATION_DEBOUNCE_TICKS
+                        : Math.min(pending, tickCounter + MUTATION_DEBOUNCE_TICKS);
+                if (direct) state.dirty.putFirst(key, due);
+                else state.dirty.putIfAbsent(key, due);
+                if (pending == null) mutationEnqueues++;
             }
         }
     }
@@ -121,6 +128,7 @@ final class LiveSurfaceUpdates {
                 iterator.remove();
                 // A later chunk-load event will enqueue it again. Never force a load.
                 if (state.level.getChunkSource().getChunkNow(key.x(), key.z()) == null) continue;
+                if (SurfaceService.isLoadedCurrent(state.level, key.x(), key.z())) continue;
                 refreshed++;
                 refreshStarts++;
                 state.refreshCredit--;

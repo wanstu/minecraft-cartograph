@@ -5,6 +5,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.level.chunk.LevelChunk;
 
 import java.util.Optional;
 import java.util.Set;
@@ -34,6 +35,40 @@ final class SurfaceService {
     private static final ConcurrentHashMap<Key, CompletableFuture<Optional<SurfaceTile>>> PENDING =
             new ConcurrentHashMap<>();
 
+    private static final class LoadedStamp {
+        long revision;
+        SurfaceTile verified;
+    }
+    // Weak keys do not retain unloaded Minecraft chunks. Only the server thread touches this map.
+    private static final java.util.Map<LevelChunk, LoadedStamp> LOADED_STAMPS = new java.util.WeakHashMap<>();
+
+    static long loadedRevision(LevelChunk chunk) {
+        return LOADED_STAMPS.computeIfAbsent(chunk, ignored -> new LoadedStamp()).revision;
+    }
+
+    static void loadedChanged(LevelChunk chunk) {
+        LoadedStamp stamp = LOADED_STAMPS.get(chunk);
+        if (stamp != null) { stamp.revision++; stamp.verified = null; }
+    }
+
+    static void loadedCaptured(LevelChunk chunk, SurfaceTile tile, long revision) {
+        LoadedStamp stamp = LOADED_STAMPS.get(chunk);
+        if (stamp != null && stamp.revision == revision) stamp.verified = tile;
+    }
+
+    private static boolean loadedSnapshotCurrent(LevelChunk chunk, SurfaceTile tile) {
+        LoadedStamp stamp = LOADED_STAMPS.get(chunk);
+        return stamp != null && stamp.verified == tile;
+    }
+
+    static boolean isLoadedCurrent(ServerLevel level, int x, int z) {
+        LevelChunk chunk = level.getChunkSource().getChunkNow(x, z);
+        if (chunk == null) return false;
+        Key key = key(level, x, z);
+        SurfaceTile tile = CACHE.get(key);
+        return tile != null && !DISK_STALE.contains(key) && loadedSnapshotCurrent(chunk, tile);
+    }
+
     private SurfaceService() {}
 
     static boolean requiresLoadedCapture(
@@ -43,9 +78,10 @@ final class SurfaceService {
 
         Key key = key(level, chunkX, chunkZ);
         SurfaceTile cached = CACHE.get(key);
-        if (cached != null && !DISK_STALE.contains(key)) return false;
-
-        return level.getChunkSource().getChunkNow(chunkX, chunkZ) != null;
+        LevelChunk loaded = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+        if (cached != null && !DISK_STALE.contains(key)
+                && (loaded == null || loadedSnapshotCurrent(loaded, cached))) return false;
+        return loaded != null;
     }
 
     static CompletableFuture<Optional<SurfaceTile>> request(
@@ -62,7 +98,9 @@ final class SurfaceService {
         // 16x16 surface on the server thread. LiveSurfaceUpdates keeps active
         // loaded tiles fresh while the map is open.
         SurfaceTile cached = CACHE.get(key);
-        if (cached != null && !DISK_STALE.contains(key))
+        LevelChunk loadedChunk = watchLive ? level.getChunkSource().getChunkNow(chunkX, chunkZ) : null;
+        if (cached != null && !DISK_STALE.contains(key)
+                && (loadedChunk == null || loadedSnapshotCurrent(loadedChunk, cached)))
             return CompletableFuture.completedFuture(Optional.of(cached));
 
         if (watchLive && level.getChunkSource().getChunkNow(chunkX, chunkZ) != null) {
@@ -145,6 +183,7 @@ final class SurfaceService {
         CACHE.keySet().removeIf(key -> key.worldRoot().equals(root));
         DISK_STALE.removeIf(key -> key.worldRoot().equals(root));
         PENDING.keySet().removeIf(key -> key.worldRoot().equals(root));
+        LOADED_STAMPS.clear();
     }
 
     private static Key key(ServerLevel level, int chunkX, int chunkZ) {
