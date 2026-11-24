@@ -1,0 +1,11 @@
+{
+  "regions": 395,
+  "discovered_chunks": 312391,
+  "queued_chunks": 312391,
+  "header_scan_ms": 1359.934583,
+  "priority_sort_ms": 108.897964,
+  "queue_population_ms": 912.664804,
+  "total_ms": 2381.497351,
+  "heap_used_bytes_observed": 83412824,
+  "worker": "cartograph-real-header-benchmark"
+}

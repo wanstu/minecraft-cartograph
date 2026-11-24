@@ -1,5 +1,7 @@
 # Cartograph 性能修复与 MC 伴随进程边界
 
+后续事件驱动修复、缓存复用与 dadm 前后对照见 [CARTOGRAPH_PERFORMANCE_REMEDIATION_20261124.md](CARTOGRAPH_PERFORMANCE_REMEDIATION_20261124.md)。下述 11 月 23 日现场记录来自 `6cab790` 部署之前。
+
 ## 本轮证据
 
 2026-11-23 用户反馈：移动几步会卡，原地不动也会短间隔卡顿。

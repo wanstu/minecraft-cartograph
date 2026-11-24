@@ -1,0 +1,13 @@
+{
+  "real_samples": 8,
+  "full_samples": 8,
+  "input_equivalence_passed": true,
+  "reads_per_variant": 2400,
+  "full_allocated_bytes": 219612176,
+  "selective_allocated_bytes": 214743264,
+  "allocation_reduction_percent": 2.2170501147440933,
+  "full_elapsed_ms": 676.943042,
+  "selective_elapsed_ms": 684.857567,
+  "elapsed_reduction_percent": -1.169156710233237,
+  "checksum": -72000
+}
