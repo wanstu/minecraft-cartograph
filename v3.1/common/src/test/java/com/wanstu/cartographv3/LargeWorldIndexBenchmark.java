@@ -62,7 +62,8 @@ public final class LargeWorldIndexBenchmark {
         Object state = constructor.newInstance();
         Field initial = stateType.getDeclaredField("initialPending");
         initial.setAccessible(true);
-        ((Set<ChunkKey>) initial.get(state)).addAll(keys);
+        ((Map<String, Set<ChunkKey>>) initial.get(state))
+                .computeIfAbsent("minecraft:overworld", ignored -> ConcurrentHashMap.newKeySet()).addAll(keys);
         Method add = GeneratedChunkBackfill.class.getDeclaredMethod("add", stateType, ChunkKey.class);
         add.setAccessible(true);
         for (ChunkKey key : keys) add.invoke(null, state, key);
@@ -72,7 +73,7 @@ public final class LargeWorldIndexBenchmark {
         Map<String, Queue<ChunkKey>> queues = (Map<String, Queue<ChunkKey>>) ready.get(state);
         int queued = queues.get("minecraft:overworld").size();
         if (keys.size() != expected || queued != expected
-                || ((Set<?>) initial.get(state)).size() != expected)
+                || ((Set<?>) ((Map<?, ?>) initial.get(state)).get("minecraft:overworld")).size() != expected)
             throw new AssertionError("Real header index lost or duplicated chunks");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("regions", regions);

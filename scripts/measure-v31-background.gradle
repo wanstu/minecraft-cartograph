@@ -1,0 +1,14 @@
+allprojects {
+    afterEvaluate {
+        if (sourceSets.findByName('performanceVerification') != null) {
+            tasks.register('measureV31BackgroundCompletion', JavaExec) {
+                dependsOn tasks.named('performanceVerificationClasses')
+                classpath = sourceSets.performanceVerification.runtimeClasspath
+                mainClass = 'com.wanstu.cartographv3.BackgroundCompletionBenchmark'
+                maxHeapSize = '512m'
+                args rootProject.file('../../build/real-world-headers').absolutePath,
+                     rootProject.file('../../build/background-completion-results.json').absolutePath
+            }
+        }
+    }
+}

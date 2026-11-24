@@ -25,6 +25,7 @@ public final class PerformanceSelfTest {
         knownAtlasBounds();
         missingCacheLifecycleAndScale();
         selectiveSurfaceNbt();
+        backgroundCompletionIsPerDimension();
         System.out.println("Cartograph performance regressions: " + checks + " checks passed");
     }
 
@@ -162,6 +163,39 @@ public final class PerformanceSelfTest {
         missing.clear(); validated.clear(); session.setLong(null, originalSession);
     }
 
+
+    @SuppressWarnings("unchecked")
+    private static void backgroundCompletionIsPerDimension() throws Exception {
+        Class<?> type = Class.forName(GeneratedChunkBackfill.class.getName() + "$State");
+        var constructor = type.getDeclaredConstructor(); constructor.setAccessible(true);
+        Object state = constructor.newInstance();
+        var pendingField = type.getDeclaredField("initialPending"); pendingField.setAccessible(true);
+        Map<String, java.util.Set<ChunkKey>> groups =
+                (Map<String, java.util.Set<ChunkKey>>) pendingField.get(state);
+        // Looking through this foreign backlog is a regression even if a small fixture runs fast.
+        java.util.Set<ChunkKey> foreign = new java.util.AbstractSet<>() {
+            @Override public java.util.Iterator<ChunkKey> iterator() {
+                throw new AssertionError("completion traversed a foreign dimension");
+            }
+            @Override public int size() { return 312391; }
+        };
+        groups.put("qa:foreign", foreign);
+        ChunkKey first = new ChunkKey("qa:current", 1, 2), second = new ChunkKey("qa:current", 3, 4);
+        java.util.Set<ChunkKey> current = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        current.add(first); current.add(second); groups.put("qa:current", current);
+        var complete = GeneratedChunkBackfill.class.getDeclaredMethod("completeAttempt",
+                net.minecraft.server.level.ServerPlayer.class, type, ChunkKey.class);
+        complete.setAccessible(true);
+        complete.invoke(null, null, state, first);
+        require(current.size() == 1 && current.contains(second), "completion removes only its own pending key");
+        complete.invoke(null, null, state, first);
+        require(current.size() == 1, "duplicate completion cannot consume another pending key");
+        complete.invoke(null, null, state, second);
+        require(current.isEmpty() && groups.get("qa:foreign") == foreign,
+                "finishing one dimension neither traverses nor clears another dimension");
+        complete.invoke(null, null, state, new ChunkKey("qa:later", 5, 6));
+        require(groups.size() == 2, "a later completion does not create or scan unrelated pending groups");
+    }
 
     private static void selectiveSurfaceNbt() throws Exception {
         var root = new net.minecraft.nbt.CompoundTag();

@@ -52,8 +52,8 @@ final class GeneratedChunkBackfill {
         final Set<String> scanned = ConcurrentHashMap.newKeySet();
         final Set<String> scanning = ConcurrentHashMap.newKeySet();
         final Set<String> readyLogged = ConcurrentHashMap.newKeySet();
-        final Set<ChunkKey> initialPending = ConcurrentHashMap.newKeySet();
-        final Map<ChunkKey, Long> knownFingerprints = new ConcurrentHashMap<>();
+        final Map<String, Set<ChunkKey>> initialPending = new ConcurrentHashMap<>();
+        final Map<String, Map<ChunkKey, Long>> knownFingerprints = new ConcurrentHashMap<>();
         final Map<String, Long> checkpoints = new ConcurrentHashMap<>();
         final Map<String, Long> scanStartedAt = new ConcurrentHashMap<>();
     }
@@ -136,14 +136,17 @@ final class GeneratedChunkBackfill {
     static Long knownFingerprint(ServerPlayer player, ChunkKey key) {
         if (player == null || key == null) return null;
         State state = STATES.get(player.getUUID());
-        return state == null ? null : state.knownFingerprints.get(key);
+        if (state == null) return null;
+        Map<ChunkKey, Long> known = state.knownFingerprints.get(key.dimension());
+        return known == null ? null : known.get(key);
     }
 
     static void markDelivered(ServerPlayer player, SurfaceTile tile) {
         if (player == null || tile == null) return;
         State state = STATES.get(player.getUUID());
         if (state == null) return;
-        state.knownFingerprints.put(tile.key(), tile.fingerprint64());
+        state.knownFingerprints.computeIfAbsent(tile.key().dimension(),
+                ignored -> new ConcurrentHashMap<>()).put(tile.key(), tile.fingerprint64());
         completeAttempt(player, state, tile.key());
     }
 
@@ -168,8 +171,10 @@ final class GeneratedChunkBackfill {
             // handle active map areas. Save events remain important for
             // candidates that were incomplete during the initial scan and for
             // chunks generated after that scan.
-            if (state.knownFingerprints.containsKey(key)) continue;
-            if (!state.initialPending.contains(key)) add(state, key);
+            Map<ChunkKey, Long> known = state.knownFingerprints.get(key.dimension());
+            if (known != null && known.containsKey(key)) continue;
+            Set<ChunkKey> pending = state.initialPending.get(key.dimension());
+            if (pending == null || !pending.contains(key)) add(state, key);
         }
     }
 
@@ -224,13 +229,15 @@ final class GeneratedChunkBackfill {
             }));
 
             if (STATES.get(playerId) != state) return;
-            state.initialPending.addAll(discovered);
+            state.initialPending.computeIfAbsent(dimension,
+                    ignored -> ConcurrentHashMap.newKeySet()).addAll(discovered);
             for (ChunkKey key : discovered) add(state, key);
             state.scanned.add(dimension);
             LOG.info(
                     "V31_BACKGROUND_INDEX player={} dimension={} region_candidates={} checkpoint={}",
                     playerId, dimension, discovered.size(), checkpointMillis);
-            if (discovered.isEmpty()) {
+            // A tiny queue can finish while this worker is still publishing its keys.
+            if (state.initialPending.get(dimension).isEmpty()) {
                 publishCheckpoint(
                         server, playerId, state, dimension, scanStartedMillis);
             }
@@ -276,11 +283,13 @@ final class GeneratedChunkBackfill {
     private static void completeAttempt(ServerPlayer player, State state, ChunkKey key) {
         Set<ChunkKey> queued = state.queued.get(key.dimension());
         if (queued != null) queued.remove(key);
-        state.initialPending.remove(key);
+        Set<ChunkKey> pending = state.initialPending.get(key.dimension());
+        if (pending != null) pending.remove(key);
 
-        boolean dimensionPending = state.initialPending.stream()
-                .anyMatch(candidate -> candidate.dimension().equals(key.dimension()));
-        if (!dimensionPending && state.scanned.contains(key.dimension())) {
+        // Never traverse another dimension's potentially huge backlog on the server thread.
+        boolean dimensionPending = pending != null && !pending.isEmpty();
+        if (!dimensionPending && state.scanned.contains(key.dimension())
+                && !state.readyLogged.contains(key.dimension())) {
             publishCheckpoint(
                     MapGameAccess.server(player),
                     player.getUUID(),
@@ -297,15 +306,14 @@ final class GeneratedChunkBackfill {
             State state,
             String dimension,
             long checkpointMillis) {
-        if (server == null || checkpointMillis <= 0L) return;
+        if (server == null || checkpointMillis <= 0L || state.readyLogged.contains(dimension)) return;
         server.execute(() -> {
             if (STATES.get(playerId) != state || !state.active) return;
             ServerPlayer player = server.getPlayerList().getPlayer(playerId);
             if (player == null || !state.readyLogged.add(dimension)) return;
 
-            long full = state.knownFingerprints.keySet().stream()
-                    .filter(candidate -> candidate.dimension().equals(dimension))
-                    .count();
+            Map<ChunkKey, Long> known = state.knownFingerprints.get(dimension);
+            long full = known == null ? 0L : known.size();
             LOG.info(
                     "V31_BACKGROUND_READY dimension={} full_chunks={} checkpoint={}",
                     dimension, full, checkpointMillis);

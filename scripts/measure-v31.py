@@ -29,7 +29,9 @@ def prepare(args):
     (world/'session.lock').unlink(missing_ok=True)
     for directory in source.iterdir():
         if directory.is_dir() and directory.name.startswith('cartograph_'):
-            shutil.copytree(directory, instance/directory.name)
+            # Fact writes replace files atomically; worlds and other mutable caches always get real copies.
+            copy = os.link if args.link_facts and directory.name == 'cartograph_v31_map_facts' else shutil.copy2
+            shutil.copytree(directory, instance/directory.name, copy_function=copy)
     for path in (instance/'kubejs').rglob('*request*.json'):
         try:
             value=json.loads(path.read_text())
@@ -77,6 +79,9 @@ def run(args):
     rewritten[0:0]=['-XX:StartFlightRecording=name=cartograph,settings=profile,dumponexit=true,filename='+str(lab/'trace.jfr')+',maxsize=128m',
                     '-Xlog:gc*:file='+str(lab/'gc.log')+':time,uptime,level,tags']
     if args.quick: rewritten.insert(0, '-Dcartograph.measurementQuick=true')
+    if args.idle:
+        if not args.scene: raise RuntimeError('Idle mode requires an explicit scene')
+        rewritten[0:0]=['-Dcartograph.measurementIdle=true','-Dcartograph.measurementScene='+str(args.scene.resolve())]
     rewritten.extend(('--quickPlaySingleplayer','BenchWorld'))
     display=args.display or ':135'
     env=os.environ.copy();env.update(DISPLAY=display,ALSOFT_DRIVERS='null')
@@ -100,7 +105,7 @@ def run(args):
         old_state.write_text(json.dumps(state,indent=2));print(json.dumps(state),flush=True)
         while client.poll() is None:
             now=time.time()
-            if now-started>720:stop();raise RuntimeError('Measurement client exceeded total runtime limit')
+            if now-started>args.timeout:stop();raise RuntimeError('Measurement client exceeded total runtime limit')
             if result.exists():
                 try:
                     values=json.loads(result.read_text())
@@ -146,6 +151,8 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('action',choices=('prepare','run'))
     parser.add_argument('--lab',type=pathlib.Path,required=True);parser.add_argument('--source',type=pathlib.Path,required=True)
     parser.add_argument('--quick',action='store_true');parser.add_argument('--world',default='UnificationSmoke');parser.add_argument('--java',type=pathlib.Path)
+    parser.add_argument('--link-facts',action='store_true');parser.add_argument('--idle',action='store_true');parser.add_argument('--scene',type=pathlib.Path)
+    parser.add_argument('--timeout',type=int,default=720)
     parser.add_argument('--display',help='Use an existing display without starting or stopping its server')
     parser.add_argument('--xvfb',type=pathlib.Path);parser.add_argument('--cartograph-jar',type=pathlib.Path);parser.add_argument('--probe-jar',type=pathlib.Path)
     options=parser.parse_args();prepare(options) if options.action=='prepare' else run(options)

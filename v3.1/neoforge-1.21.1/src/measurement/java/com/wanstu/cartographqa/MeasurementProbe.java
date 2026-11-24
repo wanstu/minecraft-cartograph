@@ -20,10 +20,14 @@ import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Read-only measurement of mapping behavior; fixtures and movement stay in an isolated copied world. */
+/** Measurement and controlled fixture edits stay in an isolated copied world. */
 @Mod("cartograph_perf_probe")
 public final class MeasurementProbe {
-    private static final String[] PHASES = Boolean.getBoolean("cartograph.measurementQuick")
+    private static final boolean IDLE_MODE = Boolean.getBoolean("cartograph.measurementIdle");
+    private static final String[] PHASES = IDLE_MODE
+            ? new String[]{"control_warmup", "mapping_overworld", "control_overworld", "warmup_nether",
+                "mapping_nether", "control_nether", "mapping_nether_tail", "warmup_return", "mapping_overworld_tail"}
+            : Boolean.getBoolean("cartograph.measurementQuick")
             ? new String[]{"warmup_control", "mapping_still", "map_handdrawn", "map_live_edit"}
             : new String[]{"warmup_control", "control_still", "mapping_still",
             "control_move", "mapping_move", "map_near", "map_near_idle", "map_far", "map_handdrawn",
@@ -40,7 +44,10 @@ public final class MeasurementProbe {
     private long previousFrame;
     private long clientTickStarted;
     private long serverTickStarted;
-    private double homeX, homeY, homeZ;
+    private double homeX, homeY, homeZ, netherX, netherY = 90, netherZ;
+    private volatile Throwable phaseFailure;
+    private boolean netherSaveRequested;
+    private volatile boolean netherSaveFinished;
     private volatile int editStage;
     private volatile long editStarted;
     private net.minecraft.core.BlockPos editPos;
@@ -82,6 +89,7 @@ public final class MeasurementProbe {
         Minecraft mc = Minecraft.getInstance();
         if (finished || mc.level == null || mc.player == null) return;
         try {
+            if (phaseFailure != null) throw new IllegalStateException("Fixture transition failed", phaseFailure);
             clientTicks++;
             if (!initialized) {
                 if (clientTicks < 60) return;
@@ -89,6 +97,13 @@ public final class MeasurementProbe {
                 runtime = read(type("CartographClient"), null, "RUNTIME");
                 backend = read(runtime.getClass(), runtime, "backend");
                 homeX = mc.player.getX(); homeY = mc.player.getY() + 6; homeZ = mc.player.getZ();
+                if (IDLE_MODE) {
+                    var scene = com.google.gson.JsonParser.parseString(Files.readString(java.nio.file.Path.of(
+                            System.getProperty("cartograph.measurementScene")))).getAsJsonObject();
+                    homeX = scene.get("home_x").getAsDouble(); homeY = scene.get("home_y").getAsDouble();
+                    homeZ = scene.get("home_z").getAsDouble(); netherX = scene.get("nether_x").getAsDouble();
+                    netherY = scene.get("nether_y").getAsDouble(); netherZ = scene.get("nether_z").getAsDouble();
+                }
                 mc.getSingleplayerServer().execute(() -> mc.getSingleplayerServer().getPlayerList().getPlayers()
                         .forEach(player -> player.setGameMode(GameType.SPECTATOR)));
                 switchPhase(0);
@@ -101,7 +116,7 @@ public final class MeasurementProbe {
                 samples.pendingPeak = Math.max(samples.pendingPeak, (int) callStatic("MapClientCache", "pendingCount"));
             }
             double elapsed = (System.nanoTime() - samples.started) / 1e9;
-            if (samples.name.endsWith("_move") || samples.name.equals("warmup_control")) {
+            if (!IDLE_MODE && (samples.name.endsWith("_move") || samples.name.equals("warmup_control"))) {
                 if (clientTicks % 5 == 0) {
                     double duration = samples.name.equals("warmup_control") ? 20 : 25;
                     double progress = Math.min(1, elapsed / duration);
@@ -119,7 +134,23 @@ public final class MeasurementProbe {
                     image.writeToFile(mc.gameDirectory.toPath().resolve("performance-" + samples.name + ".png"));
                 }
             }
-            if (elapsed < (phaseIndex == 0 ? 20 : 25)) return;
+            if (IDLE_MODE && samples.name.equals("warmup_nether")) {
+                if (elapsed > 25 && !netherSaveRequested) {
+                    netherSaveRequested = true;
+                    mc.getSingleplayerServer().execute(() -> {
+                        try {
+                            // Save genuine game-generated terrain in the copied world so the closed-map disk
+                            // collector has real FULL chunks to process while the overworld backlog remains.
+                            var level = mc.getSingleplayerServer().getLevel(net.minecraft.world.level.Level.NETHER);
+                            level.save(null, true, false);
+                            netherSaveFinished = true;
+                        } catch (Throwable failure) { phaseFailure = failure; }
+                    });
+                }
+                if (!netherSaveFinished) return;
+                functionalChecks.put("nether_snapshot_saved_before_measurement", true);
+            }
+            if (elapsed < phaseSeconds(samples.name)) return;
             finishPhase(samples);
             if (++phaseIndex < PHASES.length) switchPhase(phaseIndex);
             else {
@@ -127,6 +158,11 @@ public final class MeasurementProbe {
                 if (mc.screen != null) mc.setScreen(null);
                 call(backend, "close");
                 writeResults(true);
+                if (IDLE_MODE) {
+                    try (var image = net.minecraft.client.Screenshot.takeScreenshot(mc.getMainRenderTarget())) {
+                        image.writeToFile(mc.gameDirectory.toPath().resolve("performance-final-world.png"));
+                    }
+                }
                 System.out.println("CARTOGRAPH_MEASUREMENT_PASS phases=" + RESULTS.size());
                 mc.stop();
             }
@@ -159,8 +195,17 @@ public final class MeasurementProbe {
             field(backend.getClass(), "worldActive").setBoolean(backend, false);
             call(backend, "setWorldActive", true);
         }
-        mc.getSingleplayerServer().execute(() -> mc.getSingleplayerServer().getPlayerList().getPlayers()
-                .forEach(player -> player.teleportTo(player.serverLevel(), homeX, homeY, homeZ, 0, 30)));
+        mc.getSingleplayerServer().execute(() -> {
+            try {
+                boolean nether = IDLE_MODE && name.contains("nether");
+                var target = IDLE_MODE ? mc.getSingleplayerServer().getLevel(nether
+                        ? net.minecraft.world.level.Level.NETHER : net.minecraft.world.level.Level.OVERWORLD) : null;
+                if (IDLE_MODE && target == null) throw new IllegalStateException("Requested fixture dimension is absent");
+                mc.getSingleplayerServer().getPlayerList().getPlayers().forEach(player ->
+                        player.teleportTo(IDLE_MODE ? target : player.serverLevel(),
+                                nether ? netherX : homeX, nether ? netherY : homeY, nether ? netherZ : homeZ, 0, 30));
+            } catch (Throwable failure) { phaseFailure = failure; }
+        });
         if (name.startsWith("map_") && !name.equals("map_closed_idle")) {
             Object satellite = Enum.valueOf((Class) type("MapDrawingMode"), name.equals("map_handdrawn") ? "HAND_DRAWN" : "SATELLITE");
             invoke(type("CartographSettings"), null, "setDrawingMode", satellite);
@@ -179,6 +224,17 @@ public final class MeasurementProbe {
         current = new Samples(name);
         previousFrame = 0;
         System.out.println("CARTOGRAPH_MEASUREMENT_PHASE " + name + " " + Instant.now());
+    }
+
+    private static double phaseSeconds(String name) {
+        if (!IDLE_MODE) return name.equals("warmup_control") ? 20 : 25;
+        return switch (name) {
+            case "control_warmup", "warmup_return" -> 30;
+            case "warmup_nether" -> 45;
+            case "mapping_overworld", "mapping_nether_tail" -> 60;
+            case "mapping_nether" -> 90;
+            default -> 45;
+        };
     }
 
     @SubscribeEvent
@@ -223,6 +279,7 @@ public final class MeasurementProbe {
         double seconds = (ended - samples.started) / 1e9;
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("phase", samples.name); result.put("start_epoch_ms", samples.wallMillis);
+        result.put("dimension", Minecraft.getInstance().level.dimension().location().toString());
         result.put("end_epoch_ms", System.currentTimeMillis()); result.put("seconds", seconds);
         result.put("frame", distribution(samples.frames)); result.put("client_tick", distribution(samples.clients));
         result.put("focused_frames", samples.focusedFrames); result.put("unfocused_frames", samples.unfocusedFrames);
@@ -247,6 +304,22 @@ public final class MeasurementProbe {
             functionalChecks.put("world_render_suppressed_under_map", worldFrames == 0 && skippedFrames > 0);
         if (worldFrames >= 0 && samples.name.equals("map_closed_idle"))
             functionalChecks.put("world_render_restored_after_map", worldFrames > 0 && skippedFrames == 0);
+        if (IDLE_MODE) {
+            try {
+                Map<?, ?> states = (Map<?, ?>) read(type("GeneratedChunkBackfill"), null, "STATES");
+                long initial = 0;
+                Map<String, Integer> queued = new TreeMap<>();
+                for (Object state : states.values()) {
+                    Object pending = read(state.getClass(), state, "initialPending");
+                    if (pending instanceof Set<?> flat) initial += flat.size();
+                    else for (Object set : ((Map<?, ?>) pending).values()) initial += ((Set<?>) set).size();
+                    ((Map<String, Set<?>>) read(state.getClass(), state, "queued"))
+                            .forEach((dimension, keys) -> queued.merge(dimension, keys.size(), Integer::sum));
+                }
+                result.put("backfill_initial_pending", initial);
+                result.put("backfill_queued_by_dimension", queued);
+            } catch (Exception failure) { throw new RuntimeException(failure); }
+        }
         RESULTS.add(result);
         try { writeResults(false); } catch (Exception failure) { throw new RuntimeException(failure); }
         System.out.println("CARTOGRAPH_MEASUREMENT_RESULT " + new GsonBuilder().create().toJson(result));
@@ -264,7 +337,8 @@ public final class MeasurementProbe {
     }
     private static double percentile(long[] values, double p) { return values[Math.min(values.length - 1, (int) Math.ceil(p * values.length) - 1)] / 1e6; }
     private void writeResults(boolean complete) throws Exception {
-        Map<String, Object> root = new LinkedHashMap<>(); root.put("schema_version", 2); root.put("complete", complete);
+        Map<String, Object> root = new LinkedHashMap<>(); root.put("schema_version", 3); root.put("complete", complete);
+        root.put("measurement_mode", IDLE_MODE ? "idle_actual_world" : "map");
         root.put("control", "CartographBackendRuntime closed; worldActive latched true to keep collection paused");
         root.put("jvm_available_processors", OS.getAvailableProcessors()); root.put("os", System.getProperty("os.name"));
         root.put("java", System.getProperty("java.version")); root.put("phases", RESULTS);
