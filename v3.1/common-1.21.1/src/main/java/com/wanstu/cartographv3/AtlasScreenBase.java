@@ -18,7 +18,12 @@ abstract class AtlasScreenBase extends Screen {
 
     @Override
     public final void render(GuiGraphics graphics, int x, int y, float delta) {
-        drawFrame(new MapGraphics(graphics), delta);
+        MapGraphics frame = new MapGraphics(graphics);
+        try {
+            drawFrame(frame, delta);
+        } finally {
+            frame.flushFills();
+        }
     }
 
     @Override
@@ -27,6 +32,7 @@ abstract class AtlasScreenBase extends Screen {
     }
 
     final void drawWidgets(MapGraphics graphics, int x, int y, float delta) {
+        graphics.flushFills();
         super.render(graphics.nativeGraphics, x, y, delta);
     }
 
