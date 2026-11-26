@@ -7,6 +7,7 @@ import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -36,6 +37,9 @@ final class PersistentRenderedAtlasStore {
     private static final int MAGIC = 0x43544131; // CTA1
     private static final int VERSION = 1;
     private static final String ROOT = "cartograph-v31-rendered-atlas-v1";
+    // Reuse one big-endian staging buffer on the atlas reader thread.
+    private static final ThreadLocal<ByteBuffer> READ_BUFFER =
+            ThreadLocal.withInitial(() -> ByteBuffer.allocate(8 * 1024));
 
     record Snapshot(long[] fingerprints, int[] pixels) {}
     private record IndexKey(UUID worldId, String dimension, long signature) {}
@@ -103,13 +107,8 @@ final class PersistentRenderedAtlasStore {
             int tiles = input.readInt();
             if (size != expectedSize || tiles != expectedTiles) return Optional.empty();
 
-            long[] fingerprints = new long[tiles];
-            for (int i = 0; i < tiles; i++) fingerprints[i] = input.readLong();
-
-            int[] pixels = new int[size * size];
-            for (int i = 0; i < pixels.length; i++) pixels[i] = input.readInt();
-            if (input.read() != -1) return Optional.empty();
-            return Optional.of(new Snapshot(fingerprints, pixels));
+            Snapshot snapshot = readSnapshot(input, size, tiles);
+            return input.read() == -1 ? Optional.of(snapshot) : Optional.empty();
         } catch (IOException | RuntimeException corrupt) {
             try { Files.deleteIfExists(file); } catch (IOException ignored) {}
             refreshIndex(worldId, dimension, signature, regionX, regionZ);
@@ -234,6 +233,26 @@ final class PersistentRenderedAtlasStore {
             try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
             return false;
         }
+    }
+
+    private static Snapshot readSnapshot(DataInputStream input, int size, int tiles) throws IOException {
+        ByteBuffer block = READ_BUFFER.get();
+        var longView = block.asLongBuffer();
+        long[] fingerprints = new long[tiles];
+        for (int offset = 0; offset < fingerprints.length; offset += longView.capacity()) {
+            int count = Math.min(longView.capacity(), fingerprints.length - offset);
+            input.readFully(block.array(), 0, count * Long.BYTES);
+            longView.get(0, fingerprints, offset, count);
+        }
+
+        var intView = block.asIntBuffer();
+        int[] pixels = new int[size * size];
+        for (int offset = 0; offset < pixels.length; offset += intView.capacity()) {
+            int count = Math.min(intView.capacity(), pixels.length - offset);
+            input.readFully(block.array(), 0, count * Integer.BYTES);
+            intView.get(0, pixels, offset, count);
+        }
+        return new Snapshot(fingerprints, pixels);
     }
 
     private static Set<String> buildIndex(IndexKey key) {

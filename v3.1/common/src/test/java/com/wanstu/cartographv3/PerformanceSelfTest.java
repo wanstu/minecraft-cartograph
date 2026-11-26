@@ -4,10 +4,17 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -28,6 +35,7 @@ public final class PerformanceSelfTest {
         memoryBoundAndEviction();
         knownAtlasBounds();
         atlasReleaseWhileWriterBusy();
+        atlasBlockReadCompatibility();
         missingCacheLifecycleAndScale();
         selectiveSurfaceNbt();
         backgroundCompletionIsPerDimension();
@@ -259,6 +267,40 @@ public final class PerformanceSelfTest {
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
         checks++;
+    }
+
+    private static void atlasBlockReadCompatibility() throws Exception {
+        // Both arrays end in a partial block and include negative values.
+        int size = 65;
+        long[] fingerprints = new long[1031];
+        int[] pixels = new int[size * size];
+        var legacyBytes = new ByteArrayOutputStream();
+        try (var legacy = new DataOutputStream(legacyBytes)) {
+            for (int i = 0; i < fingerprints.length; i++) {
+                fingerprints[i] = Long.rotateLeft(0xFEDCBA9876543210L, i);
+                legacy.writeLong(fingerprints[i]);
+            }
+            for (int i = 0; i < pixels.length; i++) {
+                pixels[i] = Integer.rotateLeft(0x89ABCDEF, i);
+                legacy.writeInt(pixels[i]);
+            }
+        }
+        byte[] bytes = legacyBytes.toByteArray();
+        Method read = PersistentRenderedAtlasStore.class.getDeclaredMethod(
+                "readSnapshot", DataInputStream.class, int.class, int.class);
+        read.setAccessible(true);
+        try (var input = new DataInputStream(new ByteArrayInputStream(bytes))) {
+            var snapshot = (PersistentRenderedAtlasStore.Snapshot) read.invoke(
+                    null, input, size, fingerprints.length);
+            require(Arrays.equals(fingerprints, snapshot.fingerprints()), "bulk atlas read keeps CTA1 fingerprints");
+            require(Arrays.equals(pixels, snapshot.pixels()), "bulk atlas read keeps CTA1 pixels");
+        }
+        try (var input = new DataInputStream(new ByteArrayInputStream(bytes, 0, bytes.length - 1))) {
+            read.invoke(null, input, size, fingerprints.length);
+            throw new AssertionError("truncated atlas payload must fail");
+        } catch (InvocationTargetException failure) {
+            require(failure.getCause() instanceof EOFException, "bulk atlas read rejects truncated data");
+        }
     }
 
     private static void atlasReleaseWhileWriterBusy() throws Exception {
