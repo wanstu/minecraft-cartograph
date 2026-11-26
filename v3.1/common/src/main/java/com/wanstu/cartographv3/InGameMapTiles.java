@@ -112,24 +112,24 @@ final class InGameMapTiles implements AutoCloseable {
         int maxX = region(camera.worldX(camera.width()));
         int minZ = region(camera.worldZ(camera.top()));
         int maxZ = region(camera.worldZ(camera.bottom()));
-        // The cache index already groups chunks into occupied regions.
-        Set<Region> candidates = new HashSet<>();
+        // Mark regions that can be painted from facts already in memory.
+        Map<Region, Boolean> candidates = new HashMap<>();
         for (var cached : backend.cachedRegionsInBounds(dim,
                 minX * CACHE_REGIONS_PER_ATLAS, (maxX + 1) * CACHE_REGIONS_PER_ATLAS - 1,
                 minZ * CACHE_REGIONS_PER_ATLAS, (maxZ + 1) * CACHE_REGIONS_PER_ATLAS - 1)) {
-            candidates.add(new Region(Math.floorDiv(cached.x(), CACHE_REGIONS_PER_ATLAS),
-                    Math.floorDiv(cached.z(), CACHE_REGIONS_PER_ATLAS)));
+            candidates.put(new Region(Math.floorDiv(cached.x(), CACHE_REGIONS_PER_ATLAS),
+                    Math.floorDiv(cached.z(), CACHE_REGIONS_PER_ATLAS)), true);
         }
         for (TextureKey key : atlases.keySet()) {
             Region region = key.region();
             if (key.signature() == targetSignature && region.x >= minX && region.x <= maxX
-                    && region.z >= minZ && region.z <= maxZ) candidates.add(region);
+                    && region.z >= minZ && region.z <= maxZ) candidates.putIfAbsent(region, false);
         }
         for (var region : PersistentRenderedAtlasStore.regionsInBounds(
                 worldId, dim, targetSignature, minX, maxX, minZ, maxZ)) {
-            candidates.add(new Region(region.x(), region.z()));
+            candidates.putIfAbsent(new Region(region.x(), region.z()), false);
         }
-        List<Region> visible = new ArrayList<>(candidates);
+        List<Region> visible = new ArrayList<>(candidates.keySet());
         int middleX = region(camera.worldX(camera.middleX()));
         int middleZ = region(camera.worldZ(camera.middleY()));
         visible.sort(Comparator.comparingInt(key -> Math.abs(key.x - middleX) + Math.abs(key.z - middleZ)));
@@ -138,7 +138,7 @@ final class InGameMapTiles implements AutoCloseable {
         reads.entrySet().removeIf(entry -> {
             TextureKey key = entry.getKey();
             Atlas exact = atlases.get(new TextureKey(key.region(), stride, targetSignature));
-            boolean discard = key.signature() != targetSignature || !candidates.contains(key.region())
+            boolean discard = key.signature() != targetSignature || !candidates.containsKey(key.region())
                     || (key.stride() != stride && exact != null && exact.complete && exact.hasPixels);
             if (discard) entry.getValue().cancel(false);
             return discard;
@@ -152,7 +152,7 @@ final class InGameMapTiles implements AutoCloseable {
             TextureKey key = new TextureKey(region, stride, targetSignature);
             Atlas atlas = atlases.get(key);
             if (atlas == null) {
-                atlas = createAtlas(worldId, dim, region, stride, targetSignature);
+                atlas = createAtlas(worldId, dim, key, candidates.get(region));
                 if (atlas == null) continue;
                 atlases.put(key, atlas);
                 allocatedTexels += atlas.texels();
@@ -174,14 +174,13 @@ final class InGameMapTiles implements AutoCloseable {
         evictOffscreen(keep);
     }
 
-    private Atlas createAtlas(
-            UUID worldId, String dimension, Region region, int stride, long signature) {
+    private Atlas createAtlas(UUID worldId, String dimension, TextureKey key, boolean hasCachedFacts) {
         if (createdThisFrame >= 1 || System.nanoTime() >= frameDeadline) return null;
-        Optional<PersistentRenderedAtlasStore.Snapshot> restored = loadSnapshot(
-                worldId, dimension, new TextureKey(region, stride, signature));
-        if (restored == null) return null;
+        Optional<PersistentRenderedAtlasStore.Snapshot> restored = loadSnapshot(worldId, dimension, key);
+        // Leave the creation slot available for an existing alternate resolution.
+        if (restored == null || (restored.isEmpty() && !hasCachedFacts)) return null;
         createdThisFrame++;
-        return new Atlas(stride, signature, restored.orElse(null));
+        return new Atlas(key.stride(), key.signature(), restored.orElse(null));
     }
 
     private Optional<PersistentRenderedAtlasStore.Snapshot> loadSnapshot(
