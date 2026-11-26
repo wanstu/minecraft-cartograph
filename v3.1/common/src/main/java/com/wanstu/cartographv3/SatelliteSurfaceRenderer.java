@@ -15,6 +15,8 @@ import net.minecraft.world.level.material.MapColor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,9 +27,9 @@ final class SatelliteSurfaceRenderer {
     private static final String LAVA_STILL = "minecraft:block/lava_still";
 
     private record Layer(int rgb, int tintIndex) {}
-    private record Appearance(Layer[] layers) {}
+    private record Appearance(Layer[] layers, int untintedRgb) {}
 
-    private static final Map<Integer, Appearance[]> STATE_CACHE = new HashMap<>();
+    private static final Int2ObjectOpenHashMap<Appearance[]> STATE_CACHE = new Int2ObjectOpenHashMap<>();
     private static final Map<String, Integer> SPRITE_CACHE = new HashMap<>();
     private static final long RENDER_PIPELINE_VERSION = 6L;
     private static volatile long renderSignature;
@@ -159,6 +161,7 @@ final class SatelliteSurfaceRenderer {
         }
 
         Appearance appearance = appearanceFor(minecraft, stateId, state, pos);
+        if (appearance.untintedRgb >= 0) return appearance.untintedRgb;
         if (appearance.layers.length == 0) {
             return fallbackMapColor(state, pos, waterDepth, worldX, worldZ);
         }
@@ -196,8 +199,11 @@ final class SatelliteSurfaceRenderer {
 
     private static Appearance appearanceFor(
             Minecraft minecraft, int stateId, BlockState state, BlockPos pos) {
-        Appearance[] variants = STATE_CACHE.computeIfAbsent(
-                stateId, ignored -> new Appearance[VARIANTS]);
+        Appearance[] variants = STATE_CACHE.get(stateId);
+        if (variants == null) {
+            variants = new Appearance[VARIANTS];
+            STATE_CACHE.put(stateId, variants);
+        }
         int variant = (int) (state.getSeed(pos) & (VARIANTS - 1));
         Appearance cached = variants[variant];
         if (cached != null) return cached;
@@ -214,9 +220,24 @@ final class SatelliteSurfaceRenderer {
             if (color != 0) layers.add(new Layer(color, -1));
         }
 
-        Appearance next = new Appearance(layers.toArray(Layer[]::new));
+        Appearance next = new Appearance(layers.toArray(Layer[]::new), untintedColor(layers));
         variants[variant] = next;
         return next;
+    }
+
+    private static int untintedColor(List<Layer> layers) {
+        if (layers.isEmpty()) return -1;
+        long red = 0;
+        long green = 0;
+        long blue = 0;
+        for (Layer layer : layers) {
+            if (layer.tintIndex >= 0) return -1;
+            red += layer.rgb >>> 16 & 255;
+            green += layer.rgb >>> 8 & 255;
+            blue += layer.rgb & 255;
+        }
+        int count = layers.size();
+        return ((int) (red / count) << 16) | ((int) (green / count) << 8) | (int) (blue / count);
     }
 
     private static int spriteAverage(String sprite) {

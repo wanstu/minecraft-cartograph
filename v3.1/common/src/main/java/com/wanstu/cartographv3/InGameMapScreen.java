@@ -79,6 +79,7 @@ final class InGameMapScreen extends AtlasScreenBase {
     private boolean dragging;
     private int panelScroll;
     private int ticks;
+    private boolean atlasUpdatePending = true;
     private int viewportDelay;
     private int hoveredX;
     private int hoveredZ;
@@ -134,6 +135,7 @@ final class InGameMapScreen extends AtlasScreenBase {
         mouseXFactor = frameWidth / (width * pixelsPerUnit);
         mouseYFactor = frameHeight / (height * pixelsPerUnit);
         camera.resize(layoutWidth, layoutHeight, HEADER, pixelsPerUnit);
+        atlasUpdatePending = true;
     }
 
     void displayScale(String key, int percent) {
@@ -155,7 +157,7 @@ final class InGameMapScreen extends AtlasScreenBase {
         ticks++;
         if (toastTicks > 0) toastTicks--;
         if (!dragging && viewportDelay > 0 && --viewportDelay == 0) submitViewport();
-        tiles.update(camera);
+        atlasUpdatePending = true;
         if (ticks % 5 == 0) refreshMarkers();
         if (hoverPending && !dragging && !dialogs.open()) {
             hoverPending = false;
@@ -182,6 +184,11 @@ final class InGameMapScreen extends AtlasScreenBase {
 
     @Override
     void drawFrame(MapGraphics graphics, float partialTick) {
+        // Catch-up ticks share one atlas budget before the next displayed frame.
+        if (atlasUpdatePending) {
+            atlasUpdatePending = false;
+            tiles.update(camera);
+        }
         graphics.push();
         try {
             graphics.scale((float) guiUnitsPerLayoutUnit);
