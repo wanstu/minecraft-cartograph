@@ -5,18 +5,11 @@ import net.minecraft.client.Minecraft;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.file.*;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
@@ -35,12 +28,6 @@ final class PersistentTileStore {
     private static final int VERSION = 1;
     private static final int FILE_BYTES = 4 * Integer.BYTES + SurfaceTile.PIXELS
             * (2 * Integer.BYTES + 2 * Short.BYTES + Byte.BYTES);
-    private static final int REGION_EDGE = CartographBackendApi.REGION_CHUNKS;
-    private static final int MAX_INDEXED_DIRECTORIES = 4;
-    private static final org.slf4j.Logger LOG =
-            org.slf4j.LoggerFactory.getLogger("cartograph.v31.cache");
-    private static final LinkedHashMap<Path, RegionIndex> INDEXES =
-            new LinkedHashMap<>(8, .75f, true);
 
     private static final ExecutorService WRITER = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "cartograph-v31-fact-cache-writer");
@@ -56,10 +43,7 @@ final class PersistentTileStore {
     private PersistentTileStore() {}
 
     static Optional<SurfaceTile> load(UUID worldId, ChunkKey key) {
-        Path directory = directory(worldId, key.dimension());
-        RegionIndex index = existingIndex(directory);
-        if (index != null && !index.mayContain(key)) return Optional.empty();
-        return loadRaw(file(directory, key), key);
+        return loadRaw(file(directory(worldId, key.dimension()), key), key);
     }
 
     static void loadAsync(
@@ -101,7 +85,6 @@ final class PersistentTileStore {
                     key, states, biomes, surface, relief, water));
         } catch (IOException | RuntimeException corrupt) {
             try { Files.deleteIfExists(file); } catch (IOException ignored) {}
-            refreshIndex(file, key);
             return Optional.empty();
         }
     }
@@ -115,52 +98,73 @@ final class PersistentTileStore {
             BooleanSupplier current,
             BiConsumer<UUID, SurfaceTile> consumer) {
         if (worldId == null || dimension == null || dimension.isBlank()
-                || scheduled == null || consumer == null) return;
+                || scheduled == null || consumer == null
+                || minChunkX > maxChunkX || minChunkZ > maxChunkZ) return;
 
         Path directory = directory(worldId, dimension);
-        READER.execute(() -> {
-            if (!current.getAsBoolean()) return;
-            RegionIndex index = indexFor(directory);
-            if (!index.prepare(directory, dimension)) return;
-            if (!current.getAsBoolean()) return;
-            List<ChunkKey> candidates = index.inBounds(minChunkX, maxChunkX, minChunkZ, maxChunkZ);
-            candidates.removeIf(key -> !scheduled.add(key));
+        // File names already identify their chunk. Probe the viewport in widening
+        // rings so an old world does not need a complete directory index to open.
+        long centerX = ((long) minChunkX + maxChunkX) / 2;
+        long centerZ = ((long) minChunkZ + maxChunkZ) / 2;
+        long maxDistance = Math.max(Math.max(centerX - minChunkX, maxChunkX - centerX),
+                Math.max(centerZ - minChunkZ, maxChunkZ - centerZ));
 
-            long centerX = ((long) minChunkX + (long) maxChunkX) / 2L;
-            long centerZ = ((long) minChunkZ + (long) maxChunkZ) / 2L;
-            candidates.sort(Comparator.comparingLong(key -> {
-                long dx = Math.abs((long) key.x() - centerX);
-                long dz = Math.abs((long) key.z() - centerZ);
-                return Math.max(dx, dz);
-            }));
+        class Restore implements Runnable {
+            private long distance;
 
-            for (ChunkKey key : candidates) {
-                if (!current.getAsBoolean()) return;
-                Path file = file(directory, key);
-                Optional<SurfaceTile> tile = loadRaw(file, key);
-                if (tile.isPresent()) {
-                    consumer.accept(worldId, tile.get());
-                } else {
-                    index.refresh(key, file);
-                    scheduled.remove(key);
+            @Override
+            public void run() {
+                if (!current.getAsBoolean() || (distance == 0 && !Files.isDirectory(directory))) return;
+                long west = centerX - distance;
+                long east = centerX + distance;
+                long north = centerZ - distance;
+                long south = centerZ + distance;
+                long firstX = Math.max(west, minChunkX);
+                long lastX = Math.min(east, maxChunkX);
+                long firstZ = Math.max(north + 1, minChunkZ);
+                long lastZ = Math.min(south - 1, maxChunkZ);
+
+                if (north >= minChunkZ && !row(firstX, lastX, (int) north)) return;
+                if (south > north && south <= maxChunkZ && !row(firstX, lastX, (int) south)) return;
+                if (west >= minChunkX && !column((int) west, firstZ, lastZ)) return;
+                if (east <= maxChunkX && !column((int) east, firstZ, lastZ)) return;
+
+                // Give any direct tile reads a turn between rings.
+                if (distance < maxDistance && current.getAsBoolean()) {
+                    distance++;
+                    READER.execute(this);
                 }
             }
-        });
-    }
 
-    private static ChunkKey keyFromFile(String dimension, String filename) {
-        if (filename == null || !filename.endsWith(".ct31")) return null;
-        String stem = filename.substring(0, filename.length() - 5);
-        int split = stem.indexOf('_');
-        if (split <= 0 || split >= stem.length() - 1) return null;
-        try {
-            return new ChunkKey(
-                    dimension,
-                    Integer.parseInt(stem.substring(0, split)),
-                    Integer.parseInt(stem.substring(split + 1)));
-        } catch (NumberFormatException invalid) {
-            return null;
+            private boolean row(long first, long last, int z) {
+                for (long x = first; x <= last; x++) {
+                    if (!restore((int) x, z)) return false;
+                }
+                return true;
+            }
+
+            private boolean column(int x, long first, long last) {
+                for (long z = first; z <= last; z++) {
+                    if (!restore(x, (int) z)) return false;
+                }
+                return true;
+            }
+
+            private boolean restore(int x, int z) {
+                if (!current.getAsBoolean()) return false;
+                ChunkKey key = new ChunkKey(dimension, x, z);
+                if (!scheduled.add(key)) return true;
+                Optional<SurfaceTile> tile = loadRaw(file(directory, key), key);
+                if (tile.isPresent() && current.getAsBoolean()) {
+                    consumer.accept(worldId, tile.get());
+                } else {
+                    scheduled.remove(key);
+                }
+                return true;
+            }
         }
+
+        READER.execute(new Restore());
     }
 
     static long backgroundCheckpoint(UUID worldId, String dimensionId) {
@@ -206,7 +210,6 @@ final class PersistentTileStore {
         WRITER.execute(() -> {
             try {
                 Files.deleteIfExists(target);
-                refreshIndex(target, key);
             } catch (IOException ignored) {}
         });
     }
@@ -221,10 +224,7 @@ final class PersistentTileStore {
             try {
                 byte[] encoded = encode(tile);
                 // Server packets can arrive before the client has applied the restored tile.
-                if (matchesExisting(target, encoded)) {
-                    refreshIndex(target, tile.key());
-                    return;
-                }
+                if (matchesExisting(target, encoded)) return;
                 Files.createDirectories(target.getParent());
                 Files.write(tmp, encoded, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
                 try {
@@ -237,7 +237,6 @@ final class PersistentTileStore {
                             tmp, target,
                             StandardCopyOption.REPLACE_EXISTING);
                 }
-                refreshIndex(target, tile.key());
             } catch (IOException failure) {
                 try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
             }
@@ -268,121 +267,6 @@ final class PersistentTileStore {
                     && Arrays.equals(existing, encoded);
         } catch (IOException unavailable) {
             return false;
-        }
-    }
-
-    private static RegionIndex indexFor(Path directory) {
-        synchronized (INDEXES) {
-            RegionIndex index = INDEXES.computeIfAbsent(directory, ignored -> new RegionIndex());
-            if (INDEXES.size() > MAX_INDEXED_DIRECTORIES) INDEXES.pollFirstEntry();
-            return index;
-        }
-    }
-
-    private static RegionIndex existingIndex(Path directory) {
-        synchronized (INDEXES) {
-            return INDEXES.get(directory);
-        }
-    }
-
-    private static void refreshIndex(Path file, ChunkKey key) {
-        RegionIndex index = existingIndex(file.getParent());
-        if (index != null) index.refresh(key, file);
-    }
-
-    private record Region(int x, int z) {
-        static Region containing(ChunkKey key) {
-            return new Region(Math.floorDiv(key.x(), REGION_EDGE), Math.floorDiv(key.z(), REGION_EDGE));
-        }
-    }
-
-    private static final class RegionIndex {
-        private final Map<ChunkKey, Boolean> pending = new HashMap<>();
-        private volatile Map<Region, Set<ChunkKey>> regions;
-
-        // The reader builds a snapshot while successful saves and deletions record their changes.
-        boolean prepare(Path directory, String dimension) {
-            if (regions != null) return true;
-            long started = System.nanoTime();
-            Map<Region, Set<ChunkKey>> scanned = new ConcurrentHashMap<>();
-            try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*.ct31")) {
-                for (Path candidate : files) {
-                    ChunkKey key = keyFromFile(dimension, candidate.getFileName().toString());
-                    if (key != null) setPresent(scanned, key, true);
-                }
-            } catch (NoSuchFileException missing) {
-                // A new world gets its first entries from the writer.
-            } catch (IOException | DirectoryIteratorException unavailable) {
-                return false;
-            }
-            synchronized (this) {
-                pending.forEach((key, present) -> setPresent(scanned, key, present));
-                pending.clear();
-                regions = scanned;
-            }
-            int chunks = scanned.values().stream().mapToInt(Set::size).sum();
-            LOG.info("V31_DISK_INDEX dimension={} regions={} chunks={} elapsed_ms={}",
-                    dimension, scanned.size(), chunks, (System.nanoTime() - started) / 1_000_000L);
-            return true;
-        }
-
-        synchronized void refresh(ChunkKey key, Path file) {
-            boolean present = Files.isRegularFile(file);
-            if (regions == null) pending.put(key, present);
-            else setPresent(regions, key, present);
-        }
-
-        boolean mayContain(ChunkKey key) {
-            var current = regions;
-            if (current == null) return true;
-            Set<ChunkKey> bucket = current.get(Region.containing(key));
-            return bucket != null && bucket.contains(key);
-        }
-
-        List<ChunkKey> inBounds(int minX, int maxX, int minZ, int maxZ) {
-            List<ChunkKey> matches = new ArrayList<>();
-            int west = Math.floorDiv(minX, REGION_EDGE);
-            int east = Math.floorDiv(maxX, REGION_EDGE);
-            int north = Math.floorDiv(minZ, REGION_EDGE);
-            int south = Math.floorDiv(maxZ, REGION_EDGE);
-            long area = (east - west + 1L) * (south - north + 1L);
-            var current = regions;
-            if (area <= current.size()) {
-                for (int z = north; z <= south; z++) {
-                    for (int x = west; x <= east; x++) {
-                        append(current.get(new Region(x, z)), matches, minX, maxX, minZ, maxZ);
-                    }
-                }
-            } else {
-                current.forEach((region, keys) -> {
-                    if (region.x >= west && region.x <= east && region.z >= north && region.z <= south) {
-                        append(keys, matches, minX, maxX, minZ, maxZ);
-                    }
-                });
-            }
-            return matches;
-        }
-
-        private static void append(Set<ChunkKey> keys, List<ChunkKey> matches,
-                                   int minX, int maxX, int minZ, int maxZ) {
-            if (keys == null) return;
-            for (ChunkKey key : keys) {
-                if (key.x() >= minX && key.x() <= maxX && key.z() >= minZ && key.z() <= maxZ) {
-                    matches.add(key);
-                }
-            }
-        }
-
-        private static void setPresent(Map<Region, Set<ChunkKey>> map, ChunkKey key, boolean present) {
-            Region region = Region.containing(key);
-            if (present) {
-                map.computeIfAbsent(region, ignored -> ConcurrentHashMap.newKeySet()).add(key);
-            } else {
-                map.computeIfPresent(region, (ignored, keys) -> {
-                    keys.remove(key);
-                    return keys.isEmpty() ? null : keys;
-                });
-            }
         }
     }
 
