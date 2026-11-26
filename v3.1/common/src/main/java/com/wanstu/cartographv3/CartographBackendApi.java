@@ -29,6 +29,8 @@ interface CartographBackendApi extends AutoCloseable {
 
     record CachedRegion(int x, int z) {}
 
+    record MarkerRevision(String dimension, long markers, long structureAppearance) {}
+
     void open();
 
     void tick();
@@ -67,6 +69,8 @@ interface CartographBackendApi extends AutoCloseable {
     int surfaceYAt(int blockX, int blockZ);
 
     String biomeLabelAt(int blockX, int blockZ);
+
+    MarkerRevision markerRevision();
 
     List<MapMarkerStore.Marker> markers();
 

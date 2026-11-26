@@ -198,6 +198,7 @@ final class MapMarkerStore {
     });
 
     private static UUID worldId;
+    private static long revision;
     private static final LinkedHashMap<UUID, Marker> MARKERS = new LinkedHashMap<>();
     private static final Map<String, UUID> AUTO_INDEX = new HashMap<>();
 
@@ -206,6 +207,7 @@ final class MapMarkerStore {
     static synchronized void ensureWorld(UUID nextWorldId) {
         if (Objects.equals(worldId, nextWorldId)) return;
         worldId = nextWorldId;
+        revision++;
         MARKERS.clear();
         AUTO_INDEX.clear();
         if (worldId == null) return;
@@ -333,6 +335,10 @@ final class MapMarkerStore {
         }
 
         if (changed) saveAsync();
+    }
+
+    static synchronized long revision() {
+        return revision;
     }
 
     static synchronized List<Marker> visible(String dimension) {
@@ -511,6 +517,7 @@ final class MapMarkerStore {
     }
 
     private static void saveAsync() {
+        revision++;
         if (worldId == null) return;
         UUID snapshotWorld = worldId;
         List<Marker> snapshot = MARKERS.values().stream().map(Marker::copy).toList();

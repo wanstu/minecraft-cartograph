@@ -189,6 +189,11 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     }
 
     @Override
+    public MarkerRevision markerRevision() {
+        return new MarkerRevision(dimension(), MapMarkerStore.revision(), CartographSettings.structurePresetRevision());
+    }
+
+    @Override
     public List<MapMarkerStore.Marker> markers() {
         return MapMarkerStore.visible(dimension());
     }

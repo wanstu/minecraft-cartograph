@@ -32,8 +32,15 @@ final class InGameMapScreen extends AtlasScreenBase {
 
     record Point(int x, int y, int z, String biome) {}
     private record Menu(int left, int top, Point point, MapMarkerStore.Marker marker) {}
-    private record MapLabel(MapMarkerStore.Marker marker, String text, int width) {}
-    private record Pin(MapLabel label, Box glyph, Box name, boolean nameVisible) {}
+    private record MapLabel(MapMarkerStore.Marker marker, String text, int width,
+                            String layerId, MapMarkerStore.StructurePreset preset) {
+        int priority() {
+            if (layerId == null) return 2;
+            return preset == MapMarkerStore.StructurePreset.VILLAGE ? 1 : 0;
+        }
+    }
+    private record Pin(MapLabel label, Box glyph, Box name) {}
+    private record MarkerLayout(CartographBackendApi.Viewport viewport, double zoom, long preferencesRevision) {}
     private record Layer(String id, String name, MapMarkerStore.Icon icon,
                          MapMarkerStore.StructurePreset preset, int count) {}
     private record Row(String label, String icon, boolean checked, int count, boolean child, Runnable run) {}
@@ -48,6 +55,10 @@ final class InGameMapScreen extends AtlasScreenBase {
     private final InGameMapCamera.Position savedPosition;
     private final List<Pin> pins = new ArrayList<>();
     private List<MapLabel> markerLabels = List.of();
+    private List<MapLabel> visibleMarkerLabels = List.of();
+    private CartographBackendApi.MarkerRevision markerRevision;
+    private float markerFontScale;
+    private MarkerLayout markerLayout;
     private List<MapMarkerStore.Marker> customMarkers = List.of();
     private List<Layer> structureLayers = List.of();
     private InGameMapUi ui;
@@ -101,8 +112,9 @@ final class InGameMapScreen extends AtlasScreenBase {
             } else {
                 centerPlayer();
             }
-            refreshMarkers();
         }
+        markerRevision = null;
+        refreshMarkers();
         dialogs.resize();
         viewportDelay = 1;
     }
@@ -364,30 +376,36 @@ final class InGameMapScreen extends AtlasScreenBase {
     }
 
     void refreshMarkers() {
-        List<MapMarkerStore.Marker> source = backend.markers();
-        markerLabels = source.stream().sorted(Comparator
-                        .comparingInt(InGameMapScreen::priority).reversed().thenComparing(marker -> marker.id))
-                .map(marker -> {
-                    String name = font.plainSubstrByWidth(marker.name, (int) (140 / fontScale));
-                    int width = (int) Math.ceil(font.width(name) * SMALL_TEXT * fontScale);
-                    return new MapLabel(marker, name, width);
-                }).toList();
-        customMarkers = source.stream().filter(MapMarkerStore.Marker::appearsAsCustom).toList();
+        var revision = backend.markerRevision();
+        if (revision.equals(markerRevision) && fontScale == markerFontScale) return;
+
+        var source = backend.markers();
+        var labels = new ArrayList<MapLabel>(source.size());
+        var custom = new ArrayList<MapMarkerStore.Marker>();
         var groups = new LinkedHashMap<String, Layer>();
         for (MapMarkerStore.Marker marker : source) {
-            if (marker.appearsAsCustom()) continue;
+            String name = font.plainSubstrByWidth(marker.name, (int) (140 / fontScale));
+            int width = (int) Math.ceil(font.width(name) * SMALL_TEXT * fontScale);
+            if (marker.appearsAsCustom()) {
+                custom.add(marker);
+                labels.add(new MapLabel(marker, name, width, null, null));
+                continue;
+            }
+
             var preset = MapMarkerStore.structurePreset(marker.structureId);
             String id = layerId(marker, preset);
+            labels.add(new MapLabel(marker, name, width, id, preset));
             Layer old = groups.get(id);
-            String name = preset == null ? marker.name : preset.label;
-            groups.put(id, new Layer(id, name, marker.icon, preset, old == null ? 1 : old.count + 1));
+            String layerName = preset == null ? marker.name : preset.label;
+            groups.put(id, new Layer(id, layerName, marker.icon, preset, old == null ? 1 : old.count + 1));
         }
+        labels.sort(Comparator.comparingInt(MapLabel::priority).reversed().thenComparing(label -> label.marker.id));
+        markerLabels = labels;
+        customMarkers = custom;
         structureLayers = new ArrayList<>(groups.values());
-    }
-
-    private static int priority(MapMarkerStore.Marker marker) {
-        if (marker.appearsAsCustom()) return 2;
-        return MapMarkerStore.structurePreset(marker.structureId) == MapMarkerStore.StructurePreset.VILLAGE ? 1 : 0;
+        markerRevision = revision;
+        markerFontScale = fontScale;
+        markerLayout = null;
     }
 
     private static String layerId(MapMarkerStore.Marker marker, MapMarkerStore.StructurePreset preset) {
@@ -395,7 +413,16 @@ final class InGameMapScreen extends AtlasScreenBase {
         return marker.structureId == null ? marker.name : marker.structureId;
     }
 
-    private void drawMarkers(InGameMapUi draw) {
+    private void layoutMarkers(InGameMapUi draw) {
+        var next = new MarkerLayout(camera.viewport(false), camera.zoom(), preferences.revision());
+        if (next.equals(markerLayout)) return;
+        if (markerLayout == null || markerLayout.preferencesRevision != next.preferencesRevision) {
+            boolean custom = preferences.enabled(Flag.CUSTOM);
+            boolean structures = preferences.enabled(Flag.STRUCTURES);
+            visibleMarkerLabels = markerLabels.stream().filter(label -> label.layerId == null
+                    ? custom : structures && preferences.layer(label.layerId, label.preset)).toList();
+        }
+        markerLayout = next;
         pins.clear();
         List<Box> occupied = new ArrayList<>();
         boolean showNames = preferences.enabled(Flag.NAMES)
@@ -404,28 +431,39 @@ final class InGameMapScreen extends AtlasScreenBase {
         int labelHeight = Math.max(12, draw.textHeight(SMALL_TEXT) + 4);
         double scaleFactor = Math.pow(Math.clamp(camera.zoom(), .15, 4),
                 .2 * preferences.number("markerScale", 35, 0, 100) / 100.0);
-        for (MapLabel label : markerLabels) {
+        int customSize = Math.clamp(px(preferences.number("markerSize", DEFAULT_MARKER_SIZE, 7, 25) * scaleFactor), 8, 24);
+        int structureSize = Math.clamp(px(13.5 * scaleFactor), 8, 24);
+        for (MapLabel label : visibleMarkerLabels) {
             var marker = label.marker;
-            if (marker.appearsAsCustom()) {
-                if (!preferences.enabled(Flag.CUSTOM)) continue;
-            } else {
-                var preset = MapMarkerStore.structurePreset(marker.structureId);
-                if (!preferences.enabled(Flag.STRUCTURES) || !preferences.layer(layerId(marker, preset), preset)) continue;
-            }
             int x = px(camera.screenX(marker.x));
             int y = px(camera.screenY(marker.z));
             if (x < -40 || x > layoutWidth + 40 || y < HEADER - 40 || y > layoutHeight + 40) continue;
-            double base = marker.appearsAsCustom() ? preferences.number("markerSize", DEFAULT_MARKER_SIZE, 7, 25) : 13.5;
-            int size = Math.clamp(px(base * scaleFactor), 8, 24);
+            int size = label.layerId == null ? customSize : structureSize;
             Box icon = new Box(x - size / 2, y - size / 2, size, size);
-            Box name = new Box(x - label.width / 2 - 4, icon.bottom() + 2, label.width + 8, labelHeight);
-            Box padded = new Box(name.x() - 2, name.y() - 2, name.w() + 4, name.h() + 4);
-            boolean nameVisible = showNames && name.bottom() > HEADER && name.y() < layoutHeight
-                    && name.right() > 0 && name.x() < layoutWidth
-                    && (!avoid || occupied.stream().noneMatch(padded::overlaps));
-            if (nameVisible && avoid) occupied.add(padded);
-            pins.add(new Pin(label, icon, name, nameVisible));
+            Box name = null;
+            if (showNames) {
+                Box candidate = new Box(x - label.width / 2 - 4, icon.bottom() + 2, label.width + 8, labelHeight);
+                if (candidate.bottom() > HEADER && candidate.y() < layoutHeight
+                        && candidate.right() > 0 && candidate.x() < layoutWidth
+                        && (!avoid || reserveName(candidate, occupied))) {
+                    name = candidate;
+                }
+            }
+            pins.add(new Pin(label, icon, name));
         }
+    }
+
+    private static boolean reserveName(Box name, List<Box> occupied) {
+        Box padded = new Box(name.x() - 2, name.y() - 2, name.w() + 4, name.h() + 4);
+        for (Box other : occupied) {
+            if (padded.overlaps(other)) return false;
+        }
+        occupied.add(padded);
+        return true;
+    }
+
+    private void drawMarkers(InGameMapUi draw) {
+        layoutMarkers(draw);
         for (int i = pins.size() - 1; i >= 0; i--) {
             Pin pin = pins.get(i);
             Box box = pin.glyph;
@@ -433,7 +471,7 @@ final class InGameMapScreen extends AtlasScreenBase {
             draw.glyph(pin.label.marker.icon, box.x(), box.y(), box.w(), 0xff000000 | pin.label.marker.accent());
         }
         for (Pin pin : pins) {
-            if (!pin.nameVisible) continue;
+            if (pin.name == null) continue;
             draw.fill(pin.name, MARKER_LABEL);
             draw.border(pin.name, LINE);
             draw.center(pin.label.text, pin.name, TEXT, SMALL_TEXT);
@@ -442,7 +480,7 @@ final class InGameMapScreen extends AtlasScreenBase {
 
     private MapMarkerStore.Marker hitMarker(double x, double y) {
         for (Pin pin : pins) {
-            if (pin.glyph.at(x, y) || (pin.nameVisible && pin.name.at(x, y))) return pin.label.marker;
+            if (pin.glyph.at(x, y) || (pin.name != null && pin.name.at(x, y))) return pin.label.marker;
         }
         return null;
     }

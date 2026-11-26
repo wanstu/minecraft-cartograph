@@ -37,6 +37,7 @@ final class InGameMapPreferences {
     private final Path path = Minecraft.getInstance().gameDirectory.toPath()
             .resolve("config").resolve("cartograph-v31-native-ui.properties");
     private final Properties values = new Properties();
+    private long revision;
 
     InGameMapPreferences() {
         if (!Files.isRegularFile(path)) return;
@@ -46,6 +47,8 @@ final class InGameMapPreferences {
             LOG.warn("Cannot read native map settings", failure);
         }
     }
+
+    long revision() { return revision; }
 
     boolean enabled(Flag flag) {
         return Boolean.parseBoolean(values.getProperty(flag.key, Boolean.toString(flag.initial)));
@@ -69,8 +72,10 @@ final class InGameMapPreferences {
     }
 
     int number(String key, int fallback, int min, int max) {
+        String value = values.getProperty(key);
+        if (value == null) return fallback;
         try {
-            return Math.clamp(Integer.parseInt(values.getProperty(key)), min, max);
+            return Math.clamp(Integer.parseInt(value), min, max);
         } catch (NumberFormatException ignored) {
             return fallback;
         }
@@ -94,6 +99,7 @@ final class InGameMapPreferences {
 
     private void change(Consumer<Properties> update) {
         update.accept(values);
+        revision++;
         try {
             Files.createDirectories(path.getParent());
             Path pending = Files.createTempFile(path.getParent(), "cartograph-native-", ".tmp");
