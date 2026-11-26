@@ -41,6 +41,7 @@ final class PersistentRenderedAtlasStore {
     private static final ThreadLocal<ByteBuffer> READ_BUFFER =
             ThreadLocal.withInitial(() -> ByteBuffer.allocate(8 * 1024));
 
+    /** Each load owns independent arrays that can be adopted and updated by the receiving atlas. */
     record Snapshot(long[] fingerprints, int[] pixels) {}
     private record IndexKey(UUID worldId, String dimension, long signature) {}
 

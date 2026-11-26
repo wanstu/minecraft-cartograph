@@ -38,7 +38,7 @@ final class InGameMapTiles implements AutoCloseable {
     private record DrawTile(Region region, Atlas atlas) {}
 
     private static final class Atlas {
-        final long[] fingerprints = new long[REGION_TILES];
+        final long[] fingerprints;
         final int[] pixels;
         final MapGraphics.Texture texture;
         final int size;
@@ -53,22 +53,24 @@ final class InGameMapTiles implements AutoCloseable {
             this.signature = signature;
             size = REGION_SIZE / stride;
             texture = new MapGraphics.Texture(size);
-            pixels = new int[size * size];
-
-            if (restored != null) {
-                System.arraycopy(restored.fingerprints(), 0, fingerprints, 0, REGION_TILES);
-                System.arraycopy(restored.pixels(), 0, pixels, 0, pixels.length);
-                NativeImage image = texture.getPixels();
-                for (int y = 0; y < size; y++) {
-                    for (int x = 0; x < size; x++) {
-                        int pixel = pixels[y * size + x];
-                        MapGraphics.writeAbgr(image, x, y, pixel);
-                        hasPixels |= pixel != 0;
-                    }
-                }
-                texture.upload();
-                complete = true;
+            if (restored == null) {
+                fingerprints = new long[REGION_TILES];
+                pixels = new int[size * size];
+                return;
             }
+
+            fingerprints = restored.fingerprints();
+            pixels = restored.pixels();
+            NativeImage image = texture.getPixels();
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                    int pixel = pixels[y * size + x];
+                    MapGraphics.writeAbgr(image, x, y, pixel);
+                    hasPixels |= pixel != 0;
+                }
+            }
+            texture.upload();
+            complete = true;
         }
 
         long texels() { return (long) size * size; }
