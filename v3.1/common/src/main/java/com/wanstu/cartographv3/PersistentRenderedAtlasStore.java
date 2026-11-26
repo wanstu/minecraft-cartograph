@@ -18,10 +18,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Persistent cache for fully rendered native-map atlases.
@@ -66,6 +68,11 @@ final class PersistentRenderedAtlasStore {
             long[] fingerprints,
             int[] pixels) {}
 
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(
+                PersistentRenderedAtlasStore::flushAtShutdown, "cartograph-v31-rendered-atlas-shutdown"));
+    }
+
     private PersistentRenderedAtlasStore() {}
 
     static Optional<Snapshot> load(
@@ -79,6 +86,11 @@ final class PersistentRenderedAtlasStore {
             int expectedTiles) {
         if (worldId == null || dimension == null || dimension.isBlank()) return Optional.empty();
         Path file = file(worldId, dimension, signature, regionX, regionZ, stride);
+        PendingWrite pending = PENDING.get(file);
+        if (pending != null && pending.size() == expectedSize
+                && pending.fingerprints().length == expectedTiles && pending.pixels().length == expectedSize * expectedSize) {
+            return Optional.of(new Snapshot(pending.fingerprints().clone(), pending.pixels().clone()));
+        }
         if (!Files.isRegularFile(file)) return Optional.empty();
 
         try (DataInputStream input = new DataInputStream(
@@ -160,10 +172,12 @@ final class PersistentRenderedAtlasStore {
         schedule(target);
     }
 
-    static void flush() {
+    private static void flushAtShutdown() {
         try {
             WRITER.submit(() -> {}).get(3, TimeUnit.SECONDS);
-        } catch (Exception ignored) {}
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | TimeoutException ignored) {}
     }
 
     private static void schedule(Path target) {
@@ -174,9 +188,15 @@ final class PersistentRenderedAtlasStore {
     private static void drain(Path target) {
         try {
             while (true) {
-                PendingWrite write = PENDING.remove(target);
+                PendingWrite write = PENDING.get(target);
                 if (write == null) break;
-                write(target, write);
+                boolean saved = write(target, write);
+                // Reopened views can read this snapshot until it is published.
+                // A newer save for the same target may have arrived during the write.
+                if (PENDING.remove(target, write) && !saved) {
+                    IndexKey key = write.indexKey();
+                    refreshIndex(key.worldId(), key.dimension(), key.signature(), write.regionX(), write.regionZ());
+                }
             }
         } finally {
             SCHEDULED.remove(target);
@@ -184,7 +204,7 @@ final class PersistentRenderedAtlasStore {
         }
     }
 
-    private static void write(Path target, PendingWrite write) {
+    private static boolean write(Path target, PendingWrite write) {
         Path tmp = target.resolveSibling(target.getFileName() + ".tmp-" + UUID.randomUUID());
         try {
             Files.createDirectories(target.getParent());
@@ -209,14 +229,10 @@ final class PersistentRenderedAtlasStore {
             } catch (AtomicMoveNotSupportedException unsupported) {
                 Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            return true;
         } catch (IOException failure) {
             try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
-            refreshIndex(
-                    write.indexKey().worldId(),
-                    write.indexKey().dimension(),
-                    write.indexKey().signature(),
-                    write.regionX(),
-                    write.regionZ());
+            return false;
         }
     }
 
@@ -241,16 +257,23 @@ final class PersistentRenderedAtlasStore {
         Set<String> current = REGION_INDEX.get(key);
         if (current == null) return;
         String region = regionName(regionX, regionZ);
-        boolean exists = false;
-        for (int stride = 1; stride <= InGameMapTiles.CHUNK; stride *= 2) {
-            if (Files.isRegularFile(file(
-                    worldId, dimension, signature, regionX, regionZ, stride))) {
-                exists = true;
-                break;
-            }
+        Path base = signatureDirectory(worldId, dimension, signature);
+        if (hasAtlas(base, region)) {
+            current.add(region);
+        } else {
+            current.remove(region);
+            // A save can update the queue and index while the files are checked.
+            if (hasAtlas(base, region)) current.add(region);
         }
-        if (exists) current.add(region);
-        else current.remove(region);
+    }
+
+    private static boolean hasAtlas(Path base, String region) {
+        String name = region + ".cta1";
+        for (int stride = 1; stride <= InGameMapTiles.CHUNK; stride *= 2) {
+            Path atlas = base.resolve("s" + stride).resolve(name);
+            if (PENDING.containsKey(atlas) || Files.isRegularFile(atlas)) return true;
+        }
+        return false;
     }
 
     private static String regionName(int regionX, int regionZ) {

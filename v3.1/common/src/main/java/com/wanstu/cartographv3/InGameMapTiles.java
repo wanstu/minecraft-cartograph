@@ -411,7 +411,6 @@ final class InGameMapTiles implements AutoCloseable {
 
     @Override
     public void close() {
-        PersistentRenderedAtlasStore.flush();
         for (Atlas atlas : atlases.values()) atlas.texture.close();
         atlases.clear();
         reads.values().forEach(future -> future.cancel(false));

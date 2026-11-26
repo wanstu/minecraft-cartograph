@@ -10,6 +10,10 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -23,6 +27,7 @@ public final class PerformanceSelfTest {
         viewStateRoundTrip();
         memoryBoundAndEviction();
         knownAtlasBounds();
+        atlasReleaseWhileWriterBusy();
         missingCacheLifecycleAndScale();
         selectiveSurfaceNbt();
         backgroundCompletionIsPerDimension();
@@ -254,6 +259,32 @@ public final class PerformanceSelfTest {
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
         checks++;
+    }
+
+    private static void atlasReleaseWhileWriterBusy() throws Exception {
+        var writerField = PersistentRenderedAtlasStore.class.getDeclaredField("WRITER");
+        writerField.setAccessible(true);
+        var writer = (ExecutorService) writerField.get(null);
+        var busy = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var write = writer.submit(() -> {
+            busy.countDown();
+            release.await();
+            return null;
+        });
+        var close = new FutureTask<>(() -> {
+            new InGameMapTiles(null).close();
+            return null;
+        });
+        try {
+            require(busy.await(5, TimeUnit.SECONDS), "atlas writer starts");
+            new Thread(close, "atlas release check").start();
+            close.get(2, TimeUnit.SECONDS);
+            require(!write.isDone(), "releasing view resources completes while the atlas writer is busy");
+        } finally {
+            release.countDown();
+            write.get(5, TimeUnit.SECONDS);
+        }
     }
 
     @SuppressWarnings("unchecked")
