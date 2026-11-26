@@ -22,7 +22,7 @@ abstract class AtlasScreenBase extends Screen {
         try {
             drawFrame(frame, delta);
         } finally {
-            frame.flushFills();
+            frame.flushPending();
         }
     }
 
@@ -32,7 +32,7 @@ abstract class AtlasScreenBase extends Screen {
     }
 
     final void drawWidgets(MapGraphics graphics, int x, int y, float delta) {
-        graphics.flushFills();
+        graphics.flushPending();
         super.render(graphics.nativeGraphics, x, y, delta);
     }
 

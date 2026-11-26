@@ -4,6 +4,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,11 +35,12 @@ final class TileRequestScheduler {
         final LinkedHashMap<ChunkKey, MapProtocol.RequestTile> pending =
                 new LinkedHashMap<>();
         final Set<ChunkKey> inFlight = new HashSet<>();
-        // A popped backfill key stays claimed until a tile or empty status is sent.
-        final Set<ChunkKey> backfillClaims = new HashSet<>();
+        // A popped backfill request stays claimed while its disk read is in flight.
+        final Map<ChunkKey, GeneratedChunkBackfill.Claim> backfillClaims = new HashMap<>();
 
         void retryBackfill(ServerPlayer player, ChunkKey key) {
-            if (backfillClaims.remove(key)) GeneratedChunkBackfill.requeue(player, key);
+            var claim = backfillClaims.remove(key);
+            if (claim != null) GeneratedChunkBackfill.requeue(player, claim);
         }
     }
 
@@ -211,11 +213,12 @@ final class TileRequestScheduler {
                     && playerStarts < MAX_STARTED_PER_PLAYER_PER_TICK
                     && queue.inFlight.size() < MAX_BACKGROUND_IN_FLIGHT_PER_PLAYER
                     && backgroundAttempts < MAX_QUEUE_SCAN_PER_PLAYER_PER_TICK) {
-                ChunkKey key = GeneratedChunkBackfill.poll(player);
-                if (key == null) break;
+                var claim = GeneratedChunkBackfill.poll(player);
+                if (claim == null) break;
                 backgroundAttempts++;
 
-                queue.backfillClaims.add(key);
+                ChunkKey key = claim.key();
+                queue.backfillClaims.put(key, claim);
                 if (queue.pending.containsKey(key) || !queue.inFlight.add(key)) continue;
 
                 Long knownFingerprint =
@@ -279,6 +282,11 @@ final class TileRequestScheduler {
 
         SurfaceTile tile = combined.getKey().orElse(null);
         var structures = combined.getValue();
+        if (tile == null && GeneratedChunkBackfill.retryEmptySave(player, queue.backfillClaims.get(key))) {
+            queue.backfillClaims.remove(key);
+            if (watchLive) sendRetry(player, request);
+            return;
+        }
         if (tile != null && watchLive && VIEWING_PLAYERS.contains(player.getUUID()))
             LiveSurfaceUpdates.watch(player, key);
         MapProtocol.Tile reply;

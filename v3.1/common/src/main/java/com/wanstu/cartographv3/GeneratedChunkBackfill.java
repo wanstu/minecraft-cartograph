@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -27,14 +29,20 @@ import java.util.regex.Pattern;
  *
  * Region headers are scanned asynchronously to discover every generated/saved
  * chunk in the current dimension. TileRequestScheduler consumes those keys
- * gradually after high-priority viewport work. Newly saved chunks are queued
- * immediately, so map facts continue to grow while no frontend is visible.
+ * gradually after high-priority viewport work. Recent saves around the player
+ * share that existing background budget with the archive.
  */
 final class GeneratedChunkBackfill {
     private static final org.slf4j.Logger LOG =
             org.slf4j.LoggerFactory.getLogger("cartograph.v3.backfill");
     private static final Pattern REGION_FILE =
             Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
+
+    private static final int RECENT_SAVE_RADIUS = 2;
+    private static final int RECENT_BURST = 3;
+    private static final int MAX_RECENT_PENDING = 128;
+    private static final int MAX_RECENT_ATTEMPTS = 3;
+    private static final long SAVE_GRACE_NANOS = TimeUnit.SECONDS.toNanos(1);
 
     private static final ExecutorService SCANNER =
             Executors.newFixedThreadPool(2, task -> {
@@ -43,12 +51,76 @@ final class GeneratedChunkBackfill {
                 return thread;
             });
 
+    record Claim(ChunkKey key, int recentAttempt) {}
+
+    static final class ReadyChunks {
+        private record RecentSave(int attempt, long readyAt) {}
+
+        private final Set<ChunkKey> queued = ConcurrentHashMap.newKeySet();
+        private final ConcurrentLinkedQueue<ChunkKey> archive = new ConcurrentLinkedQueue<>();
+        private final LinkedHashMap<ChunkKey, RecentSave> recent = new LinkedHashMap<>();
+        private int recentStreak;
+
+        void addArchived(ChunkKey key) {
+            if (queued.add(key)) archive.add(key);
+        }
+
+        synchronized void addSaved(ChunkKey key, long now) {
+            if (queued.add(key)) enqueueSave(key, 1, now);
+        }
+
+        synchronized Claim poll(long now) {
+            var next = recent.firstEntry();
+            boolean eligible = next != null && now - next.getValue().readyAt >= 0;
+            if (eligible && recentStreak < RECENT_BURST) return takeRecent();
+            ChunkKey key = archive.poll();
+            if (key != null) {
+                recentStreak = 0;
+                return new Claim(key, 0);
+            }
+            return eligible ? takeRecent() : null;
+        }
+
+        private Claim takeRecent() {
+            var save = recent.pollFirstEntry();
+            recentStreak = Math.min(RECENT_BURST, recentStreak + 1);
+            return new Claim(save.getKey(), save.getValue().attempt);
+        }
+
+        private void enqueueSave(ChunkKey key, int attempt, long now) {
+            if (attempt <= MAX_RECENT_ATTEMPTS && recent.size() < MAX_RECENT_PENDING) {
+                // The chunk-save callback can fire before the region write is visible.
+                recent.put(key, new RecentSave(attempt, now + SAVE_GRACE_NANOS));
+            } else {
+                archive.add(key);
+            }
+        }
+
+        synchronized void requeue(Claim claim, long now) {
+            if (!queued.contains(claim.key)) return;
+            if (claim.recentAttempt == 0) archive.add(claim.key);
+            else enqueueSave(claim.key, claim.recentAttempt + 1, now);
+        }
+
+        synchronized boolean retryEmpty(Claim claim, long now) {
+            if (claim.recentAttempt == 0 || !queued.contains(claim.key)) return false;
+            enqueueSave(claim.key, claim.recentAttempt + 1, now);
+            return true;
+        }
+
+        synchronized boolean hasPendingSave(ChunkKey key) {
+            return recent.containsKey(key);
+        }
+
+        synchronized void complete(ChunkKey key) {
+            recent.remove(key);
+            queued.remove(key);
+        }
+    }
+
     private static final class State {
         volatile boolean active;
-        final Map<String, ConcurrentLinkedQueue<ChunkKey>> ready =
-                new ConcurrentHashMap<>();
-        final Map<String, Set<ChunkKey>> queued =
-                new ConcurrentHashMap<>();
+        final Map<String, ReadyChunks> ready = new ConcurrentHashMap<>();
         final Set<String> scanned = ConcurrentHashMap.newKeySet();
         final Set<String> scanning = ConcurrentHashMap.newKeySet();
         final Set<String> readyLogged = ConcurrentHashMap.newKeySet();
@@ -112,25 +184,26 @@ final class GeneratedChunkBackfill {
                         centerX, centerZ, checkpointMillis, scanStartedMillis));
     }
 
-    static ChunkKey poll(ServerPlayer player) {
+    static Claim poll(ServerPlayer player) {
         if (player == null) return null;
         State state = STATES.get(player.getUUID());
         if (state == null || !state.active) return null;
         String dimension = MapGameAccess.dimension(MapGameAccess.level(player));
-        ConcurrentLinkedQueue<ChunkKey> queue = state.ready.get(dimension);
-        if (queue == null) return null;
-        return queue.poll();
+        ReadyChunks queue = state.ready.get(dimension);
+        return queue == null ? null : queue.poll(System.nanoTime());
     }
 
-    static void requeue(ServerPlayer player, ChunkKey key) {
-        if (player == null || key == null) return;
+    static void requeue(ServerPlayer player, Claim claim) {
         State state = STATES.get(player.getUUID());
-        if (state == null) return;
-        Set<ChunkKey> queued = state.queued.get(key.dimension());
-        if (queued != null && queued.contains(key)) {
-            // The claim came from this queue. Keep it even while collection is paused.
-            state.ready.get(key.dimension()).add(key);
-        }
+        ReadyChunks queue = state == null ? null : state.ready.get(claim.key.dimension());
+        if (queue != null) queue.requeue(claim, System.nanoTime());
+    }
+
+    static boolean retryEmptySave(ServerPlayer player, Claim claim) {
+        if (claim == null || claim.recentAttempt == 0) return false;
+        State state = STATES.get(player.getUUID());
+        ReadyChunks queue = state == null ? null : state.ready.get(claim.key.dimension());
+        return queue != null && queue.retryEmpty(claim, System.nanoTime());
     }
 
     static Long knownFingerprint(ServerPlayer player, ChunkKey key) {
@@ -154,6 +227,9 @@ final class GeneratedChunkBackfill {
         if (player == null || key == null) return;
         State state = STATES.get(player.getUUID());
         if (state == null) return;
+        ReadyChunks queue = state.ready.get(key.dimension());
+        // A viewport request can finish before the queued region write is visible.
+        if (queue != null && queue.hasPendingSave(key)) return;
         completeAttempt(player, state, key);
     }
 
@@ -174,7 +250,15 @@ final class GeneratedChunkBackfill {
             Map<ChunkKey, Long> known = state.knownFingerprints.get(key.dimension());
             if (known != null && known.containsKey(key)) continue;
             Set<ChunkKey> pending = state.initialPending.get(key.dimension());
-            if (pending == null || !pending.contains(key)) add(state, key);
+            if (pending != null && pending.contains(key)) continue;
+            ReadyChunks queue = ready(state, key.dimension());
+            ChunkPos center = player.chunkPosition();
+            if (Math.abs(key.x() - MapGameAccess.chunkX(center)) <= RECENT_SAVE_RADIUS
+                    && Math.abs(key.z() - MapGameAccess.chunkZ(center)) <= RECENT_SAVE_RADIUS) {
+                queue.addSaved(key, System.nanoTime());
+            } else {
+                queue.addArchived(key);
+            }
         }
     }
 
@@ -231,7 +315,8 @@ final class GeneratedChunkBackfill {
             if (STATES.get(playerId) != state) return;
             state.initialPending.computeIfAbsent(dimension,
                     ignored -> ConcurrentHashMap.newKeySet()).addAll(discovered);
-            for (ChunkKey key : discovered) add(state, key);
+            ReadyChunks queue = ready(state, dimension);
+            for (ChunkKey key : discovered) queue.addArchived(key);
             state.scanned.add(dimension);
             LOG.info(
                     "V31_BACKGROUND_INDEX player={} dimension={} region_candidates={} checkpoint={}",
@@ -281,8 +366,8 @@ final class GeneratedChunkBackfill {
     }
 
     private static void completeAttempt(ServerPlayer player, State state, ChunkKey key) {
-        Set<ChunkKey> queued = state.queued.get(key.dimension());
-        if (queued != null) queued.remove(key);
+        ReadyChunks queue = state.ready.get(key.dimension());
+        if (queue != null) queue.complete(key);
         Set<ChunkKey> pending = state.initialPending.get(key.dimension());
         if (pending != null) pending.remove(key);
 
@@ -322,12 +407,8 @@ final class GeneratedChunkBackfill {
         });
     }
 
-    private static void add(State state, ChunkKey key) {
-        Set<ChunkKey> queued = state.queued.computeIfAbsent(
-                key.dimension(), ignored -> ConcurrentHashMap.newKeySet());
-        if (!queued.add(key)) return;
-        state.ready.computeIfAbsent(
-                key.dimension(), ignored -> new ConcurrentLinkedQueue<>()).add(key);
+    private static ReadyChunks ready(State state, String dimension) {
+        return state.ready.computeIfAbsent(dimension, ignored -> new ReadyChunks());
     }
 
 

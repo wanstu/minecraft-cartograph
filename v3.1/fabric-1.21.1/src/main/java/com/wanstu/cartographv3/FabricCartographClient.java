@@ -1,9 +1,11 @@
 package com.wanstu.cartographv3;
 
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.rendering.v1.CoreShaderRegistrationCallback;
 
 public final class FabricCartographClient implements ClientModInitializer {
     @Override
@@ -18,6 +20,8 @@ public final class FabricCartographClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(MapProtocol.Tile.TYPE,
                 (packet, context) -> MapClientCache.accept(packet));
 
+        CoreShaderRegistrationCallback.EVENT.register(context -> context.register(MapGraphics.ICON_SHADER,
+                DefaultVertexFormat.POSITION_TEX_COLOR, MapGraphics::setIconShader));
         KeyBindingHelper.registerKeyBinding(CartographClient.OPEN_KEY);
         ClientTickEvents.END_CLIENT_TICK.register(CartographClient::tick);
     }

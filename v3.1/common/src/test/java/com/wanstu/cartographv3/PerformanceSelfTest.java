@@ -39,6 +39,7 @@ public final class PerformanceSelfTest {
         missingCacheLifecycleAndScale();
         selectiveSurfaceNbt();
         backgroundCompletionIsPerDimension();
+        recentSavesShareBackgroundBudget();
         System.out.println("Cartograph performance regressions: " + checks + " checks passed");
     }
 
@@ -224,6 +225,37 @@ public final class PerformanceSelfTest {
                 "finishing one dimension neither traverses nor clears another dimension");
         complete.invoke(null, null, state, new ChunkKey("qa:later", 5, 6));
         require(groups.size() == 2, "a later completion does not create or scan unrelated pending groups");
+    }
+
+    private static void recentSavesShareBackgroundBudget() {
+        var queue = new GeneratedChunkBackfill.ReadyChunks();
+        ChunkKey archive = new ChunkKey("qa:overworld", -120, 640);
+        List<ChunkKey> saves = List.of(
+                new ChunkKey("qa:overworld", -38, 753), new ChunkKey("qa:overworld", -37, 753),
+                new ChunkKey("qa:overworld", -37, 754), new ChunkKey("qa:overworld", -36, 754));
+        queue.addArchived(archive);
+        for (ChunkKey key : saves) queue.addSaved(key, 0L);
+        queue.addSaved(saves.getFirst(), 0L);
+        require(queue.poll(0L).key().equals(archive), "disk-write grace uses archive budget");
+        queue.addArchived(new ChunkKey("qa:overworld", -120, 641));
+        long now = TimeUnit.SECONDS.toNanos(2);
+        for (ChunkKey key : saves.subList(0, 3)) {
+            require(queue.poll(now).key().equals(key), "recent saves pass the old archive");
+        }
+        require(queue.poll(now).recentAttempt() == 0, "continuous saves leave work for the archive");
+        var claim = queue.poll(now);
+        require(claim.key().equals(saves.getLast()) && queue.poll(now) == null,
+                "duplicate save notifications produce only one read");
+        require(queue.retryEmpty(claim, now) && queue.poll(now) == null,
+                "an unfinished write can retry without exposing an empty tile");
+        claim = queue.poll(now += TimeUnit.SECONDS.toNanos(2));
+        require(claim.recentAttempt() == 2, "retry survives a temporary missing disk slot");
+        queue.retryEmpty(claim, now);
+        claim = queue.poll(now += TimeUnit.SECONDS.toNanos(2));
+        queue.retryEmpty(claim, now);
+        require(queue.poll(now).recentAttempt() == 0, "an inaccessible save falls back to archive work");
+        queue.complete(saves.getLast());
+        require(!queue.retryEmpty(claim, now), "a delivered tile is no longer retried");
     }
 
     private static void selectiveSurfaceNbt() throws Exception {
