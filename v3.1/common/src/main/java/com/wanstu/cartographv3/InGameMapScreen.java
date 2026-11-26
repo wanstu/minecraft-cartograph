@@ -80,6 +80,7 @@ final class InGameMapScreen extends AtlasScreenBase {
     private int panelScroll;
     private int ticks;
     private boolean atlasUpdatePending = true;
+    private boolean firstFrame = true;
     private int viewportDelay;
     private int hoveredX;
     private int hoveredZ;
@@ -184,8 +185,11 @@ final class InGameMapScreen extends AtlasScreenBase {
 
     @Override
     void drawFrame(MapGraphics graphics, float partialTick) {
+        // Show the retained view on reopen and refresh it on the following frame.
+        boolean reuseFirstFrame = firstFrame && tiles.hasCachedFrame(camera);
+        firstFrame = false;
         // Catch-up ticks share one atlas budget before the next displayed frame.
-        if (atlasUpdatePending) {
+        if (atlasUpdatePending && !reuseFirstFrame) {
             atlasUpdatePending = false;
             tiles.update(camera);
         }

@@ -34,6 +34,7 @@ public final class PerformanceSelfTest {
         viewStateRoundTrip();
         memoryBoundAndEviction();
         knownAtlasBounds();
+        visibleAtlasTilesPaintFirst();
         atlasReleaseWhileWriterBusy();
         atlasBlockReadCompatibility();
         missingCacheLifecycleAndScale();
@@ -41,6 +42,29 @@ public final class PerformanceSelfTest {
         backgroundCompletionIsPerDimension();
         recentSavesShareBackgroundBudget();
         System.out.println("Cartograph performance regressions: " + checks + " checks passed");
+    }
+
+    private static void visibleAtlasTilesPaintFirst() {
+        int[][] rectangles = {{0, 0, 32, 32}, {0, 0, 1, 1}, {31, 31, 1, 1},
+                {0, 12, 32, 3}, {3, 0, 4, 32}, {11, 9, 5, 12}};
+        for (int[] rectangle : rectangles) {
+            int left = rectangle[0], top = rectangle[1], width = rectangle[2], height = rectangle[3];
+            var order = new InGameMapTiles.ScanOrder(left, top, width, height);
+            var seen = new java.util.BitSet(1024);
+            boolean correct = true;
+            for (int step = 0; step < 1024; step++) {
+                int index = order.index(step);
+                if (index < 0 || index >= 1024 || seen.get(index)) {
+                    correct = false;
+                    break;
+                }
+                seen.set(index);
+                int x = index % 32, z = index / 32;
+                boolean inView = x >= left && x < left + width && z >= top && z < top + height;
+                correct &= inView == (step < width * height);
+            }
+            require(correct && seen.cardinality() == 1024, "Atlas scan visits the visible rectangle first, then every other tile");
+        }
     }
 
     private static void budgetAndFairness() {

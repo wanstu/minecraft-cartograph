@@ -36,6 +36,46 @@ final class InGameMapTiles implements AutoCloseable {
     private record Region(int x, int z) {}
     private record TextureKey(Region region, int stride, long signature) {}
     private record DrawTile(Region region, Atlas atlas) {}
+    private record FrameView(
+            UUID worldId, String dimension, long signature, CartographBackendApi.Viewport viewport) {}
+
+    record ScanOrder(int left, int top, int width, int height) {
+        private static ScanOrder forViewport(Region region, InGameMapCamera camera) {
+            int originX = region.x * REGION_CHUNKS;
+            int originZ = region.z * REGION_CHUNKS;
+            int left = localChunk(camera.worldX(0), originX);
+            int right = localChunk(camera.worldX(camera.width()), originX);
+            int top = localChunk(camera.worldZ(camera.top()), originZ);
+            int bottom = localChunk(camera.worldZ(camera.bottom()), originZ);
+            return new ScanOrder(left, top, right - left + 1, bottom - top + 1);
+        }
+
+        private static int localChunk(double coordinate, int origin) {
+            return Math.clamp((int) Math.floor(coordinate / CHUNK) - origin, 0, REGION_CHUNKS - 1);
+        }
+
+        // Visit the visible rectangle first, followed by the rows above, the
+        // columns to either side, and the rows below it.
+        int index(int step) {
+            int visible = width * height;
+            if (step < visible) {
+                return (top + step / width) * REGION_CHUNKS + left + step % width;
+            }
+            step -= visible;
+            int above = top * REGION_CHUNKS;
+            if (step < above) return step;
+            step -= above;
+            int sideWidth = REGION_CHUNKS - width;
+            int sides = sideWidth * height;
+            if (step < sides) {
+                int row = top + step / sideWidth;
+                int column = step % sideWidth;
+                if (column >= left) column += width;
+                return row * REGION_CHUNKS + column;
+            }
+            return (top + height) * REGION_CHUNKS + step - sides;
+        }
+    }
 
     private static final class Atlas {
         final long[] fingerprints;
@@ -44,6 +84,7 @@ final class InGameMapTiles implements AutoCloseable {
         final int size;
         final long signature;
         int next = REGION_TILES;
+        ScanOrder scanOrder;
         long revision = Long.MIN_VALUE;
         boolean hasPixels;
         boolean complete;
@@ -81,6 +122,7 @@ final class InGameMapTiles implements AutoCloseable {
     private final Set<TextureKey> diskMisses = new HashSet<>();
     private final CartographBackendApi backend;
     private List<DrawTile> frame = List.of();
+    private FrameView frameView;
     private long allocatedTexels;
     private String dimension = "";
     private long targetSignature;
@@ -103,6 +145,7 @@ final class InGameMapTiles implements AutoCloseable {
             // Never keep drawing the previous presentation after the user has
             // selected another drawing mode/style.
             frame = List.of();
+            frameView = null;
         }
         if (dim.isBlank()) return;
 
@@ -159,7 +202,7 @@ final class InGameMapTiles implements AutoCloseable {
             }
             keep.add(key);
             if (remaining > 0 && System.nanoTime() < deadline) {
-                remaining -= updateAtlas(worldId, dim, region, atlas, stride, remaining, deadline);
+                remaining -= updateAtlas(worldId, dim, region, atlas, stride, remaining, deadline, camera);
             }
         }
 
@@ -171,7 +214,13 @@ final class InGameMapTiles implements AutoCloseable {
         }
 
         frame = drawing;
+        frameView = drawing.isEmpty() ? null : new FrameView(worldId, dim, appearance, camera.viewport(false));
         evictOffscreen(keep);
+    }
+
+    boolean hasCachedFrame(InGameMapCamera camera) {
+        return frameView != null && frameView.equals(new FrameView(
+                backend.worldId(), backend.dimension(), MapPresentationRenderer.renderSignature(), camera.viewport(false)));
     }
 
     private Atlas createAtlas(UUID worldId, String dimension, TextureKey key, boolean hasCachedFacts) {
@@ -268,11 +317,13 @@ final class InGameMapTiles implements AutoCloseable {
             Atlas atlas,
             int stride,
             int remaining,
-            long deadline) {
+            long deadline,
+            InGameMapCamera camera) {
         if (atlas.next == REGION_TILES) {
             long current = revision(dimension, key);
             if (atlas.revision == current) return 0;
             atlas.revision = current;
+            atlas.scanOrder = ScanOrder.forViewport(key, camera);
             atlas.next = 0;
         }
 
@@ -285,7 +336,7 @@ final class InGameMapTiles implements AutoCloseable {
         int painted = 0;
 
         while (atlas.next < REGION_TILES && painted < remaining && System.nanoTime() < deadline) {
-            int index = atlas.next++;
+            int index = atlas.scanOrder.index(atlas.next++);
             int localX = index % REGION_CHUNKS;
             int localZ = index / REGION_CHUNKS;
             ChunkKey tileKey = new ChunkKey(
@@ -418,6 +469,7 @@ final class InGameMapTiles implements AutoCloseable {
         reads.clear();
         diskMisses.clear();
         frame = List.of();
+        frameView = null;
         allocatedTexels = 0;
         dimension = "";
         targetSignature = 0L;
