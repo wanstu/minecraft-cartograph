@@ -338,9 +338,6 @@ final class MinecraftCartographBackend implements CartographBackendApi {
 
         if (viewportChanged) {
             MapClientCache.cancelVisibleRestores();
-            MapClientCache.restoreVisibleFromDisk(
-                    dim, rawMinChunkX, rawMaxChunkX, rawMinChunkZ, rawMaxChunkZ);
-
             lastRequestMinChunkX = rawMinChunkX;
             lastRequestMaxChunkX = rawMaxChunkX;
             lastRequestMinChunkZ = rawMinChunkZ;
@@ -369,7 +366,6 @@ final class MinecraftCartographBackend implements CartographBackendApi {
         int requestBudget = Math.min(
                 requestBatch,
                 Math.max(0, maxPendingRequests() - MapClientCache.pendingCount()));
-        if (requestBudget <= 0) return;
 
         int requested = 0;
         int scanned = 0;
@@ -424,6 +420,13 @@ final class MinecraftCartographBackend implements CartographBackendApi {
             if (!MapClientCache.needsRequest(key)) continue;
             MapClientCache.request(key);
             requested++;
+        }
+
+        // Both paths share a disk reader. Queue the closest requests before
+        // the bulk restore can scan the cache index.
+        if (viewportChanged) {
+            MapClientCache.restoreVisibleFromDisk(
+                    dim, rawMinChunkX, rawMaxChunkX, rawMinChunkZ, rawMaxChunkZ);
         }
     }
 }
