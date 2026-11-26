@@ -112,6 +112,15 @@ final class MinecraftCartographBackend implements CartographBackendApi {
     }
 
     @Override
+    public List<CachedRegion> cachedRegionsInBounds(
+            String dimension,
+            int minRegionX, int maxRegionX,
+            int minRegionZ, int maxRegionZ) {
+        return MapClientCache.cachedRegionsInBounds(
+                dimension, minRegionX, maxRegionX, minRegionZ, maxRegionZ);
+    }
+
+    @Override
     public void updateViewport(Viewport viewport, boolean force) {
         boolean visibilityChanged = (this.viewport == null) != (viewport == null);
         this.viewport = viewport;

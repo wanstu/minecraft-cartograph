@@ -366,6 +366,22 @@ public final class MapClientCache {
         return result;
     }
 
+    static List<CartographBackendApi.CachedRegion> cachedRegionsInBounds(
+            String dimension,
+            int minRegionX, int maxRegionX,
+            int minRegionZ, int maxRegionZ) {
+        if (dimension == null || dimension.isBlank()) return List.of();
+        List<CartographBackendApi.CachedRegion> result = new ArrayList<>();
+        for (RegionKey region : REGION_TILE_COUNTS.keySet()) {
+            if (dimension.equals(region.dimension())
+                    && region.x() >= minRegionX && region.x() <= maxRegionX
+                    && region.z() >= minRegionZ && region.z() <= maxRegionZ) {
+                result.add(new CartographBackendApi.CachedRegion(region.x(), region.z()));
+            }
+        }
+        return result;
+    }
+
     static java.util.UUID worldId() { return worldId; }
 
     static boolean hasTilesInRegion(String dimension, int regionX, int regionZ) {

@@ -27,6 +27,8 @@ interface CartographBackendApi extends AutoCloseable {
         }
     }
 
+    record CachedRegion(int x, int z) {}
+
     void open();
 
     void tick();
@@ -51,6 +53,12 @@ interface CartographBackendApi extends AutoCloseable {
             String dimension,
             int minChunkX, int maxChunkX,
             int minChunkZ, int maxChunkZ);
+
+    /** Returns occupied cache regions, using inclusive region coordinates. */
+    List<CachedRegion> cachedRegionsInBounds(
+            String dimension,
+            int minRegionX, int maxRegionX,
+            int minRegionZ, int maxRegionZ);
 
     void updateViewport(Viewport viewport, boolean force);
 

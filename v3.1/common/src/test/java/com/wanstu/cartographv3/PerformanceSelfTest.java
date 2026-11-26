@@ -112,6 +112,14 @@ public final class PerformanceSelfTest {
         short[] relief = new short[SurfaceTile.PIXELS];
         byte[] water = new byte[SurfaceTile.PIXELS];
         String dimension = "minecraft:overworld";
+        ChunkKey isolated = new ChunkKey("qa:other_dimension", -17, -16);
+        put.invoke(null, isolated, cached.newInstance(SurfaceTile.fromFacts(
+                isolated, states, biomes, surface, relief, water), true));
+        require(MapClientCache.cachedRegionsInBounds(isolated.dimension(), -2, -2, -1, -1)
+                        .equals(List.of(new CartographBackendApi.CachedRegion(-2, -1))),
+                "region lookup floors negative chunk coordinates");
+        require(MapClientCache.cachedRegionsInBounds(dimension, -2, -2, -1, -1).isEmpty(),
+                "region lookup uses only the requested dimension");
         for (int i = 0; i < 8192; i++) {
             ChunkKey key = new ChunkKey(dimension, i, 0);
             put.invoke(null, key, cached.newInstance(SurfaceTile.fromFacts(
@@ -128,6 +136,14 @@ public final class PerformanceSelfTest {
         require(MapClientCache.tile(evicted) == null, "least recently used facts leave RAM");
         require(!MapClientCache.isMissing(evicted), "evicted facts do not become missing terrain");
         require(MapClientCache.tile(added) != null, "new terrain remains available");
+        require(MapClientCache.cachedRegionsInBounds(isolated.dimension(), -2, -2, -1, -1).isEmpty(),
+                "evicting a region's last chunk removes it from the region lookup");
+        require(MapClientCache.cachedRegionsInBounds(dimension, 512, 512, 0, 0)
+                        .equals(List.of(new CartographBackendApi.CachedRegion(512, 0))),
+                "receiving the first tile makes its whole cache region discoverable");
+        require(MapClientCache.cachedRegionsInBounds(dimension, 0, 0, 0, 0)
+                        .equals(List.of(new CartographBackendApi.CachedRegion(0, 0))),
+                "each populated region is returned once within inclusive bounds");
         var field = MapClientCache.class.getDeclaredField("REGION_TILE_COUNTS");
         field.setAccessible(true);
         Map<?, Integer> counts = (Map<?, Integer>) field.get(null);

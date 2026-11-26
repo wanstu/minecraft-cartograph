@@ -110,14 +110,13 @@ final class InGameMapTiles implements AutoCloseable {
         int maxX = region(camera.worldX(camera.width()));
         int minZ = region(camera.worldZ(camera.top()));
         int maxZ = region(camera.worldZ(camera.bottom()));
-        // Work scales with known terrain, not the potentially huge empty
-        // rectangle covered by a zoomed-out viewport.
+        // The cache index already groups chunks into occupied regions.
         Set<Region> candidates = new HashSet<>();
-        for (ChunkKey key : backend.cachedKeysInBounds(dim,
-                minX * REGION_CHUNKS, maxX * REGION_CHUNKS + REGION_CHUNKS - 1,
-                minZ * REGION_CHUNKS, maxZ * REGION_CHUNKS + REGION_CHUNKS - 1)) {
-            candidates.add(new Region(Math.floorDiv(key.x(), REGION_CHUNKS),
-                    Math.floorDiv(key.z(), REGION_CHUNKS)));
+        for (var cached : backend.cachedRegionsInBounds(dim,
+                minX * CACHE_REGIONS_PER_ATLAS, (maxX + 1) * CACHE_REGIONS_PER_ATLAS - 1,
+                minZ * CACHE_REGIONS_PER_ATLAS, (maxZ + 1) * CACHE_REGIONS_PER_ATLAS - 1)) {
+            candidates.add(new Region(Math.floorDiv(cached.x(), CACHE_REGIONS_PER_ATLAS),
+                    Math.floorDiv(cached.z(), CACHE_REGIONS_PER_ATLAS)));
         }
         for (TextureKey key : atlases.keySet()) {
             Region region = key.region();
