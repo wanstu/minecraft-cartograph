@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.function.IntUnaryOperator;
 
 /**
  * Abstract map representation derived from SurfaceTile facts.
@@ -55,6 +56,8 @@ record HandDrawnMapData(
         }
     }
 
+    private static final TerrainClass[] TERRAIN_CLASSES = TerrainClass.values();
+
     static void beginMapSession() {
         synchronized (RELIEF_SUMMARY_CACHE) {
             RELIEF_SUMMARY_CACHE.clear();
@@ -68,7 +71,7 @@ record HandDrawnMapData(
     static HandDrawnMapData from(
             SurfaceTile tile,
             Function<ChunkKey, SurfaceTile> tileLookup) {
-        int[] source = SatelliteSurfaceRenderer.renderPixels(tile, 1);
+        IntUnaryOperator colorsAt = null;
         TerrainClass[] classes = new TerrainClass[CELLS];
         int[] water = new int[CELLS];
         int[] depth = new int[CELLS];
@@ -78,12 +81,11 @@ record HandDrawnMapData(
         int[] range = new int[CELLS];
         int[] slope = new int[CELLS];
         int[] shade = new int[CELLS];
-        int[] form = new int[CELLS];
+        int[] votes = new int[TERRAIN_CLASSES.length];
+        int[] heights = new int[CELL_SIZE * CELL_SIZE];
 
         for (int cellZ = 0; cellZ < GRID; cellZ++) {
             for (int cellX = 0; cellX < GRID; cellX++) {
-                int[] votes = new int[TerrainClass.values().length];
-                int[] heights = new int[CELL_SIZE * CELL_SIZE];
                 int heightCount = 0;
                 int waterCount = 0;
                 int waterDepthTotal = 0;
@@ -101,9 +103,6 @@ record HandDrawnMapData(
                             waterCount++;
                             waterDepthTotal += sampleDepth;
                         }
-
-                        TerrainClass terrain = classify(source[index], isWater);
-                        if (terrain != TerrainClass.UNKNOWN) votes[terrain.ordinal()]++;
 
                         int surfaceY = tile.surfaceHeightAt(index);
                         int reliefY = tile.reliefHeightAt(index);
@@ -130,8 +129,11 @@ record HandDrawnMapData(
                 forest[cell] = canopyCount * 100 / (CELL_SIZE * CELL_SIZE);
                 canopy[cell] = canopyCount == 0
                         ? 0 : Math.round((float) canopyHeightTotal / canopyCount);
-                classes[cell] = waterPct >= WATER_THRESHOLD
-                        ? TerrainClass.WATER : dominant(votes);
+                if (waterPct < WATER_THRESHOLD && colorsAt == null) {
+                    colorsAt = SatelliteSurfaceRenderer.colorSampler(tile);
+                }
+                classes[cell] = waterPct >= WATER_THRESHOLD ? TerrainClass.WATER
+                        : classifyCell(tile, cellX, cellZ, colorsAt, votes);
 
                 if (heightCount == 0) {
                     relief[cell] = SurfaceTile.UNKNOWN_HEIGHT;
@@ -154,9 +156,8 @@ record HandDrawnMapData(
         ReliefNeighborhood reliefNeighborhood = ReliefNeighborhood.from(
                 tile.key(), relief, water, tileLookup);
         relief = reliefNeighborhood.smoothedCenterRelief();
-        slope = deriveSlopeStrength(reliefNeighborhood, water);
-        shade = deriveHillshade(reliefNeighborhood, water);
-        form = deriveLandform(reliefNeighborhood, water);
+        deriveSlopeAndHillshade(reliefNeighborhood, water, slope, shade);
+        int[] form = deriveLandform(reliefNeighborhood, water);
         int[] colors = new int[CELLS];
         for (int i = 0; i < CELLS; i++) colors[i] = classes[i].color;
 
@@ -169,8 +170,22 @@ record HandDrawnMapData(
      * Region color is categorical. Satellite textures only help classify the
      * terrain; their exact RGB values never enter the hand-drawn data model.
      */
-    private static TerrainClass classify(int rgb, boolean water) {
-        if (water) return TerrainClass.WATER;
+    private static TerrainClass classifyCell(
+            SurfaceTile tile, int cellX, int cellZ, IntUnaryOperator colorsAt, int[] votes) {
+        Arrays.fill(votes, 0);
+        int first = cellZ * CELL_SIZE * SurfaceTile.SIZE + cellX * CELL_SIZE;
+        for (int z = 0; z < CELL_SIZE; z++) {
+            for (int x = 0; x < CELL_SIZE; x++) {
+                int index = first + z * SurfaceTile.SIZE + x;
+                TerrainClass terrain = tile.waterDepthAt(index) > 0
+                        ? TerrainClass.WATER : classify(colorsAt.applyAsInt(index));
+                if (terrain != TerrainClass.UNKNOWN) votes[terrain.ordinal()]++;
+            }
+        }
+        return dominant(votes);
+    }
+
+    private static TerrainClass classify(int rgb) {
         if (rgb == 0) return TerrainClass.UNKNOWN;
 
         double r = (rgb >>> 16 & 255) / 255.0;
@@ -210,7 +225,7 @@ record HandDrawnMapData(
                 bestCount = votes[i];
             }
         }
-        return bestCount == 0 ? TerrainClass.UNKNOWN : TerrainClass.values()[best];
+        return bestCount == 0 ? TerrainClass.UNKNOWN : TERRAIN_CLASSES[best];
     }
 
     /**
@@ -218,13 +233,14 @@ record HandDrawnMapData(
      */
     private static TerrainClass[] smoothClasses(TerrainClass[] source, int[] waterPercent) {
         TerrainClass[] smoothed = source.clone();
+        int[] votes = new int[TERRAIN_CLASSES.length];
         for (int z = 0; z < GRID; z++) {
             for (int x = 0; x < GRID; x++) {
                 int index = z * GRID + x;
                 if (source[index] == TerrainClass.WATER
                         && waterPercent[index] >= WATER_THRESHOLD) continue;
 
-                int[] votes = new int[TerrainClass.values().length];
+                Arrays.fill(votes, 0);
                 for (int dz = -1; dz <= 1; dz++) {
                     int sampleZ = z + dz;
                     if (sampleZ < 0 || sampleZ >= GRID) continue;
@@ -375,9 +391,14 @@ record HandDrawnMapData(
      * a clamped edge sample.
      */
     private static final class ReliefNeighborhood {
+        private static final int HALO_SIDE = GRID * 3;
+        private static final int NOT_SAMPLED = Integer.MIN_VALUE;
         private final ReliefGrid[] grids = new ReliefGrid[9];
+        private final int[] smoothed = new int[HALO_SIDE * HALO_SIDE];
 
-        private ReliefNeighborhood() {}
+        private ReliefNeighborhood() {
+            Arrays.fill(smoothed, NOT_SAMPLED);
+        }
 
         static ReliefNeighborhood from(
                 ChunkKey centerKey,
@@ -401,8 +422,21 @@ record HandDrawnMapData(
         }
 
         int landRelief(int cellX, int cellZ, int fallback) {
+            int x = cellX + GRID;
+            int z = cellZ + GRID;
+            if (x < 0 || x >= HALO_SIDE || z < 0 || z >= HALO_SIDE) return fallback;
+            int index = z * HALO_SIDE + x;
+            int value = smoothed[index];
+            if (value == NOT_SAMPLED) {
+                value = smoothLandRelief(cellX, cellZ);
+                smoothed[index] = value;
+            }
+            return value == SurfaceTile.UNKNOWN_HEIGHT ? fallback : value;
+        }
+
+        private int smoothLandRelief(int cellX, int cellZ) {
             int center = rawLandRelief(cellX, cellZ);
-            if (center == SurfaceTile.UNKNOWN_HEIGHT) return fallback;
+            if (center == SurfaceTile.UNKNOWN_HEIGHT) return center;
 
             int sum = 0;
             int weight = 0;
@@ -472,10 +506,10 @@ record HandDrawnMapData(
     private static ReliefGrid summarizeRelief(SurfaceTile tile) {
         int[] water = new int[CELLS];
         int[] relief = new int[CELLS];
+        int[] heights = new int[CELL_SIZE * CELL_SIZE];
 
         for (int cellZ = 0; cellZ < GRID; cellZ++) {
             for (int cellX = 0; cellX < GRID; cellX++) {
-                int[] heights = new int[CELL_SIZE * CELL_SIZE];
                 int heightCount = 0;
                 int waterCount = 0;
 
@@ -506,53 +540,24 @@ record HandDrawnMapData(
         return new ReliefGrid(relief, water);
     }
 
-    /**
-     * Map-scale slope strength blends a near (8 block) gradient with a broad
-     * (16 block) gradient. The semantic halo keeps both samples continuous at
-     * chunk boundaries.
-     */
-    private static int[] deriveSlopeStrength(
-            ReliefNeighborhood neighborhood,
-            int[] waterPercent) {
-        int[] out = new int[CELLS];
+    /** Slope strength and north-west hillshade share the same cross-chunk gradient. */
+    private static void deriveSlopeAndHillshade(
+            ReliefNeighborhood neighborhood, int[] waterPercent, int[] slope, int[] hillshade) {
         for (int z = 0; z < GRID; z++) {
             for (int x = 0; x < GRID; x++) {
                 int index = z * GRID + x;
+                if (waterPercent[index] >= WATER_THRESHOLD) continue;
                 int center = neighborhood.landRelief(x, z, SurfaceTile.UNKNOWN_HEIGHT);
-                if (waterPercent[index] >= WATER_THRESHOLD
-                        || center == SurfaceTile.UNKNOWN_HEIGHT) continue;
+                if (center == SurfaceTile.UNKNOWN_HEIGHT) continue;
 
                 double dx = blendedGradient(neighborhood, x, z, center, true);
                 double dz = blendedGradient(neighborhood, x, z, center, false);
                 double magnitude = Math.sqrt(dx * dx + dz * dz);
-                out[index] = Math.min(100, (int) Math.round(magnitude * 8.0));
-            }
-        }
-        return out;
-    }
-
-    /**
-     * Signed hillshade under a fixed north-west light. Because it uses the same
-     * broad gradient as slope strength, lighting now flows across chunk seams.
-     */
-    private static int[] deriveHillshade(
-            ReliefNeighborhood neighborhood,
-            int[] waterPercent) {
-        int[] out = new int[CELLS];
-        for (int z = 0; z < GRID; z++) {
-            for (int x = 0; x < GRID; x++) {
-                int index = z * GRID + x;
-                int center = neighborhood.landRelief(x, z, SurfaceTile.UNKNOWN_HEIGHT);
-                if (waterPercent[index] >= WATER_THRESHOLD
-                        || center == SurfaceTile.UNKNOWN_HEIGHT) continue;
-
-                double dx = blendedGradient(neighborhood, x, z, center, true);
-                double dz = blendedGradient(neighborhood, x, z, center, false);
-                out[index] = Math.clamp(
+                slope[index] = Math.min(100, (int) Math.round(magnitude * 8.0));
+                hillshade[index] = Math.clamp(
                         (int) Math.round(-(dx + dz) * 6.0), -100, 100);
             }
         }
-        return out;
     }
 
     private static double blendedGradient(

@@ -110,6 +110,19 @@ final class SatelliteSurfaceRenderer {
         return rgb;
     }
 
+    /** Samples the same full-resolution color as renderPixels(tile, 1) on the client thread. */
+    static java.util.function.IntUnaryOperator colorSampler(SurfaceTile tile) {
+        Minecraft minecraft = Minecraft.getInstance();
+        Registry<Biome> biomes = minecraft.level == null ? null
+                : MapGameAccess.registry(minecraft.level.registryAccess(), Registries.BIOME);
+        var pos = new BlockPos.MutableBlockPos();
+        java.util.function.IntUnaryOperator heightAt = tile::reliefHeightAt;
+        int baseX = tile.key().x() * SurfaceTile.SIZE;
+        int baseZ = tile.key().z() * SurfaceTile.SIZE;
+        return index -> shadedPixel(minecraft, biomes, pos, tile, heightAt, baseX, baseZ,
+                index % SurfaceTile.SIZE, index / SurfaceTile.SIZE);
+    }
+
     private static int shadedPixel(
             Minecraft minecraft, Registry<Biome> biomes, BlockPos.MutableBlockPos pos,
             SurfaceTile tile, java.util.function.IntUnaryOperator heightAt,
