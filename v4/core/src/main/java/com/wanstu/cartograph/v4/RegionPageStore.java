@@ -4,17 +4,13 @@ import java.io.*;
 import java.nio.file.*;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.zip.CRC32C;
-import net.jpountz.lz4.LZ4Factory;
-import net.jpountz.lz4.LZ4Exception;
 import java.util.concurrent.*;
 
 /** V4-only pages. A store instance is owned by one writer/IO worker for one world/dimension. */
 public final class RegionPageStore {
     public static final int EDGE = 32;
     static final int MAGIC = 0x43563450; // CV4P
-    static final int VERSION = 6;
-    private static final LZ4Factory CODEC=LZ4Factory.safeInstance();
+    static final int VERSION = 7;
     private static final int MAX_RAW = 4 * 1024 * 1024;
     private static final int MAX_BATCH_PAGES=DiskGeographicPyramid.MAX_BATCH_CHUNKS*11;
     private static final int CLASSES = FeatureDictionary.Terrain.values().length;
@@ -381,24 +377,11 @@ public final class RegionPageStore {
             }
         }
         if(row!=n)throw new IOException("Incorrect numeric record count");
-        CRC32C crc=new CRC32C();crc.update(body);
-        var compressor=CODEC.fastCompressor();
-        byte[] compressed=new byte[8+compressor.maxCompressedLength(body.length)];
-        ByteBuffer.wrap(compressed).putInt(body.length).putInt((int)crc.getValue());
-        int length=compressor.compress(body,0,body.length,compressed,8,compressed.length-8);
-        return Arrays.copyOf(compressed,8+length);
+        return PageFrameCodec.encode(body,base,n);
     }
     static Page decode(byte[] data,Key expected)throws IOException{
-        try(DataInputStream header=new DataInputStream(new ByteArrayInputStream(data))){
-            int size=header.readInt(),checksum=header.readInt();
-            if(size<1||size>MAX_RAW)throw new IOException("Page length");
-            byte[] body=new byte[size];
-            try{
-                int n=CODEC.safeDecompressor().decompress(data,8,data.length-8,body,0,size);
-                if(n!=size)throw new IOException("Page decompressed size");
-            }catch(LZ4Exception e){throw new IOException("Invalid page compression",e);}
-            CRC32C crc=new CRC32C();crc.update(body);
-            if(body.length!=size||(int)crc.getValue()!=checksum)throw new IOException("Page checksum");
+        try{
+            byte[] body=PageFrameCodec.decode(data);
             try(DataInputStream in=new DataInputStream(new ByteArrayInputStream(body))){
                 if(in.readInt()!=MAGIC||in.readInt()!=VERSION)throw new IOException("Not V4 page");
                 Key key=new Key(in.readInt(),in.readInt(),in.readInt());

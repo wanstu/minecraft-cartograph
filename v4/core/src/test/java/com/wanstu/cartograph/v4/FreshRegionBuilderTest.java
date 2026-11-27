@@ -44,6 +44,7 @@ public final class FreshRegionBuilderTest {
             }
             var result=FreshRegionBuilder.build(root,id,(x,z)->chunks.get(key(x,z)));
             check(result.chunks()==coordinates.length,"observed chunks only");
+            check(result.flushes()==1,"staged shard forced once before publication");
             var shard=new RegionShard(root,id,16,8*1024*1024);
             for(Cell cell:visited){
                 Stats expected=oracle.at(cell);Entry actual=shard.get(cell);
@@ -57,6 +58,18 @@ public final class FreshRegionBuilderTest {
             RegionShard.Id failed=new RegionShard.Id(2,-1);
             expectIO(()->FreshRegionBuilder.build(root,failed,(x,z)->{throw new IOException("source failed");}));
             check(!Files.exists(failed.directory(root)),"partial shard unpublished");
+            // Fail after enough dense pages to have opened the staged log and written a frame.
+            RegionShard.Id midFailed=new RegionShard.Id(3,-1);
+            var counter=new java.util.concurrent.atomic.AtomicInteger();
+            var repeated=FreshRegionBuilder.Columns.fromEntries(chunks.get(key(-64,64)));
+            expectIO(()->FreshRegionBuilder.buildPacked(root,midFailed,(x,z)->{
+                if(counter.incrementAndGet()>1000)throw new IOException("mid-build source failure");
+                return repeated;
+            }));
+            check(counter.get()==1001&&!Files.exists(midFailed.directory(root)),"mid-build stage unpublished");
+            try(var children=Files.list(root)){
+                check(children.noneMatch(path->path.getFileName().toString().startsWith(".building-")),"staging cleaned");
+            }
             // Incremental updates read and revise the fresh-built pages normally.
             Entry[] replacement=new Entry[256];
             Arrays.fill(replacement,Entry.leaf(grass,100,99,0,20,30,40));

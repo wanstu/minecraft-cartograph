@@ -3,18 +3,13 @@ package com.wanstu.cartograph.v4;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
-import java.util.zip.CRC32C;
-import java.nio.ByteBuffer;
-import net.jpountz.lz4.LZ4Factory;
 import static com.wanstu.cartograph.v4.RegionPageStore.*;
 
 /** Fresh-shard-only bottom-up builder. Each physical LOD page is generated once. */
-public final class FreshRegionBuilder {
+public final class FreshRegionBuilder implements AutoCloseable {
     private static final int N=32*32,H=FeatureDictionary.Terrain.values().length;
     private static final int KNOWN=0,SC=1,GC=2,WET=3,SS=4,GS=5,R=6,G=7,B=8,DEPTH=9,MIN=10,MAX=11,HIST=12;
     private static final int UNKNOWN=GeographicPyramid.UNKNOWN_HEIGHT;
-    private static final LZ4Factory CODEC=LZ4Factory.safeInstance();
-    private static final ThreadLocal<byte[]> COMPRESS_SCRATCH=ThreadLocal.withInitial(()->new byte[128*1024]);
 
     /** A complete observed chunk, or null if it has not been generated. */
     @FunctionalInterface public interface Source { Entry[] chunk(int x,int z)throws IOException; }
@@ -69,14 +64,14 @@ public final class FreshRegionBuilder {
         Path target=id.directory(root);
         if(Files.exists(target))throw new IOException("Fresh builder cannot overwrite an existing shard");
         Path stage=Files.createTempDirectory(root,".building-");
-        try{
-            var b=new FreshRegionBuilder(stage,source);
+        try(var b=new FreshRegionBuilder(stage,source)){
             Packed p=b.buildPage(5,id.x(),id.z());
             for(int lod=6;lod<=10;lod++){
                 Key parent=new Key(lod,Math.floorDiv(p.key.x(),2),Math.floorDiv(p.key.z(),2));
                 Packed q=b.page(parent);b.merge(q,p);b.emit(q);p=q;
             }
             b.flush();
+            long syncStart=System.nanoTime();b.log.forceStaged();b.commitNanos+=System.nanoTime()-syncStart;
             if(Files.exists(target))throw new IOException("Shard already published");
             Files.move(stage,target,StandardCopyOption.ATOMIC_MOVE);
             return new Result(b.chunks,b.pages,b.log.flushes(),b.sourceNanos,b.mergeNanos,b.encodeNanos,b.commitNanos);
@@ -86,6 +81,7 @@ public final class FreshRegionBuilder {
             }
         }
     }
+    @Override public void close()throws IOException{log.closeStaged();}
     private Packed page(Key key){
         Packed p=scratch[key.lod()];
         if(p==null){p=new Packed(key);scratch[key.lod()]=p;}
@@ -117,7 +113,7 @@ public final class FreshRegionBuilder {
     }
     private void flush()throws IOException{
         if(pending.isEmpty())return;
-        long start=System.nanoTime();log.appendEncoded(pending);commitNanos+=System.nanoTime()-start;pending.clear();pendingBytes=0;
+        long start=System.nanoTime();log.appendStaged(pending);commitNanos+=System.nanoTime()-start;pending.clear();pendingBytes=0;
     }
     private static final class Packed {
         Key key;
@@ -204,7 +200,8 @@ public final class FreshRegionBuilder {
                 pos+=n;
             }
             return pos;
-        }        byte[] encode()throws IOException{
+        }
+        byte[] encode()throws IOException{
             int lod=key.lod(),cw=countWidth(lod),sw=colorWidth(lod);
             boolean dense=count==N;
             int stride=stride(lod)-(dense?2:0);
@@ -259,15 +256,7 @@ public final class FreshRegionBuilder {
                 for(int f=HIST;f<HIST+H;f++)pos=channel(body,pos,data[f],slots,n,cw);
                 if(pos!=body.length)throw new IOException("Incorrect page size");
             }
-            CRC32C crc=new CRC32C();crc.update(body);
-            var codec=CODEC.fastCompressor();
-            if(body.length>4*1024*1024)throw new IOException("Page limit");
-            byte[] encoded=COMPRESS_SCRATCH.get();
-            int required=8+codec.maxCompressedLength(body.length);
-            if(encoded.length<required){encoded=new byte[required];COMPRESS_SCRATCH.set(encoded);}
-            ByteBuffer.wrap(encoded).putInt(body.length).putInt((int)crc.getValue());
-            int len=codec.compress(body,0,body.length,encoded,8,encoded.length-8);
-            return Arrays.copyOf(encoded,8+len);
+            return PageFrameCodec.encode(body,base,n);
         }
     }
 }

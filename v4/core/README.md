@@ -1,16 +1,14 @@
 # V4 foundation prototype
 
-Standalone Java 21 core. No Minecraft runtime required. The page codec experiment uses the
-existing Minecraft 1.21.1 LZ4 Java library (org.lz4:lz4-java:1.8.0, safe Java implementation).
-Supply its jar on the compile and runtime classpath. Production dependency review and
-packaging are still pending.
+Standalone Java 21 core. No Minecraft runtime or external compression dependency required.
+The current format uses lossless adaptive byte-plane offsets and CRC32C.
 
-PowerShell, from this directory, with LZ4_JAR set to the jar path:
+PowerShell, from this directory:
 
     $src = Get-ChildItem src -Recurse -Filter '*.java' | ForEach-Object FullName
-    javac --release 21 -cp $env:LZ4_JAR -d out $src
-    $cp = "out;$env:LZ4_JAR"
-    foreach ($test in 'FoundationTest','CameraTest','RegionStoreTest','WorkerTest','CapturePumpTest','DensePyramidTest','PageCodecTest','FreshRegionBuilderTest') {
+    javac --release 21 -d out $src
+    $cp = "out"
+    foreach ($test in 'FoundationTest','CameraTest','RegionStoreTest','WorkerTest','CapturePumpTest','DensePyramidTest','PageCodecTest','FreshRegionBuilderTest','PageFrameCodecTest') {
         java -Xmx256m -cp $cp "com.wanstu.cartograph.v4.$test"
         if ($LASTEXITCODE -ne 0) { throw "$test failed" }
     }
@@ -18,7 +16,6 @@ PowerShell, from this directory, with LZ4_JAR set to the jar path:
     java -Xmx256m -cp $cp com.wanstu.cartograph.v4.ScaleTest 128 256
     java -Xmx256m -cp $cp com.wanstu.cartograph.v4.ScaleTest 320 256
 
-On Linux use ':' rather than ';' as the classpath separator.
 The synthetic benchmark uses repeated pseudo-random samples, 11 exact LODs and durable
 transactions. It is not a game benchmark. Optional encoder thread count:
 -Dcartograph.v4.encodeThreads=1, 2 (default), or 4.
@@ -40,3 +37,6 @@ Larger independent-snapshot benchmark (262144 chunks, 2 workers):
 
 The worker stage timings are summed elapsed time across workers, not CPU time.
 The JVM active processor setting is not a hard operating-system CPU limit.
+Million-chunk independent-snapshot benchmark (1,048,576 chunks, 256 shards, two workers):
+
+    java '-Dcartograph.v4.encodeThreads=1' '-XX:ActiveProcessorCount=4' -Xmx256m -cp $cp com.wanstu.cartograph.v4.ShardScaleTest 16 2 256 unique

@@ -6,7 +6,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.zip.CRC32C;
 
-/** Append-only transaction experiment. One durable flush per batch; direct latest-page index. */
+/** Append-only log; incremental batches force immediately, unpublished fresh shards force before publication. */
 final class PageTransactionLog {
     private static final int MAGIC=0x4356344c, END=0x434f4d54;
     private static final int MAX=32*1024*1024;
@@ -15,6 +15,7 @@ final class PageTransactionLog {
     private final Path file;
     private final Map<RegionPageStore.Key,Pointer> index=new HashMap<>();
     private long flushes,scanBytes;
+    private RandomAccessFile staging;
     PageTransactionLog(Path root)throws IOException{
         file=root.resolve("pages.cv4log");
         if(Files.notExists(file))Files.createFile(file);
@@ -59,6 +60,25 @@ final class PageTransactionLog {
         appendEncoded(encoded);
     }
     void appendEncoded(List<Encoded> pages)throws IOException{
+        if(staging!=null)throw new IOException("Staged writer active");
+        try(var out=new RandomAccessFile(file.toFile(),"rw")){append(out,pages,true);}
+    }
+    // Only a private, unpublished fresh-build staging directory may defer force.
+    void appendStaged(List<Encoded> pages)throws IOException{
+        if(staging==null)staging=new RandomAccessFile(file.toFile(),"rw");
+        append(staging,pages,false);
+    }
+    void forceStaged()throws IOException{
+        if(staging==null)staging=new RandomAccessFile(file.toFile(),"rw");
+        try{staging.getChannel().force(true);flushes++;}
+        finally{closeStaged();}
+    }
+    void closeStaged()throws IOException{
+        if(staging!=null){
+            RandomAccessFile out=staging;staging=null;out.close();
+        }
+    }
+    private void append(RandomAccessFile fileOut,List<Encoded> pages,boolean durable)throws IOException{
         if(pages.isEmpty()||pages.size()>DiskGeographicPyramid.MAX_BATCH_CHUNKS*11)
             throw new IOException("Invalid transaction page count");
         long length=4;
@@ -67,23 +87,26 @@ final class PageTransactionLog {
         byte[] body=new byte[(int)length];
         ByteBuffer out=ByteBuffer.wrap(body);
         out.putInt(pages.size());
-        try(var fileOut=new RandomAccessFile(file.toFile(),"rw")){
-            long start=fileOut.length();
-            Map<RegionPageStore.Key,Pointer> next=new HashMap<>();
-            for(Encoded page:pages){
-                byte[] data=page.data;var key=page.key;
-                if(data.length<1||data.length>MAX_PAGE||page.revision<=revision(key))
-                    throw new IOException("Invalid transaction page");
-                out.putInt(key.lod()).putInt(key.x()).putInt(key.z()).putLong(page.revision).putInt(data.length);
-                if(next.put(key,new Pointer(start+8+out.position(),data.length,page.revision))!=null)
-                    throw new IOException("Duplicate page");
-                out.put(data);
-            }
-            fileOut.seek(start);fileOut.writeInt(MAGIC);fileOut.writeInt(body.length);fileOut.write(body);
-            fileOut.writeInt(checksum(body));fileOut.writeInt(END);
-            fileOut.getChannel().force(true);flushes++;
-            index.putAll(next);
+        long start=fileOut.length();
+        Map<RegionPageStore.Key,Pointer> next=new HashMap<>();
+        for(Encoded page:pages){
+            byte[] data=page.data;var key=page.key;
+            if(data.length<1||data.length>MAX_PAGE||page.revision<=revision(key))
+                throw new IOException("Invalid transaction page");
+            out.putInt(key.lod()).putInt(key.x()).putInt(key.z()).putLong(page.revision).putInt(data.length);
+            if(next.put(key,new Pointer(start+8+out.position(),data.length,page.revision))!=null)
+                throw new IOException("Duplicate page");
+            out.put(data);
         }
+        var channel=fileOut.getChannel();channel.position(start);
+        writeFully(channel,ByteBuffer.allocate(8).putInt(MAGIC).putInt(body.length).flip());
+        writeFully(channel,ByteBuffer.wrap(body));
+        writeFully(channel,ByteBuffer.allocate(8).putInt(checksum(body)).putInt(END).flip());
+        if(durable){fileOut.getChannel().force(true);flushes++;}
+        index.putAll(next);
+    }
+    private static void writeFully(java.nio.channels.FileChannel channel,ByteBuffer bytes)throws IOException{
+        while(bytes.hasRemaining())channel.write(bytes);
     }
     private void recover()throws IOException{
         try(var in=new RandomAccessFile(file.toFile(),"rw")){
