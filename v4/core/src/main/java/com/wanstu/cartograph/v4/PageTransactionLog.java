@@ -2,6 +2,7 @@ package com.wanstu.cartograph.v4;
 
 import java.io.*;
 import java.nio.file.*;
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.zip.CRC32C;
 
@@ -52,23 +53,27 @@ final class PageTransactionLog {
         return pending;
     }
     void append(List<RegionPageStore.Page> pages,List<byte[]> payloads)throws IOException{
-        ByteArrayOutputStream bytes=new ByteArrayOutputStream();
-        try(var out=new DataOutputStream(bytes)){
-            out.writeInt(pages.size());
+        long length=4;
+        for(byte[] data:payloads)length+=24L+data.length;
+        if(length>MAX)throw new IOException("Transaction limit");
+        byte[] body=new byte[(int)length];
+        ByteBuffer out=ByteBuffer.wrap(body);
+        out.putInt(pages.size());
+        try(var fileOut=new RandomAccessFile(file.toFile(),"rw")){
+            long start=fileOut.length();
+            Map<RegionPageStore.Key,Pointer> next=new HashMap<>();
             for(int i=0;i<pages.size();i++){
-                var page=pages.get(i);byte[] data=payloads.get(i);
-                if((long)bytes.size()+24+data.length>MAX)throw new IOException("Transaction limit");
-                out.writeInt(page.key().lod());out.writeInt(page.key().x());out.writeInt(page.key().z());
-                out.writeLong(page.revision());out.writeInt(data.length);out.write(data);
+                var page=pages.get(i);byte[] data=payloads.get(i);var key=page.key();
+                if(data.length<1||data.length>MAX_PAGE||page.revision()<=revision(key))
+                    throw new IOException("Invalid transaction page");
+                out.putInt(key.lod()).putInt(key.x()).putInt(key.z()).putLong(page.revision()).putInt(data.length);
+                if(next.put(key,new Pointer(start+8+out.position(),data.length,page.revision()))!=null)
+                    throw new IOException("Duplicate page");
+                out.put(data);
             }
-        }
-        byte[] body=bytes.toByteArray();
-        try(var out=new RandomAccessFile(file.toFile(),"rw")){
-            long start=out.length();
-            var next=parse(body,start+8);
-            out.seek(start);out.writeInt(MAGIC);out.writeInt(body.length);out.write(body);
-            out.writeInt(checksum(body));out.writeInt(END);
-            out.getChannel().force(true);flushes++;
+            fileOut.seek(start);fileOut.writeInt(MAGIC);fileOut.writeInt(body.length);fileOut.write(body);
+            fileOut.writeInt(checksum(body));fileOut.writeInt(END);
+            fileOut.getChannel().force(true);flushes++;
             index.putAll(next);
         }
     }

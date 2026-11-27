@@ -50,18 +50,26 @@ public final class ScaleTest {
         long scanBytes=store.startupScanBytes();
         pyramid=new DiskGeographicPyramid(store,10);
         long coverage=0;
-        for(int z=-1;z<=0;z++)for(int x=-1;x<=0;x++)coverage+=pyramid.get(new GeographicPyramid.Cell(10,x,z)).stats().known();
+        int min=Math.floorDiv(-edge/2*16,1024),max=Math.floorDiv((edge/2)*16-1,1024);
+        Set<Key> overviewPages=new HashSet<>();
+        for(int z=min;z<=max;z++)for(int x=min;x<=max;x++){
+            var cell=new GeographicPyramid.Cell(10,x,z);
+            var value=pyramid.get(cell);
+            check(value!=null,"overview cell");
+            coverage+=value.stats().known();
+            overviewPages.add(Key.of(cell));
+        }
         check(coverage==chunks*256L,"whole world coverage");
-        check(store.diskReads()==4,"only coarse pages after restart");
+        check(store.diskReads()==overviewPages.size(),"only coarse pages after restart");
         long w=store.diskWrites();
         check(pyramid.updateChunk(-edge/2,-edge/2,samples[0])==0&&store.diskWrites()==w,"unchanged chunk");
         System.out.printf(Locale.ROOT,"encodeMs=%.1f appendMs=%.1f cacheMs=%.1f%n",encode/1e6,append/1e6,cache/1e6);
-        System.out.printf(Locale.ROOT,"chunks=%d batch=%d seconds=%.3f chunks/s=%.1f pageWrites=%d pageReads=%d diskBytes=%d flushes=%d reopenMs=%.1f startupScanBytes=%d coldOverviewReads=4 coverage=%d%n",
-            chunks,batch,seconds,chunks/seconds,writes,reads,bytes,flushes,reopenMs,scanBytes,coverage);
+        System.out.printf(Locale.ROOT,"chunks=%d batch=%d seconds=%.3f chunks/s=%.1f pageWrites=%d pageReads=%d diskBytes=%d flushes=%d reopenMs=%.1f startupScanBytes=%d coldOverviewReads=%d coverage=%d%n",
+            chunks,batch,seconds,chunks/seconds,writes,reads,bytes,flushes,reopenMs,scanBytes,overviewPages.size(),coverage);
     }
     public static void main(String[] args)throws Exception{
         int edge=Integer.parseInt(args[0]),batch=Integer.parseInt(args[1]);
-        if(edge<4||edge>128||edge%4!=0)throw new IllegalArgumentException("edge");
+        if(edge<4||edge>1024||edge%4!=0)throw new IllegalArgumentException("edge");
         Path root=Files.createTempDirectory("cartograph-v4-scale-");
         try{run(root,edge,batch,samples());}finally{delete(root);}
     }

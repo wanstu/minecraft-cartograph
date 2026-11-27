@@ -16,6 +16,7 @@ PowerShell, from this directory, with LZ4_JAR set to the jar path:
     }
     java -Xmx256m -cp $cp com.wanstu.cartograph.v4.ScaleTest 64 256
     java -Xmx256m -cp $cp com.wanstu.cartograph.v4.ScaleTest 128 256
+    java -Xmx256m -cp $cp com.wanstu.cartograph.v4.ScaleTest 320 256
 
 On Linux use ':' rather than ';' as the classpath separator.
 The synthetic benchmark uses repeated pseudo-random samples, 11 exact LODs and durable

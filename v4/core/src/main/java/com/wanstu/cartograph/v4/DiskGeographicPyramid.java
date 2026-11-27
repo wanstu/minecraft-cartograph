@@ -15,25 +15,23 @@ public final class DiskGeographicPyramid {
     }
     public synchronized Entry get(GeographicPyramid.Cell cell)throws IOException{
         if(cell.level()<0||cell.level()>maxLod)throw new IllegalArgumentException("LOD");
-        return store.read(Key.of(cell)).entries().get(Key.slot(cell));
+        return store.read(Key.of(cell)).entryAt(Key.slot(cell));
     }
     private static final class WorkPage {
         final Page old;
-        final Entry[] data=new Entry[SLOTS];
+        final Entry[] data;
         final BitSet changed=new BitSet(SLOTS);
         WorkPage(Page old){
             this.old=old;
-            old.entries().forEach((slot,e)->data[slot]=e);
+            data=old.copySlots();
         }
         void put(int slot,Entry entry){
             data[slot]=entry;
-            if(Objects.equals(old.entries().get(slot),entry))changed.clear(slot);
+            if(Objects.equals(old.entryAt(slot),entry))changed.clear(slot);
             else changed.set(slot);
         }
         Page publish(){
-            Map<Integer,Entry> entries=new HashMap<>(SLOTS*4/3+1);
-            for(int i=0;i<SLOTS;i++)if(data[i]!=null)entries.put(i,data[i]);
-            return new Page(old.key(),Math.addExact(old.revision(),1),entries);
+            return Page.fromSlots(old.key(),Math.addExact(old.revision(),1),data);
         }
     }
     private WorkPage page(Map<Key,WorkPage> pages,Key key)throws IOException{

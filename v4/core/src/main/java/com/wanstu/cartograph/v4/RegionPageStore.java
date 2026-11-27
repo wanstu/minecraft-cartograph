@@ -104,22 +104,60 @@ public final class RegionPageStore {
         }
     }
 
-    public record Page(Key key, long revision, Map<Integer,Entry> entries) {
-        public Page {
-            Objects.requireNonNull(key);
-            entries = Map.copyOf(entries);
-            if(revision<0 || entries.size()>EDGE*EDGE)throw new IllegalArgumentException("Page");
-            long capacity=1L<<(key.lod()*2);
-            for(var e:entries.entrySet()) {
-                Entry v=e.getValue();
-                if(e.getKey()<0||e.getKey()>=EDGE*EDGE||v.stats.known>capacity||
-                    (key.lod()==0)!=(v.feature!=null)||
-                    (v.feature!=null && !validLeaf(v)))
-                    throw new IllegalArgumentException("Page slot");
-            }
+    /** Immutable indexed page. Materialize the public map view only for consumers that ask for it. */
+    public static final class Page {
+        private final Key key;
+        private final long revision;
+        private final Entry[] slots;
+        private final int size;
+        private volatile Map<Integer,Entry> view;
+        public Page(Key key,long revision,Map<Integer,Entry> entries){
+            this(key,revision,toSlots(entries));
         }
+        private static Entry[] toSlots(Map<Integer,Entry> entries){
+            Entry[] slots=new Entry[EDGE*EDGE];
+            for(var pair:entries.entrySet()){
+                int slot=pair.getKey();
+                if(slot<0||slot>=slots.length)throw new IllegalArgumentException("Page slot");
+                slots[slot]=Objects.requireNonNull(pair.getValue());
+            }
+            return slots;
+        }
+        private Page(Key key,long revision,Entry[] slots){
+            this.key=Objects.requireNonNull(key);
+            this.revision=revision;
+            if(revision<0||slots.length!=EDGE*EDGE)throw new IllegalArgumentException("Page");
+            this.slots=slots;
+            long capacity=1L<<(key.lod()*2);
+            int count=0;
+            for(Entry v:slots){
+                if(v==null)continue;
+                if(v.stats.known>capacity||(key.lod()==0)!=(v.feature!=null)||
+                    (v.feature!=null&&!validLeaf(v)))throw new IllegalArgumentException("Page slot");
+                count++;
+            }
+            size=count;
+        }
+        static Page fromSlots(Key key,long revision,Entry[] slots){
+            return new Page(key,revision,slots.clone());
+        }
+        public Key key(){return key;}
+        public long revision(){return revision;}
+        public Entry entryAt(int slot){return slots[slot];}
+        Entry[] copySlots(){return slots.clone();}
+        public int size(){return size;}
+        public Map<Integer,Entry> entries(){
+            Map<Integer,Entry> result=view;
+            if(result!=null)return result;
+            Map<Integer,Entry> entries=new HashMap<>(size*4/3+1);
+            for(int i=0;i<slots.length;i++)if(slots[i]!=null)entries.put(i,slots[i]);
+            result=Map.copyOf(entries);view=result;return result;
+        }
+        @Override public boolean equals(Object o){
+            return o instanceof Page p&&key.equals(p.key)&&revision==p.revision&&Arrays.equals(slots,p.slots);
+        }
+        @Override public int hashCode(){return 31*Objects.hash(key,revision)+Arrays.hashCode(slots);}
     }
-
     private static boolean validLeaf(Entry v){
         Aggregate a=v.stats;
         if(a.known!=1||a.histogram[v.feature.terrain().ordinal()]!=1)return false;
@@ -180,8 +218,9 @@ public final class RegionPageStore {
 
     // Conservative accounting model, not measured JVM retained size.
     private static long estimatedWeight(Page p){
-        long weight=256;
-        for(Entry e:p.entries.values()){
+        long weight=4352;
+        for(Entry e:p.slots){
+            if(e==null)continue;
             weight+=384;
             if(e.feature!=null)weight+=128+2L*(e.feature.materialKey().length()+e.feature.biomeKey().length());
         }
@@ -274,54 +313,60 @@ public final class RegionPageStore {
             default -> throw new IllegalArgumentException("width");
         };
     }
+    /** Thread-owned scratch bounded by one full page; never escapes to stored pages or results. */
+    private static final ThreadLocal<byte[]> ROW_SCRATCH=ThreadLocal.withInitial(()->new byte[EDGE*EDGE*stride(10)]);
     static byte[] encode(Page p)throws IOException{
-        ByteArrayOutputStream raw=new ByteArrayOutputStream();
-        try(DataOutputStream out=new DataOutputStream(raw)){
-            out.writeInt(MAGIC);out.writeInt(VERSION);out.writeInt(p.key.lod());out.writeInt(p.key.x());out.writeInt(p.key.z());
+        ByteArrayOutputStream header=new ByteArrayOutputStream(256);
+        Map<FeatureDictionary.Feature,Integer> palette=new LinkedHashMap<>();
+        Entry[] ordered=p.slots;
+        int lod=p.key.lod(),stride=stride(lod),cw=countWidth(lod),sw=colorWidth(lod);
+        if(lod==0){
+            for(Entry e:ordered)if(e!=null)palette.computeIfAbsent(e.feature,f->palette.size()+1);
+        }
+        try(DataOutputStream out=new DataOutputStream(header)){
+            out.writeInt(MAGIC);out.writeInt(VERSION);out.writeInt(lod);out.writeInt(p.key.x());out.writeInt(p.key.z());
             out.writeLong(p.revision);
-            // Region-local palette, independent of process-local IDs.
-            Map<FeatureDictionary.Feature,Integer> palette=new LinkedHashMap<>();
-            Entry[] ordered=new Entry[EDGE*EDGE];
-            p.entries.forEach((slot,e)->ordered[slot]=e);
-            for(Entry e:ordered)if(e!=null&&e.feature!=null)palette.computeIfAbsent(e.feature,f->palette.size()+1);
             out.writeInt(palette.size());
             for(var f:palette.keySet()){out.writeUTF(f.materialKey());out.writeUTF(f.biomeKey());out.writeByte(f.terrain().ordinal());}
-            out.writeInt(p.entries.size());
-            // Fixed-width numeric records: bulk byte buffer instead of dozens of stream calls per cell.
-            int lod=p.key.lod(),stride=stride(lod),cw=countWidth(lod),sw=colorWidth(lod);
-            ByteBuffer cells=ByteBuffer.allocate(Math.multiplyExact(p.entries.size(),stride));
-            for(int slot=0;slot<ordered.length;slot++){
-                Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
-                cells.putShort((short)slot);
-                if(lod==0){
-                    cells.putShort((short)(int)palette.get(e.feature));
-                    cells.putInt(a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.surfaceSum));
-                    cells.putInt(a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.groundSum));
-                    cells.putShort((short)a.depthSum).putShort((short)a.redSum);
-                    cells.putShort((short)a.greenSum).putShort((short)a.blueSum);
-                    continue;
-                }
-                putUnsigned(cells,a.known,cw);putUnsigned(cells,a.surfaceCount,cw);
-                putUnsigned(cells,a.groundCount,cw);putUnsigned(cells,a.wetCount,cw);
-                cells.putLong(a.surfaceSum).putLong(a.groundSum);
-                putUnsigned(cells,a.redSum,sw);putUnsigned(cells,a.greenSum,sw);
-                putUnsigned(cells,a.blueSum,sw);putUnsigned(cells,a.depthSum,sw);
-                cells.putInt(a.minGround).putInt(a.maxGround);
-                for(long n:a.histogram)putUnsigned(cells,n,cw);
-            }
-            byte[] rowMajor=cells.array(),planes=new byte[rowMajor.length];
-            int n=p.entries.size();
-            for(int row=0;row<n;row++)for(int col=0;col<stride;col++)
-                planes[col*n+row]=rowMajor[row*stride+col];
-            out.write(planes);
+            out.writeInt(p.size);
         }
-        byte[] body=raw.toByteArray();if(body.length>MAX_RAW)throw new IOException("Page limit");
+        int n=p.size,bytes=n*stride;
+        byte[] prefix=header.toByteArray();
+        if((long)prefix.length+bytes>MAX_RAW)throw new IOException("Page limit");
+        byte[] rowMajor=ROW_SCRATCH.get();
+        ByteBuffer cells=ByteBuffer.wrap(rowMajor,0,bytes);
+        for(int slot=0;slot<ordered.length;slot++){
+            Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
+            cells.putShort((short)slot);
+            if(lod==0){
+                cells.putShort((short)(int)palette.get(e.feature));
+                cells.putInt(a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.surfaceSum));
+                cells.putInt(a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.groundSum));
+                cells.putShort((short)a.depthSum).putShort((short)a.redSum);
+                cells.putShort((short)a.greenSum).putShort((short)a.blueSum);
+                continue;
+            }
+            putUnsigned(cells,a.known,cw);putUnsigned(cells,a.surfaceCount,cw);
+            putUnsigned(cells,a.groundCount,cw);putUnsigned(cells,a.wetCount,cw);
+            cells.putLong(a.surfaceSum).putLong(a.groundSum);
+            putUnsigned(cells,a.redSum,sw);putUnsigned(cells,a.greenSum,sw);
+            putUnsigned(cells,a.blueSum,sw);putUnsigned(cells,a.depthSum,sw);
+            cells.putInt(a.minGround).putInt(a.maxGround);
+            for(long value:a.histogram)putUnsigned(cells,value,cw);
+        }
+        if(cells.position()!=bytes)throw new IOException("Incorrect numeric record length");
+        byte[] body=Arrays.copyOf(prefix,prefix.length+bytes);
+        // Directly produce the final byte planes. No intermediate planes array or stream copy.
+        int base=prefix.length;
+        for(int col=0;col<stride;col++)
+            for(int row=0,offset=col,dest=base+col*n;row<n;row++,offset+=stride,dest++)
+                body[dest]=rowMajor[offset];
         CRC32C crc=new CRC32C();crc.update(body);
         var compressor=CODEC.fastCompressor();
         byte[] compressed=new byte[8+compressor.maxCompressedLength(body.length)];
         ByteBuffer.wrap(compressed).putInt(body.length).putInt((int)crc.getValue());
-        int n=compressor.compress(body,0,body.length,compressed,8,compressed.length-8);
-        return Arrays.copyOf(compressed,8+n);
+        int length=compressor.compress(body,0,body.length,compressed,8,compressed.length-8);
+        return Arrays.copyOf(compressed,8+length);
     }
     static Page decode(byte[] data,Key expected)throws IOException{
         try(DataInputStream header=new DataInputStream(new ByteArrayInputStream(data))){
@@ -350,11 +395,11 @@ public final class RegionPageStore {
                 int lod=key.lod(),stride=stride(lod),cw=countWidth(lod),sw=colorWidth(lod);
                 if(in.available()!=count*stride)throw new IOException("Numeric page length");
                 int base=body.length-in.available();
-                byte[] rows=new byte[count*stride];
-                for(int row=0;row<count;row++)for(int col=0;col<stride;col++)
-                    rows[row*stride+col]=body[base+col*count+row];
-                ByteBuffer cells=ByteBuffer.wrap(rows);
-                Map<Integer,Entry> entries=new HashMap<>(count*4/3+1);
+                byte[] rows=ROW_SCRATCH.get();
+                for(int col=0;col<stride;col++)for(int row=0,dest=col,src=base+col*count;row<count;row++,dest+=stride,src++)
+                    rows[dest]=body[src];
+                ByteBuffer cells=ByteBuffer.wrap(rows,0,count*stride);
+                Entry[] entries=new Entry[EDGE*EDGE];
                 for(int i=0;i<count;i++){
                     int slot=Short.toUnsignedInt(cells.getShort()),feature=lod==0?Short.toUnsignedInt(cells.getShort()):0;
                     if(feature>=palette.size())throw new IOException("Feature index");
@@ -363,7 +408,8 @@ public final class RegionPageStore {
                         Entry e=Entry.leaf(palette.get(feature),cells.getInt(),cells.getInt(),
                             Short.toUnsignedInt(cells.getShort()),Short.toUnsignedInt(cells.getShort()),
                             Short.toUnsignedInt(cells.getShort()),Short.toUnsignedInt(cells.getShort()));
-                        if(entries.put(slot,e)!=null)throw new IOException("Duplicate slot");
+                        if(slot>=entries.length||entries[slot]!=null)throw new IOException("Invalid or duplicate slot");
+                        entries[slot]=e;
                         continue;
                     }
                     long known=getUnsigned(cells,cw),sc=getUnsigned(cells,cw),gc=getUnsigned(cells,cw),wet=getUnsigned(cells,cw);
@@ -372,7 +418,8 @@ public final class RegionPageStore {
                     int min=cells.getInt(),max=cells.getInt();long[] h=new long[CLASSES];
                     for(int j=0;j<CLASSES;j++)h[j]=getUnsigned(cells,cw);
                     Entry e=new Entry(new Aggregate(known,sc,gc,ss,gs,r,g,b,wet,depth,min,max,h),palette.get(feature));
-                    if(entries.put(slot,e)!=null)throw new IOException("Duplicate slot");
+                    if(slot>=entries.length||entries[slot]!=null)throw new IOException("Invalid or duplicate slot");
+                        entries[slot]=e;
                 }
                 return new Page(key,revision,entries);
             }
