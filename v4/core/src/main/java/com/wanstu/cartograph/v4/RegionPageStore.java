@@ -12,6 +12,8 @@ public final class RegionPageStore {
     private static final int MAGIC = 0x43563450; // CV4P
     private static final int VERSION = 1;
     private static final int MAX_RAW = 4 * 1024 * 1024;
+    private static final int MAX_BATCH_PAGES=DiskGeographicPyramid.MAX_BATCH_CHUNKS*11;
+    private static final int MAX_JOURNAL_BYTES=32*1024*1024;
     private static final int CLASSES = FeatureDictionary.Terrain.values().length;
 
     public record Key(int lod, int x, int z) {
@@ -178,8 +180,9 @@ public final class RegionPageStore {
         if(Files.exists(root.resolve("pending.cv4j")))throw new IOException("Recover pending transaction first");
         List<Page> pages=List.copyOf(input);
         if(pages.isEmpty())return;
-        if(pages.size()>11)throw new IllegalArgumentException("Batch limit");
+        if(pages.size()>MAX_BATCH_PAGES)throw new IllegalArgumentException("Batch limit");
         Set<Key> seen=new HashSet<>();
+        List<byte[]> payloads=new ArrayList<>();
         ByteArrayOutputStream bytes=new ByteArrayOutputStream();
         try(DataOutputStream out=new DataOutputStream(bytes)){
             out.writeInt(0x4356344a);out.writeInt(pages.size());
@@ -187,13 +190,15 @@ public final class RegionPageStore {
                 if(!seen.add(p.key)||p.revision<=read(p.key).revision)
                     throw new IllegalArgumentException("Duplicate key or stale revision");
                 byte[] data=encode(p);
+                if((long)bytes.size()+16+data.length>MAX_JOURNAL_BYTES)throw new IOException("Journal size limit");
+                payloads.add(data);
                 out.writeInt(p.key.lod());out.writeInt(p.key.x());out.writeInt(p.key.z());
                 out.writeInt(data.length);out.write(data);
             }
         }
         recoveryRequired=true;
         atomicWrite(root.resolve("pending.cv4j"),bytes.toByteArray());
-        recover();
+        publish(pages,payloads);
     }
 
     /** Redo is idempotent; journal is deleted only after every page is published. */
@@ -201,11 +206,11 @@ public final class RegionPageStore {
         Path journal=root.resolve("pending.cv4j");
         if(Files.notExists(journal)){recoveryRequired=false;return;}
         recoveryRequired=true;
-        if(Files.size(journal)>11L*(MAX_RAW+1024)+128)throw new IOException("Oversized journal");
+        if(Files.size(journal)>MAX_JOURNAL_BYTES)throw new IOException("Oversized journal");
         List<Page> pages=new ArrayList<>();List<byte[]> payloads=new ArrayList<>();
         try(DataInputStream in=new DataInputStream(Files.newInputStream(journal))){
             if(in.readInt()!=0x4356344a)throw new IOException("Journal magic");
-            int count=in.readInt();if(count<1||count>11)throw new IOException("Journal count");
+            int count=in.readInt();if(count<1||count>MAX_BATCH_PAGES)throw new IOException("Journal count");
             Set<Key> keys=new HashSet<>();
             for(int i=0;i<count;i++){
                 Key k=new Key(in.readInt(),in.readInt(),in.readInt());
@@ -216,8 +221,12 @@ public final class RegionPageStore {
             }
             if(in.read()!=-1)throw new IOException("Trailing journal data");
         } catch(IllegalArgumentException e){throw new IOException("Invalid journal",e);}
+        publish(pages,payloads);
+    }
+
+    private void publish(List<Page> pages,List<byte[]> payloads)throws IOException{
         for(int i=0;i<pages.size();i++){atomicWrite(path(pages.get(i).key),payloads.get(i));diskWrites++;}
-        Files.delete(journal);
+        Files.delete(root.resolve("pending.cv4j"));
         recoveryRequired=false;
         for(Page p:pages)remember(p);
     }

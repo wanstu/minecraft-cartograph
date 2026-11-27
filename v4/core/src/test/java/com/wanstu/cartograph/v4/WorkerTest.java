@@ -41,7 +41,7 @@ public final class WorkerTest {
         worker.closeAsync().get(30,TimeUnit.SECONDS);
         check(newWrite.join()==GeographicWorker.WriteResult.COMMITTED,"durable receipt");
         var m=worker.metrics();
-        check(m.committedChunks()==2&&m.diskWrites()==22&&!m.failed(),"drain writes");
+        check(m.committedChunks()==2&&m.diskWrites()<22&&!m.failed(),"drain writes");
         check(m.estimatedCacheBytes()<=4096,"cache budget");
         check(!worker.offerChunk(0,0,first),"closed rejects");
         var store=new RegionPageStore(root,8,4096);

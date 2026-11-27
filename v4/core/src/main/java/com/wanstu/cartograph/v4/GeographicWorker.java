@@ -28,7 +28,7 @@ public final class GeographicWorker {
     private final long cacheBytes;
     private final CompletableFuture<Void> ready=new CompletableFuture<>(),closed=new CompletableFuture<>();
     private Read activeRead;
-    private Write activeWrite;
+    private List<Write> activeWrites=List.of();
     private boolean closing;
     private Throwable failure;
     private long coalesced,rejectedReads,rejectedWrites,committed,ioReads,ioWrites,estimatedBytes;
@@ -110,7 +110,11 @@ public final class GeographicWorker {
     /** Only COMMITTED acknowledges persistence; SUPERSEDED means a newer full snapshot replaced it. */
     public CompletableFuture<WriteResult> submitChunk(int chunkX,int chunkZ,Entry[] columns){
         Write write=enqueueChunk(chunkX,chunkZ,columns);
-        return write==null?CompletableFuture.failedFuture(new RejectedExecutionException("write unavailable")):write.receipt.copy();
+        if(write!=null)return write.receipt.copy();
+        synchronized(lock){
+            return CompletableFuture.failedFuture(closing||failure!=null?
+                new IllegalStateException("Worker closed",failure):new RejectedExecutionException("write queue full"));
+        }
     }
     private Write enqueueChunk(int chunkX,int chunkZ,Entry[] columns){
         Objects.requireNonNull(columns);
@@ -141,23 +145,27 @@ public final class GeographicWorker {
             ready.complete(null);
             int readBurst=0;
             while(true){
-                Read read=null;Write write=null;
+                Read read=null;List<Write> batch=new ArrayList<>();
                 synchronized(lock){
                     while(!closing&&visible.isEmpty()&&prefetch.isEmpty()&&writes.isEmpty())lock.wait();
                     if(closing&&writes.isEmpty())break;
                     if(!writes.isEmpty()&&(closing||visible.isEmpty()||readBurst>=4)){
-                        write=take(writes);readBurst=0;
+                        batch.add(take(writes));
+                        while(batch.size()<DiskGeographicPyramid.MAX_BATCH_CHUNKS&&!writes.isEmpty())batch.add(take(writes));
+                        readBurst=0;
                     }else if(!visible.isEmpty()){
                         read=take(visible);readBurst++;
                     }else if(!prefetch.isEmpty()){
                         read=take(prefetch);
                     }
-                    activeRead=read;activeWrite=write;
+                    activeRead=read;activeWrites=batch;
                 }
-                if(write!=null){
-                    pyramid.updateChunk(write.chunk.x,write.chunk.z,write.columns);
-                    synchronized(lock){committed++;activeWrite=null;ioReads=store.diskReads();ioWrites=store.diskWrites();estimatedBytes=store.estimatedCacheBytes();}
-                    write.receipt.complete(WriteResult.COMMITTED);
+                if(!batch.isEmpty()){
+                    List<DiskGeographicPyramid.ChunkSnapshot> snapshots=new ArrayList<>(batch.size());
+                    for(Write w:batch)snapshots.add(new DiskGeographicPyramid.ChunkSnapshot(w.chunk.x,w.chunk.z,w.columns));
+                    pyramid.updateChunks(snapshots);
+                    synchronized(lock){committed+=batch.size();activeWrites=List.of();ioReads=store.diskReads();ioWrites=store.diskWrites();estimatedBytes=store.estimatedCacheBytes();}
+                    for(Write w:batch)w.receipt.complete(WriteResult.COMMITTED);
                 }else if(read!=null){
                     try{
                         Page page=store.read(read.key);
@@ -181,7 +189,7 @@ public final class GeographicWorker {
                 if(activeRead!=null)canceled.add(activeRead);
                 visible.clear();prefetch.clear();activeRead=null;
                 unwritten=new ArrayList<>(writes.values());writes.clear();
-                if(activeWrite!=null)unwritten.add(activeWrite);activeWrite=null;
+                unwritten.addAll(activeWrites);activeWrites=List.of();
                 // Stop accepting writes, report failure; caller must not treat queued data as durable.
             }
             ready.completeExceptionally(e);

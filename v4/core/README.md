@@ -11,3 +11,6 @@ Storage tests: java -cp out com.wanstu.cartograph.v4.RegionStoreTest
 V4 only: new empty database, no old-format reader, no migration. Never point the store at a legacy cache directory.
 
 Async worker tests: java -cp out com.wanstu.cartograph.v4.WorkerTest
+
+Capture tests: java -cp out com.wanstu.cartograph.v4.CapturePumpTest
+Scale test (synthetic, 4096 chunks): java -Xmx256m -cp out com.wanstu.cartograph.v4.ScaleTest 64 16
