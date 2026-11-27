@@ -294,7 +294,7 @@ tasks.register('verifyV31FrontendThemes') {
             }
         }
         ['MapPresentationRenderer.dependencyFingerprint(',
-         'MapPresentationRenderer.render(facts, backend::tile)'].each { token ->
+         'MapPresentationRenderer.renderPixels(facts, 1, backend::tile)'].each { token ->
             if (!server.contains(token)) {
                 throw new GradleException('Web cross-chunk relief invalidation is incomplete: ' + token)
             }
@@ -314,7 +314,7 @@ tasks.register('verifyV31FrontendThemes') {
         ['"drawingMode", CartographSettings.drawingMode().id()',
          '"visualStyle", CartographSettings.visualStyle().id()',
          'MapPresentationRenderer.renderSignature()',
-         'MapPresentationRenderer.render(facts, backend::tile).rgb()'].each { token ->
+         'MapPresentationRenderer.renderPixels(facts, 1, backend::tile)'].each { token ->
             if (!server.contains(token)) {
                 throw new GradleException('WebUI presentation bridge is incomplete: ' + token)
             }

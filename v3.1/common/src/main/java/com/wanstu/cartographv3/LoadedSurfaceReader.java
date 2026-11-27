@@ -20,6 +20,7 @@ final class LoadedSurfaceReader {
     private record Key(ServerLevel level, int x, int z) {}
     private static final LinkedHashMap<Key, Capture> PENDING = new LinkedHashMap<>();
     private static final TickWorkQueue WORK = new TickWorkQueue();
+    private static long drainCycle;
     private static long capturesStarted;
     private static long columnsSampled;
 
@@ -45,6 +46,7 @@ final class LoadedSurfaceReader {
     static void tick(MinecraftServer server) {
         if (!server.isSameThread())
             throw new IllegalStateException("Surface work must drain on server thread");
+        drainCycle++;
         WORK.drain(BUDGET_NANOS, MAX_COLUMNS_PER_TICK);
     }
 
@@ -59,6 +61,7 @@ final class LoadedSurfaceReader {
         final Key key;
         final LevelChunk chunk;
         final long sourceRevision;
+        final int minY;
         final CompletableFuture<Optional<SurfaceTile>> result = new CompletableFuture<>();
         final int[] colors = new int[SurfaceTile.PIXELS];
         final short[] heights = new short[SurfaceTile.PIXELS];
@@ -70,11 +73,13 @@ final class LoadedSurfaceReader {
         final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         final net.minecraft.core.Registry<net.minecraft.world.level.biome.Biome> biomes;
         int next;
+        long checkedCycle;
 
         Capture(Key key, LevelChunk chunk) {
             this.key = key;
             this.chunk = chunk;
             this.sourceRevision = SurfaceService.loadedRevision(chunk);
+            this.minY = MapGameAccess.minY(chunk);
             biomes = MapGameAccess.registry(key.level().registryAccess(), Registries.BIOME);
             Arrays.fill(heights, SurfaceColors.UNKNOWN_HEIGHT);
             Arrays.fill(stateIds, -1);
@@ -88,9 +93,13 @@ final class LoadedSurfaceReader {
             if (result.isDone()) return true;
             try {
                 ServerLevel level = key.level();
-                // Never retain or force-load a chunk that the game has unloaded.
-                if (level.getChunkSource().getChunkNow(key.x(), key.z()) != chunk)
-                    throw new IllegalStateException("Surface chunk unloaded during sampling");
+                // The server thread owns the chunk and this drain. Recheck
+                // when a partial capture resumes in a later tick.
+                if (checkedCycle != drainCycle) {
+                    if (level.getChunkSource().getChunkNow(key.x(), key.z()) != chunk)
+                        throw new IllegalStateException("Surface chunk unloaded during sampling");
+                    checkedCycle = drainCycle;
+                }
                 sampleColumn(level, next++);
                 if (next < SurfaceTile.PIXELS) return false;
                 SurfaceTile tile = new SurfaceTile(
@@ -116,7 +125,7 @@ final class LoadedSurfaceReader {
             int top = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
             int reliefY = chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
             int oceanFloor = chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z);
-            for (int y = top; y >= MapGameAccess.minY(chunk); y--) {
+            for (int y = top; y >= minY; y--) {
                 pos.set(worldX, y, worldZ);
                 var state = chunk.getBlockState(pos);
                 MapColor color;
@@ -128,7 +137,7 @@ final class LoadedSurfaceReader {
                 if (color == MapColor.NONE) continue;
                 int waterDepth = color == MapColor.WATER ? Math.max(0, y - oceanFloor) : 0;
                 colors[index] = SurfaceColors.surfaceColor(color, waterDepth, worldX, worldZ);
-                heights[index] = (short) Math.max(MapGameAccess.minY(chunk), reliefY);
+                heights[index] = (short) Math.max(minY, reliefY);
                 stateIds[index] = Block.getId(state);
                 biomeIds[index] = biomes.getId(level.getBiome(pos).value());
                 surfaceHeights[index] = (short) y;

@@ -75,7 +75,7 @@ final class CartographWebUiServer implements AutoCloseable {
             int width,
             int height) {}
     private record TileBatchItem(int x, int z, String etag) {}
-    private record TileBatchPayload(List<TileBatchItem> tiles) {}
+    private record TileBatchSnapshot(String dimension, List<TileReply> replies) {}
     private record TileBatchResult(byte[] bytes, Map<ChunkKey, String> etags) {}
     private record ViewportSelection(
             String dimension,
@@ -481,21 +481,17 @@ final class CartographWebUiServer implements AutoCloseable {
 
     private record TileReply(String etag, byte[] body) {}
 
-    private TileReply tileReply(int x, int z) {
-        String dimension = backend.dimension();
-        if (dimension == null || dimension.isBlank()) return null;
-        ChunkKey key = new ChunkKey(dimension, x, z);
+    private TileReply tileReply(ChunkKey key, long signature) {
         SurfaceTile facts = backend.tile(key);
         if (facts == null || !facts.hasSurfaceFacts()) return null;
 
         long fingerprint = MapPresentationRenderer.dependencyFingerprint(
                 facts, backend::tile);
-        long signature = MapPresentationRenderer.renderSignature();
         CachedTile cached = renderedTiles.get(key);
         if (cached == null
                 || cached.fingerprint() != fingerprint
                 || cached.styleSignature() != signature) {
-            int[] rgb = MapPresentationRenderer.render(facts, backend::tile).rgb();
+            int[] rgb = MapPresentationRenderer.renderPixels(facts, 1, backend::tile);
             byte[] body = new byte[SurfaceTile.PIXELS * 3];
             for (int i = 0; i < SurfaceTile.PIXELS; i++) {
                 int color = rgb[i];
@@ -511,25 +507,41 @@ final class CartographWebUiServer implements AutoCloseable {
         return new TileReply(etag, cached.rgb24());
     }
 
-    private TileBatchResult tileBatchForSocket(TileBatchPayload payload) {
-        List<TileBatchItem> items =
-                payload == null || payload.tiles() == null ? List.of() : payload.tiles();
+    private TileBatchSnapshot snapshotTileBatch(List<TileBatchItem> items) {
+        String dimension = backend.dimension();
+        if (dimension == null || dimension.isBlank()) {
+            return new TileBatchSnapshot("", java.util.Collections.nCopies(items.size(), null));
+        }
+
+        long signature = MapPresentationRenderer.renderSignature();
+        List<TileReply> replies = new ArrayList<>(items.size());
+        for (TileBatchItem item : items) {
+            replies.add(tileReply(new ChunkKey(dimension, item.x(), item.z()), signature));
+        }
+        return new TileBatchSnapshot(dimension, replies);
+    }
+
+    private TileBatchResult tileBatchForSocket(List<TileBatchItem> items) {
         if (items.size() > 512) {
             throw new IllegalArgumentException("Too many tiles in one batch: " + items.size());
         }
 
-        String dimension = backend.dimension();
+        // Only resolve facts and Minecraft's colors on the client thread.
+        // Tile replies own their pixel bytes, so the socket can build the frame.
+        TileBatchSnapshot snapshot = onClient(() -> snapshotTileBatch(items));
+        String dimension = snapshot.dimension();
         Map<ChunkKey, String> etags = new HashMap<>();
         ByteArrayOutputStream bytes =
                 new ByteArrayOutputStream(8 + items.size() * (32 + SurfaceTile.PIXELS * 3));
         try (DataOutputStream output = new DataOutputStream(bytes)) {
             output.writeInt(0x43544231);
             output.writeInt(items.size());
-            for (TileBatchItem item : items) {
+            for (int i = 0; i < items.size(); i++) {
+                TileBatchItem item = items.get(i);
                 output.writeInt(item.x());
                 output.writeInt(item.z());
-                TileReply reply = tileReply(item.x(), item.z());
-                ChunkKey key = dimension == null || dimension.isBlank()
+                TileReply reply = snapshot.replies().get(i);
+                ChunkKey key = dimension.isEmpty()
                         ? null : new ChunkKey(dimension, item.x(), item.z());
                 if (reply == null) {
                     if (key != null) etags.put(key, "");
@@ -932,16 +944,8 @@ final class CartographWebUiServer implements AutoCloseable {
                 int centerChunkZ = Math.floorDiv(
                         (int) Math.floor(viewport.centerZ()), 16);
 
-                List<ChunkKey> cached = new ArrayList<>(
-                        backend.cachedKeysInBounds(
-                                dimension,
-                                minChunkX, maxChunkX,
-                                minChunkZ, maxChunkZ));
-                cached.sort(Comparator.comparingLong(key -> {
-                    long dx = Math.abs((long) key.x() - centerChunkX);
-                    long dz = Math.abs((long) key.z() - centerChunkZ);
-                    return Math.max(dx, dz);
-                }));
+                List<ChunkKey> cached = backend.cachedKeysInBounds(
+                        dimension, minChunkX, maxChunkX, minChunkZ, maxChunkZ);
                 return new ViewportSelection(
                         dimension,
                         minChunkX, maxChunkX,
@@ -958,7 +962,13 @@ final class CartographWebUiServer implements AutoCloseable {
             viewportTiles.clear();
             dirtyTiles.clear();
             dirtyQueued.clear();
-            viewportTiles.addAll(selection.cachedKeys());
+            List<ChunkKey> cached = new ArrayList<>(selection.cachedKeys());
+            cached.sort(Comparator.comparingLong(key -> {
+                long dx = Math.abs((long) key.x() - selection.centerChunkX());
+                long dz = Math.abs((long) key.z() - selection.centerChunkZ());
+                return Math.max(dx, dz);
+            }));
+            viewportTiles.addAll(cached);
 
             drainViewportTiles();
             respond(
@@ -996,8 +1006,7 @@ final class CartographWebUiServer implements AutoCloseable {
             if (items.isEmpty()) return;
 
             try {
-                TileBatchResult result =
-                        onClient(() -> tileBatchForSocket(new TileBatchPayload(items)));
+                TileBatchResult result = tileBatchForSocket(items);
                 updateBrowserEtags(result.etags());
                 sendBinary(result.bytes());
             } catch (RuntimeException failure) {
@@ -1032,8 +1041,7 @@ final class CartographWebUiServer implements AutoCloseable {
             }
             if (items.isEmpty()) return;
             try {
-                TileBatchResult result =
-                        onClient(() -> tileBatchForSocket(new TileBatchPayload(items)));
+                TileBatchResult result = tileBatchForSocket(items);
                 updateBrowserEtags(result.etags());
                 sendBinary(result.bytes());
                 pushMarkersIfChanged();

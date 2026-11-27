@@ -103,7 +103,7 @@ final class SurfaceService {
                 && (loadedChunk == null || loadedSnapshotCurrent(loadedChunk, cached)))
             return CompletableFuture.completedFuture(Optional.of(cached));
 
-        if (watchLive && level.getChunkSource().getChunkNow(chunkX, chunkZ) != null) {
+        if (loadedChunk != null) {
             return LoadedSurfaceReader.captureAsync(level, chunkX, chunkZ).thenApply(loaded -> {
                 loaded.ifPresent(tile -> CACHE.put(key, tile));
                 DISK_STALE.remove(key);
