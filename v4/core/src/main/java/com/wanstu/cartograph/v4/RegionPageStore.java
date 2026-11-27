@@ -2,14 +2,19 @@ package com.wanstu.cartograph.v4;
 
 import java.io.*;
 import java.nio.file.*;
+import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.zip.*;
+import java.util.zip.CRC32C;
+import net.jpountz.lz4.LZ4Factory;
+import net.jpountz.lz4.LZ4Exception;
+import java.util.concurrent.*;
 
 /** V4-only pages. A store instance is owned by one writer/IO worker for one world/dimension. */
 public final class RegionPageStore {
     public static final int EDGE = 32;
     private static final int MAGIC = 0x43563450; // CV4P
-    private static final int VERSION = 2;
+    private static final int VERSION = 5;
+    private static final LZ4Factory CODEC=LZ4Factory.safeInstance();
     private static final int MAX_RAW = 4 * 1024 * 1024;
     private static final int MAX_BATCH_PAGES=DiskGeographicPyramid.MAX_BATCH_CHUNKS*11;
     private static final int CLASSES = FeatureDictionary.Terrain.values().length;
@@ -122,12 +127,22 @@ public final class RegionPageStore {
         if(a.groundCount==1&&(a.minGround!=a.maxGround||a.groundSum!=a.minGround))return false;
         return true;
     }
+    // Process-wide bounded CPU concurrency; default leaves cores for Minecraft.
+    // Benchmark can override it explicitly. No common-pool usage or unbounded task queue.
+    private static final int ENCODE_THREADS=Math.max(1,Math.min(4,
+        Integer.getInteger("cartograph.v4.encodeThreads",2)));
+    private static final ExecutorService ENCODERS=Executors.newFixedThreadPool(ENCODE_THREADS,r->{
+        Thread thread=new Thread(r,"cartograph-v4-page-encode");
+        thread.setDaemon(true);thread.setPriority(Thread.NORM_PRIORITY-1);return thread;
+    });
+    private static final Semaphore ENCODE_PERMITS=new Semaphore(ENCODE_THREADS);
     private final PageTransactionLog log;
     private final int maxCachedPages;
     private final long cacheByteLimit;
     private long estimatedCacheBytes;
-    private final LinkedHashMap<Key,Page> cache=new LinkedHashMap<>(16,.75f,true);
-    private long diskReads,diskWrites;
+    private record Cached(Page page,long weight) {}
+    private final LinkedHashMap<Key,Cached> cache=new LinkedHashMap<>(16,.75f,true);
+    private long diskReads,diskWrites,encodeNanos,appendNanos,cacheNanos;
     private boolean recoveryRequired;
 
     /** root must be a new V4 world/dimension directory, never a legacy directory. */
@@ -144,20 +159,23 @@ public final class RegionPageStore {
     public synchronized long durableFlushes(){return log.flushes();}
     public synchronized long startupScanBytes(){return log.scanBytes();}
     public synchronized long diskReads(){return diskReads;}
+    public synchronized long encodeNanos(){return encodeNanos;}
+    public synchronized long appendNanos(){return appendNanos;}
+    public synchronized long cacheNanos(){return cacheNanos;}
     public synchronized long diskWrites(){return diskWrites;}
     public synchronized int cachedPages(){return cache.size();}
     public synchronized long estimatedCacheBytes(){return estimatedCacheBytes;}
     public synchronized void clearCache(){cache.clear();estimatedCacheBytes=0;}
     private void remember(Page p){
-        Page previous=cache.remove(p.key);
-        if(previous!=null)estimatedCacheBytes-=estimatedWeight(previous);
+        Cached previous=cache.remove(p.key);
+        if(previous!=null)estimatedCacheBytes-=previous.weight;
         long weight=estimatedWeight(p);
         if(weight>cacheByteLimit)return;
         while(!cache.isEmpty()&&(cache.size()>=maxCachedPages||estimatedCacheBytes>cacheByteLimit-weight)){
-            var it=cache.values().iterator();Page old=it.next();it.remove();
-            estimatedCacheBytes-=estimatedWeight(old);
+            var it=cache.values().iterator();Cached old=it.next();it.remove();
+            estimatedCacheBytes-=old.weight;
         }
-        cache.put(p.key,p);estimatedCacheBytes+=weight;
+        cache.put(p.key,new Cached(p,weight));estimatedCacheBytes+=weight;
     }
 
     // Conservative accounting model, not measured JVM retained size.
@@ -171,7 +189,8 @@ public final class RegionPageStore {
     }
     public synchronized Page read(Key key)throws IOException{
         if(recoveryRequired)throw new IOException("Recover pending transaction first");
-        Page p=cache.get(key);if(p!=null)return p;
+        Cached hit=cache.get(key);if(hit!=null)return hit.page;
+        Page p;
         byte[] data=log.read(key);
         if(data==null){p=new Page(key,0,Map.of());remember(p);return p;}
         diskReads++;
@@ -184,20 +203,77 @@ public final class RegionPageStore {
         List<Page> pages=List.copyOf(input);
         if(pages.isEmpty())return;
         if(pages.size()>MAX_BATCH_PAGES)throw new IllegalArgumentException("Batch limit");
+        long start=System.nanoTime();
         Set<Key> seen=new HashSet<>();
-        List<byte[]> payloads=new ArrayList<>();
         for(Page p:pages){
             if(!seen.add(p.key)||p.revision<=log.revision(p.key))
                 throw new IllegalArgumentException("Duplicate key or stale revision");
-            payloads.add(encode(p));
         }
+        List<byte[]> payloads=encodeBatch(pages);
+        encodeNanos+=System.nanoTime()-start;
         recoveryRequired=true;
+        start=System.nanoTime();
         log.append(pages,payloads);
+        appendNanos+=System.nanoTime()-start;
+        start=System.nanoTime();
         diskWrites+=pages.size();
         for(Page p:pages)remember(p);
+        cacheNanos+=System.nanoTime()-start;
         recoveryRequired=false;
     }
 
+    private static List<byte[]> encodeBatch(List<Page> pages)throws IOException{
+        if(ENCODE_THREADS==1||pages.size()<4){
+            List<byte[]> result=new ArrayList<>(pages.size());
+            for(Page p:pages)result.add(encode(p));
+            return result;
+        }
+        byte[][] result=new byte[pages.size()][];
+        List<Future<?>> tasks=new ArrayList<>();
+        int workers=Math.min(ENCODE_THREADS,pages.size());
+        try{
+            for(int worker=0;worker<workers;worker++){
+                final int start=worker;
+                ENCODE_PERMITS.acquire();
+                try{
+                    tasks.add(ENCODERS.submit(()->{
+                        try{
+                            for(int i=start;i<pages.size();i+=workers)result[i]=encode(pages.get(i));
+                            return null;
+                        }finally{ENCODE_PERMITS.release();}
+                    }));
+                }catch(RuntimeException e){ENCODE_PERMITS.release();throw e;}
+            }
+            for(Future<?> task:tasks)task.get();
+        }catch(InterruptedException e){
+            Thread.currentThread().interrupt();throw new IOException("Encoding interrupted",e);
+        }catch(ExecutionException e){throw new IOException("Page encoding failed",e.getCause());}
+        return Arrays.asList(result);
+    }
+    // Counts use the smallest exact unsigned width for the LOD capacity.
+    private static int countWidth(int lod){return lod<=3?1:lod<=7?2:4;}
+    private static int colorWidth(int lod){return lod<=8?4:8;}
+    private static int stride(int lod){
+        return lod==0?20:2+(4+CLASSES)*countWidth(lod)+16+4*colorWidth(lod)+8;
+    }
+    private static void putUnsigned(ByteBuffer out,long n,int width){
+        switch(width){
+            case 1 -> out.put((byte)n);
+            case 2 -> out.putShort((short)n);
+            case 4 -> out.putInt((int)n);
+            case 8 -> out.putLong(n);
+            default -> throw new IllegalArgumentException("width");
+        }
+    }
+    private static long getUnsigned(ByteBuffer in,int width){
+        return switch(width){
+            case 1 -> Byte.toUnsignedLong(in.get());
+            case 2 -> Short.toUnsignedLong(in.getShort());
+            case 4 -> Integer.toUnsignedLong(in.getInt());
+            case 8 -> in.getLong();
+            default -> throw new IllegalArgumentException("width");
+        };
+    }
     static byte[] encode(Page p)throws IOException{
         ByteArrayOutputStream raw=new ByteArrayOutputStream();
         try(DataOutputStream out=new DataOutputStream(raw)){
@@ -211,41 +287,51 @@ public final class RegionPageStore {
             out.writeInt(palette.size());
             for(var f:palette.keySet()){out.writeUTF(f.materialKey());out.writeUTF(f.biomeKey());out.writeByte(f.terrain().ordinal());}
             out.writeInt(p.entries.size());
+            // Fixed-width numeric records: bulk byte buffer instead of dozens of stream calls per cell.
+            int lod=p.key.lod(),stride=stride(lod),cw=countWidth(lod),sw=colorWidth(lod);
+            ByteBuffer cells=ByteBuffer.allocate(Math.multiplyExact(p.entries.size(),stride));
             for(int slot=0;slot<ordered.length;slot++){
                 Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
-                out.writeShort(slot);out.writeShort(e.feature==null?0:palette.get(e.feature));
-                if(p.key.lod()==0){
-                    out.writeInt(a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.surfaceSum));
-                    out.writeInt(a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.groundSum));
-                    out.writeShort((int)a.depthSum);out.writeShort((int)a.redSum);
-                    out.writeShort((int)a.greenSum);out.writeShort((int)a.blueSum);
+                cells.putShort((short)slot);
+                if(lod==0){
+                    cells.putShort((short)(int)palette.get(e.feature));
+                    cells.putInt(a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.surfaceSum));
+                    cells.putInt(a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.groundSum));
+                    cells.putShort((short)a.depthSum).putShort((short)a.redSum);
+                    cells.putShort((short)a.greenSum).putShort((short)a.blueSum);
                     continue;
                 }
-                out.writeLong(a.known);out.writeLong(a.surfaceCount);out.writeLong(a.groundCount);
-                out.writeLong(a.surfaceSum);out.writeLong(a.groundSum);out.writeLong(a.redSum);out.writeLong(a.greenSum);out.writeLong(a.blueSum);
-                out.writeLong(a.wetCount);out.writeLong(a.depthSum);out.writeInt(a.minGround);out.writeInt(a.maxGround);
-                for(long n:a.histogram)out.writeLong(n);
+                putUnsigned(cells,a.known,cw);putUnsigned(cells,a.surfaceCount,cw);
+                putUnsigned(cells,a.groundCount,cw);putUnsigned(cells,a.wetCount,cw);
+                cells.putLong(a.surfaceSum).putLong(a.groundSum);
+                putUnsigned(cells,a.redSum,sw);putUnsigned(cells,a.greenSum,sw);
+                putUnsigned(cells,a.blueSum,sw);putUnsigned(cells,a.depthSum,sw);
+                cells.putInt(a.minGround).putInt(a.maxGround);
+                for(long n:a.histogram)putUnsigned(cells,n,cw);
             }
+            byte[] rowMajor=cells.array(),planes=new byte[rowMajor.length];
+            int n=p.entries.size();
+            for(int row=0;row<n;row++)for(int col=0;col<stride;col++)
+                planes[col*n+row]=rowMajor[row*stride+col];
+            out.write(planes);
         }
         byte[] body=raw.toByteArray();if(body.length>MAX_RAW)throw new IOException("Page limit");
         CRC32C crc=new CRC32C();crc.update(body);
-        ByteArrayOutputStream compressed=new ByteArrayOutputStream();
-        try(DataOutputStream out=new DataOutputStream(compressed)){
-            out.writeInt(body.length);out.writeInt((int)crc.getValue());
-            Deflater codec=new Deflater(Deflater.BEST_SPEED);
-            try(DeflaterOutputStream deflate=new DeflaterOutputStream(out,codec,8192)){deflate.write(body);}
-            finally{codec.end();}
-        }
-        return compressed.toByteArray();
+        var compressor=CODEC.fastCompressor();
+        byte[] compressed=new byte[8+compressor.maxCompressedLength(body.length)];
+        ByteBuffer.wrap(compressed).putInt(body.length).putInt((int)crc.getValue());
+        int n=compressor.compress(body,0,body.length,compressed,8,compressed.length-8);
+        return Arrays.copyOf(compressed,8+n);
     }
     static Page decode(byte[] data,Key expected)throws IOException{
         try(DataInputStream header=new DataInputStream(new ByteArrayInputStream(data))){
             int size=header.readInt(),checksum=header.readInt();
             if(size<1||size>MAX_RAW)throw new IOException("Page length");
-            byte[] body;
-            try(InflaterInputStream inflater=new InflaterInputStream(header)){
-                body=inflater.readNBytes(size+1);
-            }
+            byte[] body=new byte[size];
+            try{
+                int n=CODEC.safeDecompressor().decompress(data,8,data.length-8,body,0,size);
+                if(n!=size)throw new IOException("Page decompressed size");
+            }catch(LZ4Exception e){throw new IOException("Invalid page compression",e);}
             CRC32C crc=new CRC32C();crc.update(body);
             if(body.length!=size||(int)crc.getValue()!=checksum)throw new IOException("Page checksum");
             try(DataInputStream in=new DataInputStream(new ByteArrayInputStream(body))){
@@ -261,25 +347,33 @@ public final class RegionPageStore {
                     palette.add(new FeatureDictionary.Feature(material,biome,FeatureDictionary.Terrain.values()[terrain]));
                 }
                 int count=in.readInt();if(count<0||count>EDGE*EDGE)throw new IOException("Entries");
-                Map<Integer,Entry> entries=new HashMap<>();
+                int lod=key.lod(),stride=stride(lod),cw=countWidth(lod),sw=colorWidth(lod);
+                if(in.available()!=count*stride)throw new IOException("Numeric page length");
+                int base=body.length-in.available();
+                byte[] rows=new byte[count*stride];
+                for(int row=0;row<count;row++)for(int col=0;col<stride;col++)
+                    rows[row*stride+col]=body[base+col*count+row];
+                ByteBuffer cells=ByteBuffer.wrap(rows);
+                Map<Integer,Entry> entries=new HashMap<>(count*4/3+1);
                 for(int i=0;i<count;i++){
-                    int slot=in.readUnsignedShort(),feature=in.readUnsignedShort();
+                    int slot=Short.toUnsignedInt(cells.getShort()),feature=lod==0?Short.toUnsignedInt(cells.getShort()):0;
                     if(feature>=palette.size())throw new IOException("Feature index");
                     if(key.lod()==0){
                         if(feature==0)throw new IOException("Missing leaf feature");
-                        Entry e=Entry.leaf(palette.get(feature),in.readInt(),in.readInt(),
-                            in.readUnsignedShort(),in.readUnsignedShort(),in.readUnsignedShort(),in.readUnsignedShort());
+                        Entry e=Entry.leaf(palette.get(feature),cells.getInt(),cells.getInt(),
+                            Short.toUnsignedInt(cells.getShort()),Short.toUnsignedInt(cells.getShort()),
+                            Short.toUnsignedInt(cells.getShort()),Short.toUnsignedInt(cells.getShort()));
                         if(entries.put(slot,e)!=null)throw new IOException("Duplicate slot");
                         continue;
                     }
-                    long known=in.readLong(),sc=in.readLong(),gc=in.readLong(),ss=in.readLong(),gs=in.readLong(),
-                        r=in.readLong(),g=in.readLong(),b=in.readLong(),wet=in.readLong(),depth=in.readLong();
-                    int min=in.readInt(),max=in.readInt();long[] h=new long[CLASSES];
-                    for(int j=0;j<CLASSES;j++)h[j]=in.readLong();
+                    long known=getUnsigned(cells,cw),sc=getUnsigned(cells,cw),gc=getUnsigned(cells,cw),wet=getUnsigned(cells,cw);
+                    long ss=cells.getLong(),gs=cells.getLong();
+                    long r=getUnsigned(cells,sw),g=getUnsigned(cells,sw),b=getUnsigned(cells,sw),depth=getUnsigned(cells,sw);
+                    int min=cells.getInt(),max=cells.getInt();long[] h=new long[CLASSES];
+                    for(int j=0;j<CLASSES;j++)h[j]=getUnsigned(cells,cw);
                     Entry e=new Entry(new Aggregate(known,sc,gc,ss,gs,r,g,b,wet,depth,min,max,h),palette.get(feature));
                     if(entries.put(slot,e)!=null)throw new IOException("Duplicate slot");
                 }
-                if(in.read()!=-1)throw new IOException("Trailing data");
                 return new Page(key,revision,entries);
             }
         }catch(IllegalArgumentException e){throw new IOException("Invalid V4 page",e);}

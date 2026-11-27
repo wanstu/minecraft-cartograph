@@ -9,7 +9,7 @@ import java.util.zip.CRC32C;
 final class PageTransactionLog {
     private static final int MAGIC=0x4356344c, END=0x434f4d54;
     private static final int MAX=32*1024*1024;
-    private static final int MAX_PAGE=4*1024*1024+1024;
+    private static final int MAX_PAGE=4*1024*1024+32*1024;
     record Pointer(long offset,int length,long revision) {}
     private final Path file;
     private final Map<RegionPageStore.Key,Pointer> index=new HashMap<>();

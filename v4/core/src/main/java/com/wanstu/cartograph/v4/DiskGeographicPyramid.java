@@ -51,7 +51,7 @@ public final class DiskGeographicPyramid {
         page(pages,Key.of(cell)).put(Key.slot(cell),leaf);
         return apply(pages);
     }
-    public static final int MAX_BATCH_CHUNKS=64;
+    public static final int MAX_BATCH_CHUNKS=256;
     public record ChunkSnapshot(int x,int z,Entry[] columns){
         public ChunkSnapshot{
             Objects.requireNonNull(columns);

@@ -28,7 +28,10 @@ public final class ScaleTest {
         long start=System.nanoTime();int chunks=0;
         var pending=new ArrayList<DiskGeographicPyramid.ChunkSnapshot>();
         // Spatially ordered 4x4 groups: mirrors a region-file discovery iterator.
-        for(int gz=0;gz<edge;gz+=4)for(int gx=0;gx<edge;gx+=4)
+        int tile=batch>=256?16:batch>=64?8:4;
+        tile=Math.min(tile,edge);
+        for(int tz=0;tz<edge;tz+=tile)for(int tx=0;tx<edge;tx+=tile)
+          for(int gz=tz;gz<Math.min(tz+tile,edge);gz+=4)for(int gx=tx;gx<Math.min(tx+tile,edge);gx+=4)
             for(int dz=0;dz<4;dz++)for(int dx=0;dx<4;dx++){
                 pending.add(new DiskGeographicPyramid.ChunkSnapshot(gx+dx-edge/2,gz+dz-edge/2,samples[(dz*4+dx)%16]));
                 chunks++;
@@ -37,6 +40,7 @@ public final class ScaleTest {
         if(!pending.isEmpty())pyramid.updateChunks(pending);
         double seconds=(System.nanoTime()-start)/1e9;
         long writes=store.diskWrites(),reads=store.diskReads(),flushes=store.durableFlushes();
+        long encode=store.encodeNanos(),append=store.appendNanos(),cache=store.cacheNanos();
         long bytes;
         try(var files=Files.walk(root)){bytes=files.filter(Files::isRegularFile).mapToLong(p->{try{return Files.size(p);}catch(Exception e){throw new RuntimeException(e);}}).sum();}
         check(store.estimatedCacheBytes()<=16L*1024*1024,"bounded cache");
@@ -51,6 +55,7 @@ public final class ScaleTest {
         check(store.diskReads()==4,"only coarse pages after restart");
         long w=store.diskWrites();
         check(pyramid.updateChunk(-edge/2,-edge/2,samples[0])==0&&store.diskWrites()==w,"unchanged chunk");
+        System.out.printf(Locale.ROOT,"encodeMs=%.1f appendMs=%.1f cacheMs=%.1f%n",encode/1e6,append/1e6,cache/1e6);
         System.out.printf(Locale.ROOT,"chunks=%d batch=%d seconds=%.3f chunks/s=%.1f pageWrites=%d pageReads=%d diskBytes=%d flushes=%d reopenMs=%.1f startupScanBytes=%d coldOverviewReads=4 coverage=%d%n",
             chunks,batch,seconds,chunks/seconds,writes,reads,bytes,flushes,reopenMs,scanBytes,coverage);
     }
