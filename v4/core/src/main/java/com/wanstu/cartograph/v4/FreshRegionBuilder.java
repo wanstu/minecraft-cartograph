@@ -71,7 +71,7 @@ public final class FreshRegionBuilder implements AutoCloseable {
                 Packed q=b.page(parent);b.merge(q,p);b.emit(q);p=q;
             }
             b.flush();
-            long syncStart=System.nanoTime();b.log.forceStaged();b.commitNanos+=System.nanoTime()-syncStart;
+            long syncStart=System.nanoTime();b.log.forceStaged();b.log.checkpoint();b.commitNanos+=System.nanoTime()-syncStart;
             if(Files.exists(target))throw new IOException("Shard already published");
             Files.move(stage,target,StandardCopyOption.ATOMIC_MOVE);
             return new Result(b.chunks,b.pages,b.log.flushes(),b.sourceNanos,b.mergeNanos,b.encodeNanos,b.commitNanos);

@@ -8,7 +8,7 @@ PowerShell, from this directory:
     $src = Get-ChildItem src -Recurse -Filter '*.java' | ForEach-Object FullName
     javac --release 21 -d out $src
     $cp = "out"
-    foreach ($test in 'FoundationTest','CameraTest','RegionStoreTest','WorkerTest','CapturePumpTest','DensePyramidTest','PageCodecTest','FreshRegionBuilderTest','PageFrameCodecTest') {
+    foreach ($test in 'FoundationTest','CameraTest','RegionStoreTest','WorkerTest','CapturePumpTest','DensePyramidTest','PageCodecTest','FreshRegionBuilderTest','PageFrameCodecTest','CheckpointTest','WorldGeographyTest') {
         java -Xmx256m -cp $cp "com.wanstu.cartograph.v4.$test"
         if ($LASTEXITCODE -ne 0) { throw "$test failed" }
     }
@@ -40,3 +40,4 @@ The JVM active processor setting is not a hard operating-system CPU limit.
 Million-chunk independent-snapshot benchmark (1,048,576 chunks, 256 shards, two workers):
 
     java '-Dcartograph.v4.encodeThreads=1' '-XX:ActiveProcessorCount=4' -Xmx256m -cp $cp com.wanstu.cartograph.v4.ShardScaleTest 16 2 256 unique
+Fresh-shard benchmarks now also report checkpoint recovery scan bytes, cross-shard cold overview assembly and warm immutable page cache requests. These are not rendered frames.

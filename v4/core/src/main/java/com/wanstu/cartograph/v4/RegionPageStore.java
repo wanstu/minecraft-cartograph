@@ -190,6 +190,10 @@ public final class RegionPageStore {
         Files.createDirectories(root);
         log=new PageTransactionLog(root);
     }
+    public synchronized long revision(Key key){return log.revision(key);}
+    public synchronized void checkpoint()throws IOException{
+        if(recoveryRequired)throw new IOException("Recover pending transaction first");log.checkpoint();
+    }
     public synchronized long durableFlushes(){return log.flushes();}
     public synchronized long startupScanBytes(){return log.scanBytes();}
     public synchronized long diskReads(){return diskReads;}
@@ -213,7 +217,7 @@ public final class RegionPageStore {
     }
 
     // Conservative accounting model, not measured JVM retained size.
-    private static long estimatedWeight(Page p){
+    static long estimatedWeight(Page p){
         long weight=4352;
         for(Entry e:p.slots){
             if(e==null)continue;
@@ -229,7 +233,7 @@ public final class RegionPageStore {
         byte[] data=log.read(key);
         if(data==null){p=new Page(key,0,Map.of());remember(p);return p;}
         diskReads++;
-        p=decode(data,key);remember(p);return p;
+        p=decode(data,key);if(p.revision()!=log.entryRevision(key))throw new IOException("Page revision mismatch");remember(p);return p;
     }
 
     /** Commit the entire batch with one durable append; no per-page fsync or rename. */

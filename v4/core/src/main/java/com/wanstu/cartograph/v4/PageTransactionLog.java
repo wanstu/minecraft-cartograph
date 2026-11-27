@@ -12,14 +12,15 @@ final class PageTransactionLog {
     private static final int MAX=32*1024*1024;
     private static final int MAX_PAGE=4*1024*1024+32*1024;
     record Pointer(long offset,int length,long revision) {}
-    private final Path file;
+    private static final int INDEX_MAGIC=0x43563449, INDEX_MAX=4096;
+    private final Path file,indexFile;
     private final Map<RegionPageStore.Key,Pointer> index=new HashMap<>();
     private long flushes,scanBytes;
     private RandomAccessFile staging;
     PageTransactionLog(Path root)throws IOException{
-        file=root.resolve("pages.cv4log");
+        file=root.resolve("pages.cv4log");indexFile=root.resolve("pages.cv4idx");
         if(Files.notExists(file))Files.createFile(file);
-        recover();
+        recover(loadCheckpoint());
     }
     long flushes(){return flushes;}
     long scanBytes(){return scanBytes;}
@@ -29,7 +30,10 @@ final class PageTransactionLog {
     byte[] read(RegionPageStore.Key key)throws IOException{
         Pointer p=index.get(key);if(p==null)return null;
         try(var in=new RandomAccessFile(file.toFile(),"r")){
-            in.seek(p.offset);byte[] data=new byte[p.length];in.readFully(data);return data;
+            in.seek(p.offset-24);
+            if(in.readInt()!=key.lod()||in.readInt()!=key.x()||in.readInt()!=key.z()||
+                in.readLong()!=p.revision||in.readInt()!=p.length)throw new IOException("Page pointer identity");
+            byte[] data=new byte[p.length];in.readFully(data);return data;
         }
     }
     private static int checksum(byte[] data){
@@ -108,9 +112,66 @@ final class PageTransactionLog {
     private static void writeFully(java.nio.channels.FileChannel channel,ByteBuffer bytes)throws IOException{
         while(bytes.hasRemaining())channel.write(bytes);
     }
-    private void recover()throws IOException{
+    /** Optional derived index, never the authority for recovering uncheckpointed writes.
+     *  Only one owner may write or replace this log. Checkpoint pages still verify CRC on read.
+     */
+    void checkpoint()throws IOException{
+        if(staging!=null)throw new IOException("Cannot checkpoint unforced staging");
+        if(index.size()>INDEX_MAX)return; // only bounded shard indexes
+        long length=Files.size(file);
+        if(length==0)return;
+        int tail;
+        try(var in=new RandomAccessFile(file.toFile(),"r")){
+            in.seek(length-8);tail=in.readInt();
+            if(in.readInt()!=END)throw new IOException("Checkpoint requires complete log");
+        }
+        ByteBuffer bytes=ByteBuffer.allocate(24+32*index.size());
+        bytes.putInt(INDEX_MAGIC).putInt(1).putLong(length).putInt(tail).putInt(index.size());
+        for(var e:index.entrySet()){
+            var k=e.getKey();var p=e.getValue();
+            bytes.putInt(k.lod()).putInt(k.x()).putInt(k.z()).putLong(p.offset).putInt(p.length).putLong(p.revision);
+        }
+        byte[] body=bytes.array();
+        Path tmp=Files.createTempFile(indexFile.getParent(),".index-",".tmp");
+        try{
+            try(var out=new RandomAccessFile(tmp.toFile(),"rw")){
+                out.write(body);out.writeInt(checksum(body));out.getChannel().force(true);
+            }
+            Files.move(tmp,indexFile,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+        }finally{Files.deleteIfExists(tmp);}
+    }
+    private long loadCheckpoint()throws IOException{
+        if(!Files.isRegularFile(indexFile))return 0;
+        try{
+            long indexLength=Files.size(indexFile);
+            if(indexLength<28||indexLength>28L+32L*INDEX_MAX)return 0;
+            byte[] raw=Files.readAllBytes(indexFile);
+            byte[] body=Arrays.copyOf(raw,raw.length-4);
+            if(checksum(body)!=ByteBuffer.wrap(raw,raw.length-4,4).getInt())return 0;
+            ByteBuffer in=ByteBuffer.wrap(body);
+            if(in.getInt()!=INDEX_MAGIC||in.getInt()!=1)return 0;
+            long end=in.getLong();int tail=in.getInt(),count=in.getInt();
+            if(end<16||end>Files.size(file)||count<0||count>INDEX_MAX||in.remaining()!=count*32)return 0;
+            try(var log=new RandomAccessFile(file.toFile(),"r")){
+                log.seek(end-8);
+                if(log.readInt()!=tail||log.readInt()!=END)return 0;
+                Map<RegionPageStore.Key,Pointer> loaded=new HashMap<>();
+                for(int i=0;i<count;i++){
+                    var key=new RegionPageStore.Key(in.getInt(),in.getInt(),in.getInt());
+                    long offset=in.getLong();int length=in.getInt();long rev=in.getLong();
+                    if(offset<36||length<1||length>MAX_PAGE||offset>end-8-length||rev<1)return 0;
+                    // Bind each pointer to its actual frame's page header; no data payload scan.
+                    // Header checks are deferred to individual page reads to avoid random I/O here.
+                    if(loaded.put(key,new Pointer(offset,length,rev))!=null)return 0;
+                }
+                index.putAll(loaded);return end;
+            }
+        }catch(IllegalArgumentException|java.nio.BufferUnderflowException e){return 0;}
+    }
+    long entryRevision(RegionPageStore.Key key){return revision(key);}
+    private void recover(long start)throws IOException{
         try(var in=new RandomAccessFile(file.toFile(),"rw")){
-            long size=in.length(),pos=0;
+            long size=in.length(),pos=start;
             while(pos<size){
                 in.seek(pos);
                 if(size-pos<8){in.setLength(pos);in.getChannel().force(true);break;}

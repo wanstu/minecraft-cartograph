@@ -72,9 +72,11 @@ public final class ShardScaleTest {
             double seconds=(System.nanoTime()-start)/1e9,cpu=(os.getProcessCpuTime()-cpuStart)/1e9;
             System.out.printf(Locale.ROOT,"workerWallSumMs source=%.1f merge=%.1f encode=%.1f commit=%.1f%n",source/1e6,merge/1e6,encode/1e6,commit/1e6);
             int chunks=ids.size()*4096;
-            long known=0,reads=0;
+            long known=0,reads=0,recoveryBytes=0;
+            long reopenStart=System.nanoTime();
             for(var id:ids){
                 var shard=new RegionShard(root,id,8,cacheLimit);
+                recoveryBytes+=shard.scanBytes();
                 var summary=shard.get(new Cell(10,id.x(),id.z()));
                 check(summary!=null&&summary.stats().known()==1048576,"exact shard coverage");
                 known+=summary.stats().known();reads+=shard.diskReads();
@@ -84,6 +86,36 @@ public final class ShardScaleTest {
                 check(RegionShard.Id.ofChunk(id.x()*64+63,id.z()*64+63).equals(id),"negative edge routing");
             }
             check(known==chunks*256L,"world coverage");
+            double reopenMs=(System.nanoTime()-reopenStart)/1e6;
+            if(fresh)check(recoveryBytes==0,"fresh shard index avoids log scan");
+            System.out.printf(Locale.ROOT,"reopenVerificationMs=%.3f recoveryLogBytes=%d%n",reopenMs,recoveryBytes);
+            // A world-level overview uses the new read path, then reuses exactly the same
+            // immutable geography across synthetic repeated presentation requests.
+            long overviewStart=System.nanoTime();
+            var world=new WorldGeography(root,8,32,8L*1024*1024,8L*1024*1024);
+            Set<Key> keys=new LinkedHashSet<>();
+            for(var id:ids)keys.add(Key.of(new Cell(10,id.x(),id.z())));
+            Map<Key,WorldGeography.RenderPage> overview=new LinkedHashMap<>();
+            long worldCoverage=0;
+            for(Key key:keys){
+                var page=world.read(key);overview.put(key,page);
+                for(int i=0;i<1024;i++){var e=page.data().entryAt(i);if(e!=null)worldCoverage+=e.stats().known();}
+            }
+            check(worldCoverage==known,"assembled world coverage");
+            double overviewMs=(System.nanoTime()-overviewStart)/1e6;
+            var before=world.metrics();
+            long warmStart=System.nanoTime();
+            int requests=0;
+            for(int i=0;i<25000;i++)for(var item:overview.entrySet()){
+                check(world.read(item.getKey())==item.getValue(),"stable render upload token");requests++;
+            }
+            double warmMs=(System.nanoTime()-warmStart)/1e6;
+            var after=world.metrics();
+            check(after.sourceReads()==before.sourceReads()&&after.assemblies()==before.assemblies(),"unchanged presentation requests do not read/assemble");
+            if(fresh)check(after.recoveryScanBytes()==0,"world overview checkpoint");
+            System.out.printf(Locale.ROOT,"worldOverviewPages=%d coldOverviewMs=%.3f sourcePages=%d logScanBytes=%d warmRequests=%d warmMs=%.3f additionalReads=%d additionalAssemblies=%d residentShards=%d residentPages=%d residentPageBytes=%d%n",
+                keys.size(),overviewMs,before.sourceReads(),before.recoveryScanBytes(),requests,warmMs,after.sourceReads()-before.sourceReads(),after.assemblies()-before.assemblies(),
+                after.residentShards(),after.residentPages(),after.residentPageBytes());
             long bytes;
             try(var files=Files.walk(root)){bytes=files.filter(Files::isRegularFile).mapToLong(p->{try{return Files.size(p);}catch(Exception e){throw new RuntimeException(e);}}).sum();}
             System.out.printf(Locale.ROOT,"fresh=%s unique=%s shards=%d workers=%d chunks=%d batch=%d seconds=%.3f chunks/s=%.1f cpuSeconds=%.3f avgCpuCores=%.2f cpuMicrosPerChunk=%.2f pageWrites=%d flushes=%d diskBytes=%d overviewReads=%d coverage=%d%n",
