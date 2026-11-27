@@ -58,7 +58,7 @@ public final class WorkerTest {
         reopen.closeAsync().get(15,TimeUnit.SECONDS);
         check(reopen.metrics().diskReads()==1,"coarse direct disk read");
         // Fail closed if a corrupt journal is found; no claims of durability.
-        Files.write(root.resolve("pending.cv4j"),new byte[]{1,2,3});
+        Files.write(root.resolve("pages.cv4log"),new byte[]{1,2,3,4,5,6,7,8},StandardOpenOption.APPEND);
         var fail=new GeographicWorker(root,10,8,4096,2,2);
         try{fail.ready().get(15,TimeUnit.SECONDS);throw new AssertionError("failure");}catch(ExecutionException expected){}
         check(fail.metrics().failed()&&!fail.offerChunk(0,0,first),"fail closed");

@@ -1,7 +1,6 @@
 package com.wanstu.cartograph.v4;
 
 import java.io.*;
-import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.util.*;
 import java.util.zip.*;
@@ -10,10 +9,9 @@ import java.util.zip.*;
 public final class RegionPageStore {
     public static final int EDGE = 32;
     private static final int MAGIC = 0x43563450; // CV4P
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static final int MAX_RAW = 4 * 1024 * 1024;
     private static final int MAX_BATCH_PAGES=DiskGeographicPyramid.MAX_BATCH_CHUNKS*11;
-    private static final int MAX_JOURNAL_BYTES=32*1024*1024;
     private static final int CLASSES = FeatureDictionary.Terrain.values().length;
 
     public record Key(int lod, int x, int z) {
@@ -111,13 +109,16 @@ public final class RegionPageStore {
                 Entry v=e.getValue();
                 if(e.getKey()<0||e.getKey()>=EDGE*EDGE||v.stats.known>capacity||
                     (key.lod()==0)!=(v.feature!=null)||
-                    (v.feature!=null && v.stats.histogram[v.feature.terrain().ordinal()]!=1))
+                    (v.feature!=null && (v.stats.histogram[v.feature.terrain().ordinal()]!=1 ||
+                     !v.equals(Entry.leaf(v.feature,v.stats.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(v.stats.surfaceSum),
+                       v.stats.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(v.stats.groundSum),
+                       (int)v.stats.depthSum,(int)v.stats.redSum,(int)v.stats.greenSum,(int)v.stats.blueSum)))))
                     throw new IllegalArgumentException("Page slot");
             }
         }
     }
 
-    private final Path root;
+    private final PageTransactionLog log;
     private final int maxCachedPages;
     private final long cacheByteLimit;
     private long estimatedCacheBytes;
@@ -132,18 +133,17 @@ public final class RegionPageStore {
     public RegionPageStore(Path root,int maxCachedPages,long cacheByteLimit) throws IOException {
         if(maxCachedPages<1||cacheByteLimit<1)throw new IllegalArgumentException("cache");
         this.cacheByteLimit=cacheByteLimit;
-        this.root=root;this.maxCachedPages=maxCachedPages;
+        this.maxCachedPages=maxCachedPages;
         Files.createDirectories(root);
-        recover();
+        log=new PageTransactionLog(root);
     }
+    public synchronized long durableFlushes(){return log.flushes();}
+    public synchronized long startupScanBytes(){return log.scanBytes();}
     public synchronized long diskReads(){return diskReads;}
     public synchronized long diskWrites(){return diskWrites;}
     public synchronized int cachedPages(){return cache.size();}
     public synchronized long estimatedCacheBytes(){return estimatedCacheBytes;}
     public synchronized void clearCache(){cache.clear();estimatedCacheBytes=0;}
-    private Path path(Key key){
-        return root.resolve("lod-"+key.lod()).resolve("r."+key.x()+"."+key.z()+".cv4p");
-    }
     private void remember(Page p){
         Page previous=cache.remove(p.key);
         if(previous!=null)estimatedCacheBytes-=estimatedWeight(previous);
@@ -168,77 +168,30 @@ public final class RegionPageStore {
     public synchronized Page read(Key key)throws IOException{
         if(recoveryRequired)throw new IOException("Recover pending transaction first");
         Page p=cache.get(key);if(p!=null)return p;
-        Path file=path(key);
-        if(Files.notExists(file)){p=new Page(key,0,Map.of());remember(p);return p;}
-        if(Files.size(file)>MAX_RAW+1024)throw new IOException("Oversized page");
+        byte[] data=log.read(key);
+        if(data==null){p=new Page(key,0,Map.of());remember(p);return p;}
         diskReads++;
-        p=decode(Files.readAllBytes(file),key);remember(p);return p;
+        p=decode(data,key);remember(p);return p;
     }
 
-    /** All pages of an edit use a redo journal. A failed commit must be recovered before further use. */
+    /** Commit the entire batch with one durable append; no per-page fsync or rename. */
     public synchronized void writeBatch(Collection<Page> input)throws IOException{
-        if(Files.exists(root.resolve("pending.cv4j")))throw new IOException("Recover pending transaction first");
+        if(recoveryRequired)throw new IOException("Reopen store after failed transaction");
         List<Page> pages=List.copyOf(input);
         if(pages.isEmpty())return;
         if(pages.size()>MAX_BATCH_PAGES)throw new IllegalArgumentException("Batch limit");
         Set<Key> seen=new HashSet<>();
         List<byte[]> payloads=new ArrayList<>();
-        ByteArrayOutputStream bytes=new ByteArrayOutputStream();
-        try(DataOutputStream out=new DataOutputStream(bytes)){
-            out.writeInt(0x4356344a);out.writeInt(pages.size());
-            for(Page p:pages){
-                if(!seen.add(p.key)||p.revision<=read(p.key).revision)
-                    throw new IllegalArgumentException("Duplicate key or stale revision");
-                byte[] data=encode(p);
-                if((long)bytes.size()+16+data.length>MAX_JOURNAL_BYTES)throw new IOException("Journal size limit");
-                payloads.add(data);
-                out.writeInt(p.key.lod());out.writeInt(p.key.x());out.writeInt(p.key.z());
-                out.writeInt(data.length);out.write(data);
-            }
+        for(Page p:pages){
+            if(!seen.add(p.key)||p.revision<=log.revision(p.key))
+                throw new IllegalArgumentException("Duplicate key or stale revision");
+            payloads.add(encode(p));
         }
         recoveryRequired=true;
-        atomicWrite(root.resolve("pending.cv4j"),bytes.toByteArray());
-        publish(pages,payloads);
-    }
-
-    /** Redo is idempotent; journal is deleted only after every page is published. */
-    public synchronized void recover()throws IOException{
-        Path journal=root.resolve("pending.cv4j");
-        if(Files.notExists(journal)){recoveryRequired=false;return;}
-        recoveryRequired=true;
-        if(Files.size(journal)>MAX_JOURNAL_BYTES)throw new IOException("Oversized journal");
-        List<Page> pages=new ArrayList<>();List<byte[]> payloads=new ArrayList<>();
-        try(DataInputStream in=new DataInputStream(Files.newInputStream(journal))){
-            if(in.readInt()!=0x4356344a)throw new IOException("Journal magic");
-            int count=in.readInt();if(count<1||count>MAX_BATCH_PAGES)throw new IOException("Journal count");
-            Set<Key> keys=new HashSet<>();
-            for(int i=0;i<count;i++){
-                Key k=new Key(in.readInt(),in.readInt(),in.readInt());
-                if(!keys.add(k))throw new IOException("Duplicate journal key");
-                int length=in.readInt();if(length<1||length>MAX_RAW+1024)throw new IOException("Journal length");
-                byte[] data=in.readNBytes(length);if(data.length!=length)throw new EOFException();
-                pages.add(decode(data,k));payloads.add(data);
-            }
-            if(in.read()!=-1)throw new IOException("Trailing journal data");
-        } catch(IllegalArgumentException e){throw new IOException("Invalid journal",e);}
-        publish(pages,payloads);
-    }
-
-    private void publish(List<Page> pages,List<byte[]> payloads)throws IOException{
-        for(int i=0;i<pages.size();i++){atomicWrite(path(pages.get(i).key),payloads.get(i));diskWrites++;}
-        Files.delete(root.resolve("pending.cv4j"));
-        recoveryRequired=false;
+        log.append(pages,payloads);
+        diskWrites+=pages.size();
         for(Page p:pages)remember(p);
-    }
-
-    private static void atomicWrite(Path path,byte[] data)throws IOException{
-        Files.createDirectories(path.getParent());
-        Path tmp=Files.createTempFile(path.getParent(),".cv4-",".tmp");
-        try{
-            Files.write(tmp,data);
-            try(FileChannel c=FileChannel.open(tmp,StandardOpenOption.WRITE)){c.force(true);}
-            Files.move(tmp,path,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
-        }finally{Files.deleteIfExists(tmp);}
+        recoveryRequired=false;
     }
 
     static byte[] encode(Page p)throws IOException{
@@ -256,6 +209,13 @@ public final class RegionPageStore {
             for(var pair:ordered.entrySet()){
                 Entry e=pair.getValue();Aggregate a=e.stats;
                 out.writeShort(pair.getKey());out.writeShort(e.feature==null?0:palette.get(e.feature));
+                if(p.key.lod()==0){
+                    out.writeInt(a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.surfaceSum));
+                    out.writeInt(a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.groundSum));
+                    out.writeShort((int)a.depthSum);out.writeShort((int)a.redSum);
+                    out.writeShort((int)a.greenSum);out.writeShort((int)a.blueSum);
+                    continue;
+                }
                 out.writeLong(a.known);out.writeLong(a.surfaceCount);out.writeLong(a.groundCount);
                 out.writeLong(a.surfaceSum);out.writeLong(a.groundSum);out.writeLong(a.redSum);out.writeLong(a.greenSum);out.writeLong(a.blueSum);
                 out.writeLong(a.wetCount);out.writeLong(a.depthSum);out.writeInt(a.minGround);out.writeInt(a.maxGround);
@@ -267,7 +227,9 @@ public final class RegionPageStore {
         ByteArrayOutputStream compressed=new ByteArrayOutputStream();
         try(DataOutputStream out=new DataOutputStream(compressed)){
             out.writeInt(body.length);out.writeInt((int)crc.getValue());
-            try(DeflaterOutputStream deflate=new DeflaterOutputStream(out)){deflate.write(body);}
+            Deflater codec=new Deflater(Deflater.BEST_SPEED);
+            try(DeflaterOutputStream deflate=new DeflaterOutputStream(out,codec,8192)){deflate.write(body);}
+            finally{codec.end();}
         }
         return compressed.toByteArray();
     }
@@ -298,6 +260,13 @@ public final class RegionPageStore {
                 for(int i=0;i<count;i++){
                     int slot=in.readUnsignedShort(),feature=in.readUnsignedShort();
                     if(feature>=palette.size())throw new IOException("Feature index");
+                    if(key.lod()==0){
+                        if(feature==0)throw new IOException("Missing leaf feature");
+                        Entry e=Entry.leaf(palette.get(feature),in.readInt(),in.readInt(),
+                            in.readUnsignedShort(),in.readUnsignedShort(),in.readUnsignedShort(),in.readUnsignedShort());
+                        if(entries.put(slot,e)!=null)throw new IOException("Duplicate slot");
+                        continue;
+                    }
                     long known=in.readLong(),sc=in.readLong(),gc=in.readLong(),ss=in.readLong(),gs=in.readLong(),
                         r=in.readLong(),g=in.readLong(),b=in.readLong(),wet=in.readLong(),depth=in.readLong();
                     int min=in.readInt(),max=in.readInt();long[] h=new long[CLASSES];

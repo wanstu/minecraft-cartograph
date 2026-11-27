@@ -36,11 +36,14 @@ public final class ScaleTest {
             }
         if(!pending.isEmpty())pyramid.updateChunks(pending);
         double seconds=(System.nanoTime()-start)/1e9;
-        long writes=store.diskWrites(),reads=store.diskReads();
+        long writes=store.diskWrites(),reads=store.diskReads(),flushes=store.durableFlushes();
         long bytes;
         try(var files=Files.walk(root)){bytes=files.filter(Files::isRegularFile).mapToLong(p->{try{return Files.size(p);}catch(Exception e){throw new RuntimeException(e);}}).sum();}
         check(store.estimatedCacheBytes()<=16L*1024*1024,"bounded cache");
+        long reopenStart=System.nanoTime();
         store=new RegionPageStore(root,128,16L*1024*1024);
+        double reopenMs=(System.nanoTime()-reopenStart)/1e6;
+        long scanBytes=store.startupScanBytes();
         pyramid=new DiskGeographicPyramid(store,10);
         long coverage=0;
         for(int z=-1;z<=0;z++)for(int x=-1;x<=0;x++)coverage+=pyramid.get(new GeographicPyramid.Cell(10,x,z)).stats().known();
@@ -48,8 +51,8 @@ public final class ScaleTest {
         check(store.diskReads()==4,"only coarse pages after restart");
         long w=store.diskWrites();
         check(pyramid.updateChunk(-edge/2,-edge/2,samples[0])==0&&store.diskWrites()==w,"unchanged chunk");
-        System.out.printf(Locale.ROOT,"chunks=%d batch=%d seconds=%.3f chunks/s=%.1f pageWrites=%d pageReads=%d diskBytes=%d coldOverviewReads=4 coverage=%d%n",
-            chunks,batch,seconds,chunks/seconds,writes,reads,bytes,coverage);
+        System.out.printf(Locale.ROOT,"chunks=%d batch=%d seconds=%.3f chunks/s=%.1f pageWrites=%d pageReads=%d diskBytes=%d flushes=%d reopenMs=%.1f startupScanBytes=%d coldOverviewReads=4 coverage=%d%n",
+            chunks,batch,seconds,chunks/seconds,writes,reads,bytes,flushes,reopenMs,scanBytes,coverage);
     }
     public static void main(String[] args)throws Exception{
         int edge=Integer.parseInt(args[0]),batch=Integer.parseInt(args[1]);

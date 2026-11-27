@@ -22,7 +22,7 @@ public final class DiskGeographicPyramid {
         edits.put(new GeographicPyramid.Cell(0,x,z),leaf);
         return apply(edits);
     }
-    public static final int MAX_BATCH_CHUNKS=16;
+    public static final int MAX_BATCH_CHUNKS=64;
     public record ChunkSnapshot(int x,int z,Entry[] columns){
         public ChunkSnapshot{
             Objects.requireNonNull(columns);

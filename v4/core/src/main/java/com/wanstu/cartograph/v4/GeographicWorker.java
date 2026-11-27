@@ -151,7 +151,8 @@ public final class GeographicWorker {
                     if(closing&&writes.isEmpty())break;
                     if(!writes.isEmpty()&&(closing||visible.isEmpty()||readBurst>=4)){
                         batch.add(take(writes));
-                        while(batch.size()<DiskGeographicPyramid.MAX_BATCH_CHUNKS&&!writes.isEmpty())batch.add(take(writes));
+                        int limit=visible.isEmpty()?DiskGeographicPyramid.MAX_BATCH_CHUNKS:16;
+                        while(batch.size()<limit&&!writes.isEmpty())batch.add(take(writes));
                         readBurst=0;
                     }else if(!visible.isEmpty()){
                         read=take(visible);readBurst++;

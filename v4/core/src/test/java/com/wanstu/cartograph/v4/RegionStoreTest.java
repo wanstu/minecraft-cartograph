@@ -55,29 +55,27 @@ public final class RegionStoreTest {
         check(p.get(new Cell(4,-3,2)).stats().known()==256&&p.get(new Cell(4,-3,2)).stats().wetCount()==0,"chunk edit oracle");
         Arrays.fill(chunk,null);
         check(p.updateChunk(-3,2,chunk)==11&&p.get(new Cell(4,-3,2))==null,"chunk clear");
-        // Simulate a process dying after journal publication, with a first page already installed.
+        // Simulate a crash with an incomplete final append, after a durable batch.
         Key k0=new Key(0,10,10), k1=new Key(1,5,5);
         Page p0=new Page(k0,1,Map.of(0,a)),p1=new Page(k1,1,Map.of(0,new Entry(a.stats(),null)));
-        byte[] d0=RegionPageStore.encode(p0),d1=RegionPageStore.encode(p1);
-        Files.createDirectories(root.resolve("lod-0"));
-        Files.write(root.resolve("lod-0/r.10.10.cv4p"),d0);
-        try(var out=new DataOutputStream(Files.newOutputStream(root.resolve("pending.cv4j")))){
-            out.writeInt(0x4356344a);out.writeInt(2);
-            for(var page:List.of(p0,p1)){
-                byte[] data=page.key().equals(k0)?d0:d1;
-                out.writeInt(page.key().lod());out.writeInt(page.key().x());out.writeInt(page.key().z());
-                out.writeInt(data.length);out.write(data);
-            }
+        byte[] d0=RegionPageStore.encode(p0);
+        long flushes=store.durableFlushes();
+        store.writeBatch(List.of(p0,p1));
+        check(store.durableFlushes()==flushes+1,"one flush per batch");
+        Path log=root.resolve("pages.cv4log");
+        long durableLength=Files.size(log);
+        try(var out=new DataOutputStream(Files.newOutputStream(log,StandardOpenOption.APPEND))){
+            out.writeInt(0x4356344c);out.writeInt(4096);out.write(new byte[30]);
         }
         store=new RegionPageStore(root,2);
-        check(store.read(k0).equals(p0)&&store.read(k1).equals(p1),"redo after partial commit");
-        check(Files.notExists(root.resolve("pending.cv4j")),"journal removed after redo");
+        check(store.read(k0).equals(p0)&&store.read(k1).equals(p1),"prior complete batch recovered");
+        check(Files.size(log)==durableLength,"incomplete tail discarded");
         byte[] corrupt=d0.clone();corrupt[4]^=1;
         reject(()->RegionPageStore.decode(corrupt,k0),"checksum rejection");
         reject(()->RegionPageStore.decode(d0,k1),"wrong page rejection");
         RegionPageStore finalStore=store;
         try{finalStore.writeBatch(List.of(p0));throw new AssertionError("stale revision");}catch(IllegalArgumentException expected){}
-        System.out.println("PASS: V4 page palette, 55 incremental writes, 256-column chunk coalescing, direct coarse read, restart, bounded cache, deletion, redo, corruption and revision checks");
+        System.out.println("PASS: V4 page palette, 55 incremental writes, 256-column chunk coalescing, direct coarse read, restart, bounded cache, deletion, incomplete append, corruption and revision checks");
     }
     public static void main(String[] args)throws Exception{
         Path root=Files.createTempDirectory("cartograph-v4-test-");
