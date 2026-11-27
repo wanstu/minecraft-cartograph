@@ -2,6 +2,7 @@ package com.wanstu.cartograph.v4.neoforge;
 
 import com.wanstu.cartograph.v4.*;
 import com.wanstu.cartograph.v4.MarkerStore.Marker;
+import com.wanstu.cartograph.v4.MapLayers.Layer;
 import java.util.*;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -11,6 +12,7 @@ import org.lwjgl.glfw.GLFW;
 /** One camera for flat and raised maps; angle changes never alter geography. */
 final class V4MapScreen extends Screen {
     private final V4MapSession session;
+    private final V4LayerPanel layerPanel;
     private MapCamera camera,lastCamera;
     private MapProjection projection;
     private MapViewport.Plan plan;
@@ -23,7 +25,7 @@ final class V4MapScreen extends Screen {
     private int[] regionCorner;
     private static final double[] ANGLES={90,60,45,30};
     V4MapScreen(V4MapSession session,double x,double z){
-        super(Component.literal("Cartograph V4 Dev"));this.session=session;
+        super(Component.literal("Cartograph V4 Dev"));this.session=session;layerPanel=new V4LayerPanel(session.layers);
         var player=net.minecraft.client.Minecraft.getInstance().player;
         camera=new MapCamera(x,player==null?64:player.getY(),z,1,session.yaw,session.elevation);
     }
@@ -60,24 +62,25 @@ final class V4MapScreen extends Screen {
         drawMarkers(graphics);
         drawStructures(graphics);
         graphics.fill(0,0,width,107,0xde151a20);
-        graphics.drawString(font,"Cartograph V4 | "+session.style.name()+" | LOD "+plan.lod(),8,6,0xffffffff);
+        graphics.drawString(font,font.plainSubstrByWidth("Cartograph V4 | "+session.style.name()+" | LOD "+plan.lod(),Math.max(1,width-96)),8,6,0xffffffff);
         graphics.drawString(font,"Drag / scroll | 1-5 styles | R center | Esc close",8,17,0xffc1cad0);
         graphics.drawString(font,"T tilt "+(int)camera.elevationDegrees()+" | Q/E rotate "+(int)camera.yawDegrees()+" | N north-up",8,28,0xffc1cad0);
         graphics.drawString(font,"X "+(int)camera.x()+" Z "+(int)camera.z()+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size()+" | quads "+session.quads()+" | tex "+session.uploads()+" mesh "+session.meshUploads(),8,39,0xff9fadb8);
         String hit=picked==null?"Right click: add / edit marker":"Pick "+(int)Math.floor(picked.world().x())+" "+(int)Math.floor(picked.world().y())+" "+(int)Math.floor(picked.world().z())+" | LOD "+picked.lod()+(picked.side()?" side":" top");
         graphics.drawString(font,hit,8,50,0xffc1cad0);
         graphics.drawString(font,"C: "+session.contourStatus(),8,61,0xffc1cad0);
-        String m=session.markers.busy()?"Markers loading/saving":session.markers.error!=null?"Marker error: "+session.markers.error:"B: manage markers | V: "+(session.markers.visible?"hide":"show");
+        String m=session.markers.busy()?"Markers loading/saving":session.markers.error!=null?"Marker error: "+session.markers.error:"B: manage markers | V: "+(session.layers.visible(Layer.MARKERS)?"hide":"show");
         graphics.drawString(font,font.plainSubstrByWidth(m,Math.max(1,width-16)),8,72,0xffc1cad0);
         graphics.drawString(font,font.plainSubstrByWidth("S: "+structureStatus,Math.max(1,width-16)),8,83,0xffc1cad0);
-        String regionHint=selectingRegion?(regionCorner==null?"Right click first corner":"Right click second corner")+" | Esc cancel":session.regions.error!=null?session.regions.error:"G: regions | H: "+(session.regions.visible?"hide":"show");
+        String regionHint=selectingRegion?(regionCorner==null?"Right click first corner":"Right click second corner")+" | Esc cancel":session.regions.error!=null?session.regions.error:"G: regions | H: "+(session.layers.visible(Layer.REGIONS)?"hide":"show");
         graphics.drawString(font,font.plainSubstrByWidth(regionHint,Math.max(1,width-16)),8,94,0xffc1cad0);
+        layerPanel.render(graphics,font,width,height,mouseX,mouseY);
     }
     void centerOn(Marker m){setCamera(new MapCamera(m.x(),m.y(),m.z(),camera.pixelsPerBlock(),camera.yawDegrees(),camera.elevationDegrees()));}
     private void drawMarkers(GuiGraphics g){
         drawnMarkers.clear();
         var snapshot=session.markers.snapshot;
-        if(!session.markers.visible||snapshot==null)return;
+        if(!session.layers.visible(Layer.MARKERS)||snapshot==null)return;
         for(Marker m:snapshot.active()){
             var p=projection.project(m.x()+.5,m.y()+1,m.z()+.5);
             int x=(int)Math.round(width/2.0+p.x()),y=(int)Math.round(height/2.0+p.y());
@@ -99,12 +102,12 @@ final class V4MapScreen extends Screen {
         }
     }
     private void drawStructures(GuiGraphics g){
-        if(!session.structuresVisible){structureStatus="Structures off";return;}
+        if(!session.layers.structuresActive()){structureStatus="Structures off";return;}
         boolean raised=camera.elevationDegrees()!=90;
         double minY=raised&&minecraft.level!=null?minecraft.level.getMinBuildHeight():camera.y();
         double maxY=raised&&minecraft.level!=null?minecraft.level.getMaxBuildHeight():camera.y();
         var bounds=StructureView.bounds(projection.bounds(width,height,minY,maxY));
-        var result=session.structureView.tick(bounds,session.io.structureRevision(session.dimension));
+        var result=session.structureView.tick(bounds,session.io.structureRevision(session.dimension),session.layers.categoryMask());
         structureStatus=result.limited()?"Structure view limited; zoom in":session.structureView.error()!=null?session.structureView.error():session.structureView.busy()?"Structures loading":"Structures "+result.starts().size();
         List<int[]> used=new ArrayList<>();
         for(var marker:drawnMarkers)used.add(new int[]{marker.x,marker.y});
@@ -168,7 +171,7 @@ final class V4MapScreen extends Screen {
     private void drawRegions(GuiGraphics g,int mx,int my){
         if(camera.elevationDegrees()!=90)return;
         var snapshot=session.regions.snapshot;
-        if(session.regions.visible&&snapshot!=null){
+        if(session.layers.visible(Layer.REGIONS)&&snapshot!=null){
             var b=projection.bounds(width,height,camera.y(),camera.y());
             var visible=snapshot.active().stream().filter(r->r.intersects(b))
                 .sorted(Comparator.comparingLong(NamedRegion::area).reversed().thenComparing(NamedRegion::id)).limit(64).toList();
@@ -195,6 +198,7 @@ final class V4MapScreen extends Screen {
             g.drawCenteredString(font,font.plainSubstrByWidth(name,120),(int)px,(int)py-4,0xff000000|color);
     }
     @Override public boolean mouseClicked(double mx,double my,int button){
+        if(layerPanel.click(mx,my,button,width,height))return true;
         if(my<107)return true;
         if(button==0)return true;
         if(button!=1)return super.mouseClicked(mx,my,button);
@@ -215,27 +219,35 @@ final class V4MapScreen extends Screen {
         return true;
     }
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy){
+        if(layerPanel.drag(dx,dy,width,height))return true;
         if(button!=0)return super.mouseDragged(mx,my,button,dx,dy);
         if(my<107)return true;
         var p=camera.atHeight(-dx,-dy,camera.y());
         setCamera(new MapCamera(p.x(),camera.y(),p.z(),camera.pixelsPerBlock(),camera.yawDegrees(),camera.elevationDegrees()));
         return true;
     }
+    @Override public boolean mouseReleased(double mx,double my,int button){
+        if(layerPanel.release())return true;
+        return super.mouseReleased(mx,my,button);
+    }
     @Override public boolean mouseScrolled(double mx,double my,double horizontal,double vertical){
+        if(layerPanel.scroll(vertical,width,height)||my<107)return true;
         double next=Math.max(minScale(),Math.min(16,camera.pixelsPerBlock()*Math.pow(1.25,vertical)));
         var hit=session.pick(camera,mx-width/2.0,my-height/2.0);
         var anchor=hit==null?camera.atHeight(mx-width/2.0,my-height/2.0,camera.y()):hit.world();
         setCamera(camera.zoomAt(next,anchor));return true;
     }
     @Override public boolean keyPressed(int key,int scan,int modifiers){
+        if(key==GLFW.GLFW_KEY_L){layerPanel.toggle();return true;}
+        if(layerPanel.isOpen()){if(key==GLFW.GLFW_KEY_ESCAPE)layerPanel.close();return true;}
         if(selectingRegion&&key==GLFW.GLFW_KEY_ESCAPE){selectingRegion=false;regionCorner=null;return true;}
         if(selectingRegion&&key==GLFW.GLFW_KEY_T)return true;
         if(key==GLFW.GLFW_KEY_G){minecraft.setScreen(new V4RegionManager(this,session.regions));return true;}
-        if(key==GLFW.GLFW_KEY_H){session.regions.visible=!session.regions.visible;return true;}
-        if(key==GLFW.GLFW_KEY_S){session.structuresVisible=!session.structuresVisible;return true;}
+        if(key==GLFW.GLFW_KEY_H){session.layers.toggle(Layer.REGIONS);return true;}
+        if(key==GLFW.GLFW_KEY_S){session.layers.toggle(Layer.STRUCTURES);return true;}
         if(key==GLFW.GLFW_KEY_B){minecraft.setScreen(new V4MarkerManager(this,session));return true;}
-        if(key==GLFW.GLFW_KEY_V){session.markers.visible=!session.markers.visible;return true;}
-        if(key==GLFW.GLFW_KEY_C){session.contoursEnabled=!session.contoursEnabled;return true;}
+        if(key==GLFW.GLFW_KEY_V){session.layers.toggle(Layer.MARKERS);return true;}
+        if(key==GLFW.GLFW_KEY_C){session.layers.toggle(Layer.CONTOURS);return true;}
         if(key==GLFW.GLFW_KEY_M){onClose();return true;}
         if(key>=GLFW.GLFW_KEY_1&&key<=GLFW.GLFW_KEY_5){session.style=MapRaster.Style.values()[key-GLFW.GLFW_KEY_1];return true;}
         if(key==GLFW.GLFW_KEY_R&&minecraft!=null&&minecraft.player!=null){

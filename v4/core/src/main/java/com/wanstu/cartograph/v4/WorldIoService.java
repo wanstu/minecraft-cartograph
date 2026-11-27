@@ -110,8 +110,11 @@ public final class WorldIoService {
     }
     public long structureRevision(String dimension){return structureCounter(dimension).get();}
     public CompletableFuture<StructureIndex.Result> structures(String dimension,StructureIndex.Bounds bounds){
+        return structures(dimension,bounds,StructureCatalog.ALL_CATEGORIES);
+    }
+    public CompletableFuture<StructureIndex.Result> structures(String dimension,StructureIndex.Bounds bounds,int categories){
         directory(dimension);Objects.requireNonNull(bounds);
-        return submit(()->{try{return open(dimension).structures.query(bounds);}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
+        return submit(()->{try{return open(dimension).structures.query(bounds,categories);}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
     }
     private MarkerStore markerStore(String dimension){return new MarkerStore(root.resolve(directory(dimension)).resolve("markers.cv4"));}
     public CompletableFuture<MarkerStore.Snapshot> markers(String dimension){

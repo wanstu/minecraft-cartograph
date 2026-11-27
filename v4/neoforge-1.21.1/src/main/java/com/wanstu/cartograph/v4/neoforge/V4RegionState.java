@@ -8,7 +8,7 @@ final class V4RegionState {
     private CompletableFuture<NamedRegionStore.Snapshot> pending;
     NamedRegionStore.Snapshot snapshot;
     long completed;
-    boolean success,visible=true;
+    boolean success;
     String error;
     V4RegionState(WorldIoService io,String dimension){this.io=io;this.dimension=dimension;reload();}
     boolean busy(){return pending!=null;}

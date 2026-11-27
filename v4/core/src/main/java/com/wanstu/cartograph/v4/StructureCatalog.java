@@ -6,6 +6,10 @@ import java.util.Objects;
 /** Presentation metadata only: no seed prediction or changes to the structure index. */
 public final class StructureCatalog {
     public enum Category { SETTLEMENT, LANDMARK, WATER, UNDERGROUND, PORTAL, NETHER, END, OTHER }
+    public static final int ALL_CATEGORIES=(1<<Category.values().length)-1;
+    public static int bit(Category category){return 1<<category.ordinal();}
+    public static Category category(String id){return VANILLA.getOrDefault(id,Category.OTHER);}
+    public static boolean includes(int mask,String id){return (mask&bit(category(id)))!=0;}
     public record Description(Category category, String translationKey, String fallback) {}
     private static final Map<String, Category> VANILLA = Map.ofEntries(
         Map.entry("minecraft:village_plains", Category.SETTLEMENT),
@@ -48,7 +52,7 @@ public final class StructureCatalog {
 
     public static Description describe(String id) {
         Objects.requireNonNull(id);
-        Category category = VANILLA.getOrDefault(id, Category.OTHER);
+        Category category = category(id);
         // Unknown and modded identifiers keep their namespace; never infer a vanilla category by substring.
         int separator = id.indexOf(':');
         String key = separator > 0 ? "cartograph_v4.structure." + id.replace(':', '.') : id;

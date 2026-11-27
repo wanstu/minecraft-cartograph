@@ -18,7 +18,7 @@ final class V4MapSession implements AutoCloseable {
     final V4MarkerState markers;
     final V4RegionState regions;
     final StructureView structureView;
-    boolean structuresVisible=true;
+    final MapLayers layers=new MapLayers();
     final MapPresentationClient pages;
     MapRaster.Style style=MapRaster.Style.SATELLITE_MODERN;
     double yaw=0,elevation=90;
@@ -33,7 +33,7 @@ final class V4MapSession implements AutoCloseable {
     private long uploads;
     private int drawCalls,exactPages,fallbackPages,quads;
     V4MapSession(WorldIoService io,String dimension){
-        this.io=io;this.dimension=dimension;markers=new V4MarkerState(io,dimension);regions=new V4RegionState(io,dimension);structureView=new StructureView(b->io.structures(dimension,b));
+        this.io=io;this.dimension=dimension;markers=new V4MarkerState(io,dimension);regions=new V4RegionState(io,dimension);structureView=new StructureView((b,mask)->io.structures(dimension,b,mask));
         pages=new MapPresentationClient(io.presentationChanges(dimension),k->io.raster(dimension,k),512,4);
         for(int i=0;i<COUNT;i++)free.add(i);
     }
@@ -302,7 +302,7 @@ final class V4MapSession implements AutoCloseable {
                 drawCalls++;quads+=mesh.quads;rendered.addAll(group.parts);
             }
             drawnParts=List.copyOf(rendered);lastRenderedCamera=camera;
-            if(raised&&structuresVisible){
+            if(raised&&layers.structuresActive()){
                 if(!anchorDependencies.equals(drawnParts)){
                     var index=new HashMap<Key,List<Part>>();
                     for(var part:drawnParts)index.computeIfAbsent(part.target,k->new ArrayList<>(4)).add(part);
@@ -329,10 +329,9 @@ final class V4MapSession implements AutoCloseable {
     }
     long meshUploads(){return meshes.builds();}
     long meshBytes(){return meshes.bytes();}
-    boolean contoursEnabled;
     private V4ContourLayer contours;
     void drawContours(GuiGraphics graphics,net.minecraft.client.gui.Font font,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height,double depthScale){
-        if(!contoursEnabled)return;
+        if(!layers.visible(MapLayers.Layer.CONTOURS))return;
         if(contours==null)contours=new V4ContourLayer();
         Set<Key> exact=new HashSet<>();
         for(var part:drawnParts)if(part.target.equals(part.patch.source()))exact.add(part.target);
@@ -350,7 +349,7 @@ final class V4MapSession implements AutoCloseable {
         Key neighbor=new Key(k.lod(),k.x()+dx,k.z()+dz);return exact.contains(neighbor)?pages.get(neighbor):null;
     }
     String contourStatus(){
-        if(!contoursEnabled)return "Contours off";
+        if(!layers.visible(MapLayers.Layer.CONTOURS))return "Contours off";
         if(contours==null)return "Contours loading";
         return "Contours "+contours.segments()+" | VBO "+contours.uploads()+(contours.limited()?" | budget limited":"");
     }

@@ -32,5 +32,20 @@
   "cartograph_v4.structure.minecraft.fortress": "下界要塞",
   "cartograph_v4.structure.minecraft.bastion_remnant": "堡垒遗迹",
   "cartograph_v4.structure.minecraft.nether_fossil": "下界化石",
-  "cartograph_v4.structure.minecraft.end_city": "末地城"
+  "cartograph_v4.structure.minecraft.end_city": "末地城",
+  "cartograph_v4.layers.title": "图层 [L]",
+  "cartograph_v4.layers.contours": "等高线 [C]",
+  "cartograph_v4.layers.markers": "自定义标点 [V]",
+  "cartograph_v4.layers.structures": "自动结构 [S]",
+  "cartograph_v4.layers.regions": "命名区域 [H]",
+  "cartograph_v4.layers.category.settlement": "聚落",
+  "cartograph_v4.layers.category.landmark": "地表遗迹",
+  "cartograph_v4.layers.category.water": "水域结构",
+  "cartograph_v4.layers.category.underground": "地下结构",
+  "cartograph_v4.layers.category.portal": "传送门",
+  "cartograph_v4.layers.category.nether": "下界结构",
+  "cartograph_v4.layers.category.end": "末地结构",
+  "cartograph_v4.layers.category.other": "其他结构",
+  "cartograph_v4.layers.all": "全选结构分类",
+  "cartograph_v4.layers.none": "取消所有结构分类"
 }

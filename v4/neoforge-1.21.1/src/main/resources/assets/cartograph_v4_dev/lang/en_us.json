@@ -32,5 +32,20 @@
   "cartograph_v4.structure.minecraft.fortress": "Nether fortress",
   "cartograph_v4.structure.minecraft.bastion_remnant": "Bastion remnant",
   "cartograph_v4.structure.minecraft.nether_fossil": "Nether fossil",
-  "cartograph_v4.structure.minecraft.end_city": "End city"
+  "cartograph_v4.structure.minecraft.end_city": "End city",
+  "cartograph_v4.layers.title": "Layers [L]",
+  "cartograph_v4.layers.contours": "Contours [C]",
+  "cartograph_v4.layers.markers": "Custom markers [V]",
+  "cartograph_v4.layers.structures": "Structures [S]",
+  "cartograph_v4.layers.regions": "Named regions [H]",
+  "cartograph_v4.layers.category.settlement": "Settlements",
+  "cartograph_v4.layers.category.landmark": "Landmarks",
+  "cartograph_v4.layers.category.water": "Water structures",
+  "cartograph_v4.layers.category.underground": "Underground structures",
+  "cartograph_v4.layers.category.portal": "Portals",
+  "cartograph_v4.layers.category.nether": "Nether structures",
+  "cartograph_v4.layers.category.end": "End structures",
+  "cartograph_v4.layers.category.other": "Other structures",
+  "cartograph_v4.layers.all": "Select all categories",
+  "cartograph_v4.layers.none": "Clear all categories"
 }

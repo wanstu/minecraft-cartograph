@@ -106,13 +106,16 @@ public final class StructureIndex {
         }finally{Files.deleteIfExists(temp);}
         remember(r,result);return true;
     }
-    public Result query(Bounds b)throws IOException{
+    public Result query(Bounds b)throws IOException{return query(b,StructureCatalog.ALL_CATEGORIES);}
+    public Result query(Bounds b,int categories)throws IOException{
+        if((categories&~StructureCatalog.ALL_CATEGORIES)!=0)throw new IllegalArgumentException("Category mask");
+        if(categories==0)return new Result(List.of(),false);
         if(!b.bounded())return new Result(List.of(),true);
         List<Start> out=new ArrayList<>();
         // One 512-block owner-region halo covers every accepted displaced center.
         for(int z=Math.floorDiv(b.minZ,32)-1;z<=Math.floorDiv(b.maxZ,32)+1;z++)
             for(int x=Math.floorDiv(b.minX,32)-1;x<=Math.floorDiv(b.maxX,32)+1;x++)
-                for(var s:read(new Region(x,z)))if(b.contains(s)){
+                for(var s:read(new Region(x,z)))if(b.contains(s)&&StructureCatalog.includes(categories,s.type())){
                     if(out.size()>=2048)return new Result(out,true);out.add(s);
                 }
         return new Result(out,false);

@@ -12,7 +12,6 @@ final class V4MarkerState {
     String error;
     long completed;
     boolean success;
-    boolean visible=true;
     V4MarkerState(WorldIoService io,String dimension){this.io=io;this.dimension=dimension;reload();}
     boolean busy(){return pending!=null;}
     void reload(){if(busy())return;error=null;pending=io.markers(dimension);}
