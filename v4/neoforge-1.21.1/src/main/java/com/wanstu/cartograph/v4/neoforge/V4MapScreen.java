@@ -28,6 +28,9 @@ final class V4MapScreen extends Screen {
     private MapRayPicker.Hit picked;
     private record DrawnMarker(Marker marker,int x,int y){}
     private final List<DrawnMarker> drawnMarkers=new ArrayList<>();
+    private final MapLabelLayout labelLayout=new MapLabelLayout();
+    private record TextLabel(String text,int x,int y,int color,int priority){}
+    private final List<TextLabel> pendingLabels=new ArrayList<>(144);
     private String structureStatus="";
     private boolean selectingRegion;
     private int[] regionCorner;
@@ -62,21 +65,26 @@ final class V4MapScreen extends Screen {
         graphics.fill(0,0,width,height,0xff242b30);
         updatePlan();session.prepare(plan.keys());
         session.draw(graphics,plan.keys(),camera,projection,width,height,hud());
+        labelLayout.begin(hud());pendingLabels.clear();
         drawRegions(graphics,mouseX,mouseY);
         if(minecraft!=null&&minecraft.player!=null){
             var p=projection.project(minecraft.player.getX(),minecraft.player.getY(),minecraft.player.getZ());
             int px=(int)Math.round(width/2.0+p.x()),pz=(int)Math.round(height/2.0+p.y());
-            if(hud().permitsLabel(px,pz,5,5)){
+            if(labelLayout.reserve(px,pz,6,6)){
                 graphics.fill(px-4,pz-4,px+5,pz+5,0xff111111);
                 graphics.fill(px-2,pz-2,px+3,pz+3,0xffffcc55);
             }
         }
         drawMarkers(graphics);
         drawStructures(graphics);
+        session.icons.flush(graphics);
+        drawMapLabels(graphics);
+        session.drawContourLabels(graphics,camera,projection,width,height,hud(),labelLayout);
         drawHud(graphics,mouseX,mouseY);
         layerPanel.render(graphics,font,width,height,mouseX,mouseY);
         viewPanel.render(graphics,font,width,height,mouseX,mouseY,session.style,camera,selectingRegion);
-        contextMenu.render(graphics,font,width,height,mouseX,mouseY);
+        contextMenu.render(graphics,font,width,height,mouseX,mouseY,session.icons);
+        session.icons.flush(graphics);
     }
     private static String tr(String key,Object... args){return Component.translatable("cartograph_v4.hud."+key,args).getString();}
     private void activate(Action action){
@@ -134,10 +142,10 @@ final class V4MapScreen extends Screen {
             boolean active=control.action()==Action.LAYERS&&layerPanel.isOpen()||control.action()==Action.VIEW&&viewPanel.isOpen()||control.action()==Action.DIAGNOSTICS&&diagnostics;
             panel(g,r,active?0xff405a69:hover?0xff374954:0xeb202e37);
             g.renderOutline(r.x(),r.y(),r.w(),r.h(),0xff627b8a);
-            String symbol=switch(control.action()){case LAYERS->"≡";case VIEW->"◈";case MARKERS->"◆";case REGIONS->"□";case DIAGNOSTICS->"i";case ZOOM_IN->"+";case ZOOM_OUT->"−";case CENTER->"⊙";case NORTH->"N";case CLOSE->"×";};
-            g.drawCenteredString(font,symbol,r.x()+r.w()/2,r.y()+Math.max(0,(r.h()-8)/2),0xffe4eef4);
+            session.icons.draw(MapIcons.toolbar(control.action()),r.x()+r.w()/2,r.y()+r.h()/2,Math.max(6,Math.min(16,r.w()-4)),0xffe4eef4);
             if(hover){hovered=control.action();hoverRect=r;}
         }
+        session.icons.flush(g);
         if(hovered!=null&&!layerPanel.isOpen()&&!viewPanel.isOpen()&&!contextMenu.isOpen()){
             String label=font.plainSubstrByWidth(tr(hovered.name().toLowerCase(Locale.ROOT)),Math.max(1,width-12));
             int w=font.width(label)+8,x=Math.max(0,Math.min(width-w,hoverRect.x()+hoverRect.w()+4)),y=Math.max(32,Math.min(height-35,hoverRect.y()));
@@ -153,21 +161,13 @@ final class V4MapScreen extends Screen {
         for(Marker m:snapshot.active()){
             var p=projection.project(m.x()+.5,m.y()+1,m.z()+.5);
             int x=(int)Math.round(width/2.0+p.x()),y=(int)Math.round(height/2.0+p.y());
-            if(!hud().permitsLabel(x,y,7,7))continue;
-            boolean overlap=false;
-            for(var prev:drawnMarkers)if(Math.abs(prev.x-x)<12&&Math.abs(prev.y-y)<12){overlap=true;break;}
-            if(overlap)continue;
             if(drawnMarkers.size()>=128)break;
+            if(!labelLayout.reserve(x,y,8,8))continue;
             drawnMarkers.add(new DrawnMarker(m,x,y));
             int color=0xff000000|m.color();
-            g.fill(x-4,y-4,x+5,y+5,0xff14191d);
-            g.renderOutline(x-3,y-3,7,7,color);
-            String symbol=switch(m.icon()){case POINT->"+";case HOME->"H";case FLAG->"F";case MINE->"M";case PORT->"P";case FARM->"A";};
-            g.drawCenteredString(font,symbol,x,y-4,color);
-            if(drawnMarkers.size()<=48){
-                String name=font.plainSubstrByWidth(m.name(),100);
-                if(hud().permitsLabel(x,y+11,font.width(name)/2+2,6))g.drawCenteredString(font,name,x,y+7,0xffffffff);
-            }
+            g.fill(x-7,y-7,x+8,y+8,0xc51b2228);
+            session.icons.draw(MapIcons.marker(m.icon()),x,y,14,color);
+            if(drawnMarkers.size()<=48)pendingLabels.add(new TextLabel(m.name(),x,y+10,0xfff2f5f7,0));
         }
     }
     private void drawStructures(GuiGraphics g){
@@ -178,8 +178,6 @@ final class V4MapScreen extends Screen {
         var bounds=StructureView.bounds(projection.bounds(width,height,minY,maxY));
         var result=session.structureView.tick(bounds,session.io.structureRevision(session.dimension),session.layers.categoryMask());
         structureStatus=result.limited()?"Structure view limited; zoom in":session.structureView.error()!=null?session.structureView.error():session.structureView.busy()?"Structures loading":"Structures "+result.starts().size();
-        List<int[]> used=new ArrayList<>();
-        for(var marker:drawnMarkers)used.add(new int[]{marker.x,marker.y});
         int displayed=0;
         for(var start:result.starts()){
             double yAnchor=camera.y();
@@ -193,43 +191,27 @@ final class V4MapScreen extends Screen {
             var projected=projection.project(start.x()+.5,yAnchor,start.z()+.5);
             int x=(int)Math.round(width/2.0+projected.x());
             int y=(int)Math.round(height/2.0+projected.y());
-            if(!hud().permitsLabel(x,y,7,7))continue;
-            boolean overlap=false;for(int[] at:used)if(Math.abs(at[0]-x)<16&&Math.abs(at[1]-y)<16){overlap=true;break;}
-            if(overlap)continue;
             if(displayed>=96)break;
-            used.add(new int[]{x,y});displayed++;
+            if(!labelLayout.reserve(x,y,8,8))continue;
+            displayed++;
             var description=StructureCatalog.describe(start.type());
-            drawStructureIcon(g,x,y,description.category());
+            g.fill(x-7,y-7,x+8,y+8,0xc520262d);
+            session.icons.draw(MapIcons.structure(description.category()),x,y,14,0xff9cdaef);
             if(displayed<=32){
                 String name=Component.translatableWithFallback(description.translationKey(),description.fallback()).getString();
                 if(approximate)name="~ "+name;
-                name=font.plainSubstrByWidth(name,100);
-                if(hud().permitsLabel(x,y+11,font.width(name)/2+2,6))g.drawCenteredString(font,name,x,y+7,0xffb7e1ee);
+                pendingLabels.add(new TextLabel(name,x,y+10,0xffb7e1ee,1));
             }
         }
     }
-    // Monochrome 9x9 line pictograms; shared across styles, no texture uploads.
-    private static final String[][] STRUCTURE_ICONS={
-        {"....#....","...#.#...","..#...#..",".#.....#.","#########",".#.....#.",".#..#..#.",".#..#..#.",".#######."},
-        {"#.#.#.#.#","#####.###","#.......#","#.......#","#...#...#","#..#.#..#","#..#.#..#","#..#.#..#","#########"},
-        {"....#....","....##...","....#.#..","....#..#.","....#####","#########",".#.....#.","..#####..","........."},
-        {"..#####..",".#.....#.","#.......#","#..###..#","#..#.#..#","#..#.#..#","#..#.#..#","#..#.#..#","#########"},
-        {"..#####..",".#.....#.",".#.....#.",".#.....#.",".#.....#.",".#.....#.",".#.....#.",".#.....#.","#########"},
-        {"#.......#","###...###","#.#...#.#","#.#####.#","#.......#","#...#...#","#...#...#","#...#...#","#########"},
-        {"...###...","...#.#...","..#####..","..#...#..","..#####..","....#....","...###...","...#.#...","..#####.."},
-        {"....#....","...#.#...","..#...#..",".#.....#.","#...#...#",".#.....#.","..#...#..","...#.#...","....#...."}
-    };
-    private static void drawStructureIcon(GuiGraphics g,int x,int y,StructureCatalog.Category category){
-        g.fill(x-5,y-5,x+6,y+6,0xff20262d);
-        String[] pattern=STRUCTURE_ICONS[category.ordinal()];
-        for(int row=0;row<9;row++){
-            String line=pattern[row];
-            for(int col=0;col<9;){
-                if(line.charAt(col)!='#'){col++;continue;}
-                int end=col+1;while(end<9&&line.charAt(end)=='#')end++;
-                g.fill(x-4+col,y-4+row,x-4+end,y-3+row,0xff8ed8ef);
-                col=end;
-            }
+    private void drawMapLabels(GuiGraphics g){
+        pendingLabels.sort(Comparator.comparingInt(TextLabel::priority));
+        for(var label:pendingLabels){
+            String name=font.plainSubstrByWidth(label.text(),120);
+            int halfW=(font.width(name)+1)/2+2,centerY=label.y()+4;
+            if(name.isEmpty()||!labelLayout.reserve(label.x(),centerY,halfW,5))continue;
+            g.fill(label.x()-halfW,centerY-5,label.x()+halfW+1,centerY+6,0x981b2329);
+            g.drawCenteredString(font,name,label.x(),label.y(),label.color());
         }
     }
     void beginRegion(){selectingRegion=true;regionCorner=null;setCamera(camera.withAngles(camera.yawDegrees(),90));}
@@ -264,8 +246,8 @@ final class V4MapScreen extends Screen {
             g.fill(-hw,-hh,hw,hh,0x18000000|color);
             g.renderOutline(-hw,-hh,2*hw,2*hh,0xc0000000|color);
         }finally{g.pose().popPose();}
-        if(!name.isEmpty()&&hud().permitsLabel((int)px,(int)py,Math.min(60,font.width(name)/2+2),7)&&hw>=15&&hh>=8)
-            g.drawCenteredString(font,font.plainSubstrByWidth(name,120),(int)px,(int)py-4,0xff000000|color);
+        if(!name.isEmpty()&&hw>=15&&hh>=8&&px>=0&&px<width&&py>=0&&py<height)
+            pendingLabels.add(new TextLabel(name,(int)px,(int)py-4,0xffe1e8ec,2));
     }
     @Override public boolean mouseClicked(double mx,double my,int button){
         gesture.press(false,button);

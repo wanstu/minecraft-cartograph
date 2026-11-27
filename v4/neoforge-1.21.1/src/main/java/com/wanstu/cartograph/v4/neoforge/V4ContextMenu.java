@@ -27,7 +27,7 @@ final class V4ContextMenu {
         var l=MapContextLayout.menu(width,height,x,y,actions.size(),first);first=l.first();return l;
     }
     private static String label(Action a){return Component.translatable("cartograph_v4.context."+a.name().toLowerCase(Locale.ROOT)).getString();}
-    void render(GuiGraphics g,Font font,int width,int height,int mx,int my){
+    void render(GuiGraphics g,Font font,int width,int height,int mx,int my,V4IconAtlas icons){
         if(!isOpen())return;
         var l=layout(width,height);var r=l.bounds();
         if(l.rows()==0)return;
@@ -35,7 +35,11 @@ final class V4ContextMenu {
         for(int i=0;i<l.rows();i++){
             var row=l.row(i);
             if(row.contains(mx,my))g.fill(row.x()+1,row.y(),row.x()+row.w()-1,row.y()+row.h(),0xff3d5767);
-            if(row.w()>=16)g.drawString(font,font.plainSubstrByWidth(label(actions.get(l.first()+i)),Math.max(1,row.w()-14)),row.x()+6,row.y()+6,0xffe4edf3);
+            if(row.w()>=32){
+                var action=actions.get(l.first()+i);
+                icons.draw(MapIcons.context(action),row.x()+10,row.y()+10,12,0xffe4edf3);
+                g.drawString(font,font.plainSubstrByWidth(label(action),Math.max(1,row.w()-24)),row.x()+21,row.y()+6,0xffe4edf3);
+            }
         }
         g.renderOutline(r.x(),r.y(),r.w(),r.h(),0xff708795);
     }

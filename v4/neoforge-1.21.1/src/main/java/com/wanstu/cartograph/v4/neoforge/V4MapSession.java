@@ -19,6 +19,7 @@ final class V4MapSession implements AutoCloseable {
     final V4RegionState regions;
     final StructureView structureView;
     final MapLayers layers=new MapLayers();
+    final V4IconAtlas icons=new V4IconAtlas();
     final MapPresentationClient pages;
     MapRaster.Style style=MapRaster.Style.SATELLITE_MODERN;
     double yaw=0,elevation=90;
@@ -331,8 +332,10 @@ final class V4MapSession implements AutoCloseable {
             if(raised){RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableCull();RenderSystem.enableDepthTest();}
             RenderSystem.disableBlend();
         }
-        if(layers.visible(MapLayers.Layer.CONTOURS)&&contours!=null)
-            contours.drawLabels(graphics,Minecraft.getInstance().font,camera,projection,width,height,hud,drawnParts,
+    }
+    void drawContourLabels(GuiGraphics graphics,MapCamera camera,MapProjection projection,int width,int height,MapHudLayout hud,MapLabelLayout labels){
+        if(lastRenderedCamera!=null&&layers.visible(MapLayers.Layer.CONTOURS)&&contours!=null)
+            contours.drawLabels(graphics,Minecraft.getInstance().font,camera,projection,width,height,labels,drawnParts,
                 anchor->contourAnchorVisible(camera,anchor));
     }
     private void clearAnchors(){anchorParts=Map.of();anchorDependencies=List.of();}
@@ -378,6 +381,7 @@ final class V4MapSession implements AutoCloseable {
     int quads(){return quads;}
     long uploads(){return uploads;}
     @Override public void close(){
+        icons.close();
         if(contours!=null){contours.close();contours=null;}
         meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();clearAnchors();
         if(textureId!=null)Minecraft.getInstance().getTextureManager().release(textureId);
