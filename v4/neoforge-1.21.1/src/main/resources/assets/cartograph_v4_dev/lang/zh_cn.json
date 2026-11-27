@@ -66,5 +66,14 @@
   "cartograph_v4.hud.style.satellite_ancient": "古式卫星",
   "cartograph_v4.hud.style.hand_modern": "现代手绘",
   "cartograph_v4.hud.style.hand_ancient": "古式手绘",
-  "cartograph_v4.hud.style.hand_anime": "动漫手绘"
+  "cartograph_v4.hud.style.hand_anime": "动漫手绘",
+  "cartograph_v4.hud.view": "地图外观 (P)",
+  "cartograph_v4.view.title": "地图外观 (P)",
+  "cartograph_v4.view.flat": "2D 平面 · 90°",
+  "cartograph_v4.view.tilt_60": "2.5D · 60°",
+  "cartograph_v4.view.tilt_45": "2.5D · 45°",
+  "cartograph_v4.view.tilt_30": "2.5D · 30°",
+  "cartograph_v4.view.rotate_left": "向左旋转 45° (Q)",
+  "cartograph_v4.view.rotate_right": "向右旋转 45° (E)",
+  "cartograph_v4.view.north_up": "朝向正北（保留倾角）"
 }

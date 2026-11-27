@@ -66,5 +66,14 @@
   "cartograph_v4.hud.style.satellite_ancient": "Ancient satellite",
   "cartograph_v4.hud.style.hand_modern": "Modern hand-drawn",
   "cartograph_v4.hud.style.hand_ancient": "Ancient hand-drawn",
-  "cartograph_v4.hud.style.hand_anime": "Anime hand-drawn"
+  "cartograph_v4.hud.style.hand_anime": "Anime hand-drawn",
+  "cartograph_v4.hud.view": "Map appearance (P)",
+  "cartograph_v4.view.title": "Map appearance (P)",
+  "cartograph_v4.view.flat": "2D · 90°",
+  "cartograph_v4.view.tilt_60": "2.5D · 60°",
+  "cartograph_v4.view.tilt_45": "2.5D · 45°",
+  "cartograph_v4.view.tilt_30": "2.5D · 30°",
+  "cartograph_v4.view.rotate_left": "Rotate left 45° (Q)",
+  "cartograph_v4.view.rotate_right": "Rotate right 45° (E)",
+  "cartograph_v4.view.north_up": "Face north (keep tilt)"
 }

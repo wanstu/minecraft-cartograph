@@ -4,7 +4,7 @@ import java.util.*;
 
 /** One immutable layout for drawing, hit tests and overlay exclusion in GUI pixels. */
 public final class MapHudLayout {
-    public enum Action { LAYERS, MARKERS, REGIONS, DIAGNOSTICS, ZOOM_IN, ZOOM_OUT, CENTER, NORTH, CLOSE }
+    public enum Action { LAYERS, VIEW, MARKERS, REGIONS, DIAGNOSTICS, ZOOM_IN, ZOOM_OUT, CENTER, NORTH, CLOSE }
     public record Rect(int x,int y,int w,int h){
         public boolean contains(double px,double py){return px>=x&&py>=y&&px<x+w&&py<y+h;}
         public boolean intersects(Rect other){return x<other.x+other.w&&x+w>other.x&&y<other.y+other.h&&y+h>other.y;}
@@ -19,14 +19,12 @@ public final class MapHudLayout {
         header=new Rect(0,0,width,Math.min(32,height));
         status=new Rect(0,Math.max(0,height-18),width,Math.min(height,18));
         List<Control> buttons=new ArrayList<>();
-        int size=Math.min(24,Math.min(Math.max(0,(width-12)/3),Math.max(0,(height-66)/4)));
+        int size=Math.min(24,Math.min(Math.max(0,(width-12)/3),Math.max(0,(height-68)/5)));
         if(size>=10){
-            Action[] left={Action.LAYERS,Action.MARKERS,Action.REGIONS,Action.DIAGNOSTICS};
+            Action[] left={Action.LAYERS,Action.VIEW,Action.MARKERS,Action.REGIONS,Action.DIAGNOSTICS};
             Action[] right={Action.ZOOM_IN,Action.ZOOM_OUT,Action.CENTER,Action.NORTH};
-            for(int i=0;i<4;i++){
-                buttons.add(new Control(left[i],new Rect(6,38+i*(size+3),size,size)));
-                buttons.add(new Control(right[i],new Rect(width-6-size,height-24-(4-i)*size-(3-i)*3,size,size)));
-            }
+            for(int i=0;i<left.length;i++)buttons.add(new Control(left[i],new Rect(6,38+i*(size+3),size,size)));
+            for(int i=0;i<right.length;i++)buttons.add(new Control(right[i],new Rect(width-6-size,height-24-(4-i)*size-(3-i)*3,size,size)));
         }
         if(width>=32&&height>=26)buttons.add(new Control(Action.CLOSE,new Rect(width-26,4,22,22)));
         controls=List.copyOf(buttons);
