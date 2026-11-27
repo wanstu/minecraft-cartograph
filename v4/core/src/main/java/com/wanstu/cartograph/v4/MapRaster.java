@@ -28,8 +28,12 @@ public final class MapRaster {
     private final byte[] coverage;
     private final boolean empty;
     private final ReliefMesh relief;
+    private final float minSurface,maxSurface;
     private MapRaster(Key key,long generation,int[][] pixels,float[] surface,float[] ground,byte[] coverage){
         this.key=key;this.generation=generation;this.pixels=pixels;this.surface=surface;this.ground=ground;this.coverage=coverage;boolean any=false;for(byte b:coverage)if(b!=0){any=true;break;}empty=!any;relief=ReliefMesh.build(surface,coverage);
+        float min=Float.POSITIVE_INFINITY,max=Float.NEGATIVE_INFINITY;
+        for(int i=0;i<surface.length;i++)if(coverage[i]!=0&&Float.isFinite(surface[i])){min=Math.min(min,surface[i]);max=Math.max(max,surface[i]);}
+        minSurface=min;maxSurface=max;
     }
     public Key key(){return key;}
     public long generation(){return generation;}
@@ -39,6 +43,8 @@ public final class MapRaster {
     public int coverage(int slot){return Byte.toUnsignedInt(coverage[slot]);}
     public boolean empty(){return empty;}
     public ReliefMesh relief(){return relief;}
+    public float minSurface(){return minSurface;}
+    public float maxSurface(){return maxSurface;}
     private static int rgb(int r,int g,int b){return (r<<16)|(g<<8)|b;}
     private static int darken(int c,double factor){
         return rgb((int)Math.round(((c>>>16)&255)*factor),(int)Math.round(((c>>>8)&255)*factor),(int)Math.round((c&255)*factor));

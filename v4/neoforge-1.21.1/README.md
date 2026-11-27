@@ -48,3 +48,11 @@ picking. The relief path is a stepped heightfield with CPU-projected batches,
 not yet a GPU-resident mesh renderer or full production visual style.
 DADM tested an isolated elevated fixture at 90/60/45 degrees and 45-degree
 yaw, satellite/hand, drag, center and reopen. No hardware FPS acceptance.
+## Retained vertex batch (unverified native development slice)
+The current source uses world-local static GPU vertices, camera matrices and
+right-click ray picking. HUD reports texture and mesh uploads separately.
+Only rebuild on a changed drawable dependency; one combined retained batch
+is capped at 262144 quads. Core tests passed, but native build and client QA
+are pending because DADM source sync was blocked and EADM lacks the offline
+NeoForge 21.1.265 dependency. Do not deploy this commit without actual native
+compile and client verification; 8360b57 is the previous verified reference.

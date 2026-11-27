@@ -57,7 +57,7 @@ final class V4MapSession implements AutoCloseable {
             uploadOrder=requested.stream().filter(urgent::contains).toList();
         }
         pages.tick(requested);
-        Set<TextureKey> protectedKeys=new HashSet<>();
+        Set<TextureKey> protectedKeys=new HashSet<>(),previewKeys=new LinkedHashSet<>();
         for(Key k:visible){
             var r=pages.get(k);
             if(r!=null&&!r.empty()){var tk=key(r);protectedKeys.add(tk);slots.get(tk);}
@@ -65,10 +65,12 @@ final class V4MapSession implements AutoCloseable {
             if(state(k)==MapTileCoverage.State.MISSING){
                 for(var patch:MapTileCoverage.resolve(k,this::state)){
                     var source=pages.get(patch.source());
-                    if(source!=null){var tk=key(source);slots.get(tk);}
+                    if(source!=null){var tk=key(source);previewKeys.add(tk);slots.get(tk);}
                 }
             }
         }
+        // Leave free eviction candidates even when many finer previews occupy the atlas.
+        for(var tk:previewKeys){if(protectedKeys.size()>=448)break;protectedKeys.add(tk);}
         int budget=4;
         long started=System.nanoTime();
         for(Key k:uploadOrder){
@@ -92,113 +94,179 @@ final class V4MapSession implements AutoCloseable {
             slots.put(key,slot);budget--;uploads++;
         }
     }
-    /** Same atlas, camera and batch for flat and raised terrain. */
-    void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height){
-        drawCalls=exactPages=fallbackPages=quads=0;
-        if(texture==null)return;
-        boolean raised=camera.elevationDegrees()!=90;
-        graphics.flush();
-        RenderSystem.setShaderTexture(0,textureId);
-        RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
-        RenderSystem.setShaderColor(1,1,1,1);
-        RenderSystem.enableBlend();RenderSystem.defaultBlendFunc();
-        // Use the GUI depth buffer only for this map pass, not for subsequent HUD elements.
-        if(raised){
-            RenderSystem.depthMask(true);
-            RenderSystem.clear(256,Minecraft.ON_OSX);
-            RenderSystem.enableDepthTest();RenderSystem.disableCull();
-        }
-        var pose=graphics.pose().last().pose();
-        BufferBuilder buffer=Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,DefaultVertexFormat.POSITION_TEX_COLOR);
-        double depthScale=Math.min(1,70.0/(Math.hypot(width,height)/camera.pixelsPerBlock()*2+8192));
-        try{
-            for(Key k:visible){
-                var patches=MapTileCoverage.resolve(k,this::state);
-                if(patches.isEmpty())continue;
-                boolean exact=patches.size()==1&&patches.getFirst().source().equals(k);
-                if(exact)exactPages++;else fallbackPages++;
-                for(var patch:patches){
-                    var raster=pages.get(patch.source());if(raster==null)continue;
-                    Integer slot=slots.get(key(raster));if(slot==null)continue;
-                    double cell=1<<patch.source().lod();
-                    double bx=patch.source().x()*32.0*cell,bz=patch.source().z()*32.0*cell;
-                    float u=(slot%32*EDGE)/(float)SIZE,v=(slot/32*EDGE)/(float)SIZE;
-                    double x0=patch.u()*32,z0=patch.v()*32,x1=x0+patch.uvSize()*32,z1=z0+patch.uvSize()*32;
-                    if(!raised){
-                        top(buffer,pose,projection,width,height,depthScale,bx,bz,cell,x0,z0,x1,z1,camera.y(),u,v,255,false);
-                    }else{
-                        var mesh=raster.relief();
-                        for(int i=0;i<mesh.topCount();i++){
-                            double left=Math.max(x0,mesh.topX(i)),right=Math.min(x1,mesh.topX(i)+mesh.topWidth(i));
-                            double near=Math.max(z0,mesh.topZ(i)),far=Math.min(z1,mesh.topZ(i)+mesh.topDepth(i));
-                            if(left<right&&near<far)top(buffer,pose,projection,width,height,depthScale,bx,bz,cell,left,near,right,far,mesh.topHeight(i),u,v,255,true);
-                        }
-                        for(int i=0;i<mesh.wallCount();i++){
-                            int x=mesh.wallX(i),z=mesh.wallZ(i),dir=mesh.wallDirection(i);
-                            var segment=ReliefMesh.clipWall(x,z,dir,x0,z0,x1,z1);
-                            if(segment==null)continue;
-                            wall(buffer,pose,projection,width,height,depthScale,bx,bz,cell,x,z,dir,
-                                mesh.wallTop(i),mesh.wallBottom(i),u,v,segment.x(),segment.z(),segment.length());
-                        }
-                        if(exact)boundaryWalls(buffer,pose,projection,width,height,depthScale,raster,bx,bz,cell,u,v);
+    private record Part(Key target,MapTileCoverage.Patch patch,MapRaster raster,int slot,List<MapRaster> adjacent){}
+    @FunctionalInterface private interface Faces{
+        void face(Part part,double x0,double y0,double z0,double x1,double y1,double z1,
+                  double u0,double v0,double u1,double v1,int light);
+    }
+    private VertexBuffer terrain;
+    private List<Part> retained=List.of();
+    private List<Key> lastDrawKeys;
+    private long lastRevision=-1,lastUploads=-1,meshUploads;
+    private boolean lastRaised;
+    private MapRaster.Style lastStyle;
+    private double originX,originZ;
+    private MapCamera lastRenderedCamera;
+    private static final int MAX_QUADS=262144;
+
+    /** Compare actual drawable dependencies, not camera position or unrelated cache arrivals. */
+    private void refresh(List<Key> visible,boolean raised){
+        long rev=pages.revision();
+        if(lastDrawKeys==visible&&lastRevision==rev&&lastUploads==uploads&&lastRaised==raised&&lastStyle==style)return;
+        boolean modeChanged=lastRaised!=raised;
+        lastDrawKeys=visible;lastRevision=rev;lastUploads=uploads;lastRaised=raised;lastStyle=style;
+        List<Key> ordered=new ArrayList<>(visible);
+        ordered.sort(Comparator.comparingInt(Key::lod).thenComparingInt(Key::x).thenComparingInt(Key::z));
+        List<Part> next=new ArrayList<>();
+        int exact=0,fallback=0,upper=0;
+        for(Key k:ordered){
+            var patches=MapTileCoverage.resolve(k,this::state);
+            boolean isExact=patches.size()==1&&patches.getFirst().source().equals(k);
+            if(isExact)exact++;else if(!patches.isEmpty())fallback++;
+            for(var patch:patches){
+                var raster=pages.get(patch.source());if(raster==null)continue;
+                Integer slot=slots.get(key(raster));if(slot==null)continue;
+                List<MapRaster> neighbors=List.of();
+                if(raised&&isExact){
+                    MapRaster[] adjacent=new MapRaster[4];
+                    for(int dir=0;dir<4;dir++){
+                        Key other=new Key(k.lod(),k.x()+(dir==0?-1:dir==1?1:0),k.z()+(dir==2?-1:dir==3?1:0));
+                        if(state(other)==MapTileCoverage.State.READY)adjacent[dir]=pages.get(other);
                     }
+                    neighbors=Arrays.asList(adjacent);
+                }
+                next.add(new Part(k,patch,raster,slot,neighbors));
+                upper+=raised?raster.relief().topCount()+raster.relief().wallCount()+(isExact?128:0):1;
+            }
+        }
+        // Exact raised pages fit even at the 64-page worst case. Bound unusually dense
+        // transient child previews; they are replaced by exact pages when available.
+        if(upper>MAX_QUADS&&raised){
+            for(var it=next.listIterator(next.size());it.hasPrevious()&&upper>MAX_QUADS;){
+                Part p=it.previous();
+                if(p.patch.source().equals(p.target))continue;
+                upper-=p.raster.relief().topCount()+p.raster.relief().wallCount();it.remove();
+            }
+        }
+        if(!modeChanged&&retained.equals(next))return;
+        retained=List.copyOf(next);exactPages=exact;
+        fallbackPages=(int)next.stream().filter(p->!p.patch.source().equals(p.target)).map(Part::target).distinct().count();
+        rebuild(raised);
+    }
+    private void rebuild(boolean raised){
+        if(terrain!=null){terrain.close();terrain=null;}
+        quads=0;
+        if(retained.isEmpty())return;
+        var k=retained.getFirst().target;
+        originX=k.x()*(32.0*(1<<k.lod()));originZ=k.z()*(32.0*(1<<k.lod()));
+        var buffer=Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,DefaultVertexFormat.POSITION_TEX_COLOR);
+        emit(raised,null,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->{
+            float u=(part.slot%32*EDGE)/(float)SIZE,v=(part.slot/32*EDGE)/(float)SIZE;
+            float a=u+(float)(u0/SIZE),b=v+(float)(v0/SIZE),c=u+(float)(u1/SIZE),d=v+(float)(v1/SIZE);
+            if(y0==y1){
+                vertex(buffer,x0,y0,z0,a,b,light);
+                vertex(buffer,x0,y0,z1,a,d,light);
+                vertex(buffer,x1,y0,z1,c,d,light);
+                vertex(buffer,x1,y0,z0,c,b,light);
+            }else{
+                vertex(buffer,x0,y0,z0,a,b,light);
+                vertex(buffer,x0,y1,z0,a,b,light);
+                vertex(buffer,x1,y1,z1,a,b,light);
+                vertex(buffer,x1,y0,z1,a,b,light);
+            }
+            quads++;
+        });
+        var built=buffer.build();
+        if(built==null)return;
+        terrain=new VertexBuffer(VertexBuffer.Usage.STATIC);
+        terrain.bind();
+        try{terrain.upload(built);meshUploads++;}
+        finally{VertexBuffer.unbind();}
+    }
+    private void vertex(BufferBuilder b,double x,double y,double z,float u,float v,int light){
+        b.addVertex((float)(x-originX),(float)y,(float)(z-originZ)).setUv(u,v).setColor(light,light,light,255);
+    }
+    /** One face traversal, shared between retained geometry construction and precise CPU picking. */
+    private void emit(boolean raised,MapRayPicker picker,Faces sink){
+        for(Part part:retained){
+            var patch=part.patch;var raster=part.raster;
+            double cell=1<<patch.source().lod();
+            double bx=patch.source().x()*32.0*cell,bz=patch.source().z()*32.0*cell;
+            double x0=patch.u()*32,z0=patch.v()*32,x1=x0+patch.uvSize()*32,z1=z0+patch.uvSize()*32;
+            if(picker!=null){
+                double min=raised?raster.minSurface():0,max=raised?raster.maxSurface():0;
+                if(raised)for(var neighbor:part.adjacent)if(neighbor!=null)min=Math.min(min,neighbor.minSurface());
+                if(!picker.mayHit(bx+x0*cell,bz+z0*cell,bx+x1*cell,bz+z1*cell,min,max))continue;
+            }
+            if(!raised){
+                top(sink,part,bx,bz,cell,x0,z0,x1,z1,0);continue;
+            }
+            var mesh=raster.relief();
+            for(int i=0;i<mesh.topCount();i++){
+                double left=Math.max(x0,mesh.topX(i)),right=Math.min(x1,mesh.topX(i)+mesh.topWidth(i));
+                double near=Math.max(z0,mesh.topZ(i)),far=Math.min(z1,mesh.topZ(i)+mesh.topDepth(i));
+                if(left<right&&near<far)top(sink,part,bx,bz,cell,left,near,right,far,mesh.topHeight(i));
+            }
+            for(int i=0;i<mesh.wallCount();i++){
+                int x=mesh.wallX(i),z=mesh.wallZ(i),dir=mesh.wallDirection(i);
+                var seg=ReliefMesh.clipWall(x,z,dir,x0,z0,x1,z1);
+                if(seg!=null)wall(sink,part,bx,bz,cell,x,z,dir,mesh.wallTop(i),mesh.wallBottom(i),seg.x(),seg.z(),seg.length());
+            }
+            for(int dir=0;dir<part.adjacent.size();dir++){
+                MapRaster adjacent=part.adjacent.get(dir);if(adjacent==null)continue;
+                for(int i=0;i<32;i++){
+                    int x=dir==0?0:dir==1?31:i,z=dir==2?0:dir==3?31:i;
+                    int nx=dir==0?31:dir==1?0:i,nz=dir==2?31:dir==3?0:i;
+                    int at=z*32+x,n=nz*32+nx;
+                    float top=raster.surface(at),bottom=adjacent.surface(n);
+                    if(raster.coverage(at)==0||adjacent.coverage(n)==0||!Float.isFinite(top)||!Float.isFinite(bottom)||top<=bottom)continue;
+                    wall(sink,part,bx,bz,cell,x,z,dir,top,bottom,x+(dir==1?1:0),z+(dir==3?1:0),1);
                 }
             }
-            var built=buffer.build();
-            if(built!=null){BufferUploader.drawWithShader(built);drawCalls=1;}
-        }finally{
-            if(raised){
-                RenderSystem.clear(256,Minecraft.ON_OSX);
-                RenderSystem.enableCull();RenderSystem.enableDepthTest();
-            }
+        }
+    }
+    private static void top(Faces sink,Part p,double bx,double bz,double cell,double x0,double z0,double x1,double z1,double y){
+        sink.face(p,bx+x0*cell,y,bz+z0*cell,bx+x1*cell,y,bz+z1*cell,x0,z0,x1,z1,255);
+    }
+    private static void wall(Faces sink,Part p,double bx,double bz,double cell,int x,int z,int dir,float top,float bottom,double edgeX,double edgeZ,double length){
+        double ax=bx+edgeX*cell,az=bz+edgeZ*cell;
+        sink.face(p,ax,top,az,ax+(dir>=2?cell*length:0),bottom,az+(dir<2?cell*length:0),
+            x+.5,z+.5,x+.5,z+.5,dir==0||dir==2?172:211);
+    }
+    MapRayPicker.Hit pick(MapCamera camera,double sx,double sy){
+        if(!camera.equals(lastRenderedCamera)||lastRaised!=(camera.elevationDegrees()!=90))return null;
+        var picker=new MapRayPicker(camera,sx,sy);
+        emit(lastRaised,picker,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->picker.face(part.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1));
+        return picker.result();
+    }
+    /** Static world-relative vertices. Each camera movement changes just the affine transform. */
+    void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height){
+        drawCalls=0;lastRenderedCamera=null;
+        if(texture==null)return;
+        boolean raised=camera.elevationDegrees()!=90;
+        graphics.flush();refresh(visible,raised);
+        if(terrain==null)return;
+        double depthScale=Math.min(1,70.0/(Math.hypot(width,height)/camera.pixelsPerBlock()*2+8192));
+        double[] m=MapTransform.coefficients(camera,originX,0,originZ,width,height,depthScale,raised);
+        var affine=new org.joml.Matrix4f().set(
+            (float)m[0],(float)m[4],(float)m[8],0,
+            (float)m[1],(float)m[5],(float)m[9],0,
+            (float)m[2],(float)m[6],(float)m[10],0,
+            (float)m[3],(float)m[7],(float)m[11],1);
+        var matrix=new org.joml.Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose()).mul(affine);
+        RenderSystem.setShaderTexture(0,textureId);
+        RenderSystem.setShaderColor(1,1,1,1);
+        RenderSystem.enableBlend();RenderSystem.defaultBlendFunc();
+        if(raised){RenderSystem.depthMask(true);RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableDepthTest();RenderSystem.disableCull();}
+        terrain.bind();
+        try{terrain.drawWithShader(matrix,RenderSystem.getProjectionMatrix(),GameRenderer.getPositionTexColorShader());drawCalls=1;lastRenderedCamera=camera;}
+        finally{
+            VertexBuffer.unbind();
+            if(raised){RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableCull();RenderSystem.enableDepthTest();}
             RenderSystem.disableBlend();
         }
     }
-    private void vertex(BufferBuilder b,org.joml.Matrix4f pose,MapProjection p,int w,int h,double depthScale,
-                        double x,double y,double z,float u,float v,int light,boolean raised){
-        float px=(float)(w/2.0+p.screenX(x,z)),py=(float)(h/2.0+p.screenY(x,y,z));
-        float depth=raised?(float)(100+p.depth(x,y,z)*depthScale):0;
-        b.addVertex(pose,px,py,depth).setUv(u,v).setColor(light,light,light,255);
-    }
-    private void top(BufferBuilder b,org.joml.Matrix4f pose,MapProjection p,int w,int h,double depthScale,
-                     double bx,double bz,double cell,double x0,double z0,double x1,double z1,double y,float u,float v,int light,boolean raised){
-        float u0=u+(float)(x0/SIZE),v0=v+(float)(z0/SIZE),u1=u+(float)(x1/SIZE),v1=v+(float)(z1/SIZE);
-        vertex(b,pose,p,w,h,depthScale,bx+x0*cell,y,bz+z0*cell,u0,v0,light,raised);
-        vertex(b,pose,p,w,h,depthScale,bx+x0*cell,y,bz+z1*cell,u0,v1,light,raised);
-        vertex(b,pose,p,w,h,depthScale,bx+x1*cell,y,bz+z1*cell,u1,v1,light,raised);
-        vertex(b,pose,p,w,h,depthScale,bx+x1*cell,y,bz+z0*cell,u1,v0,light,raised);
-        quads++;
-    }
-    private void wall(BufferBuilder b,org.joml.Matrix4f pose,MapProjection p,int w,int h,double depthScale,
-                      double bx,double bz,double cell,int x,int z,int dir,float top,float bottom,float u,float v,double edgeX,double edgeZ,double length){
-        if(top<=bottom)return;
-        double ax=bx+edgeX*cell,az=bz+edgeZ*cell;
-        double ex=ax+(dir>=2?cell*length:0),ez=az+(dir<2?cell*length:0);
-        float tu=u+(x+.5f)/SIZE,tv=v+(z+.5f)/SIZE;
-        int light=dir==0||dir==2?172:211;
-        vertex(b,pose,p,w,h,depthScale,ax,top,az,tu,tv,light,true);
-        vertex(b,pose,p,w,h,depthScale,ax,bottom,az,tu,tv,light,true);
-        vertex(b,pose,p,w,h,depthScale,ex,bottom,ez,tu,tv,light,true);
-        vertex(b,pose,p,w,h,depthScale,ex,top,ez,tu,tv,light,true);
-        quads++;
-    }
-    private void boundaryWalls(BufferBuilder b,org.joml.Matrix4f pose,MapProjection p,int w,int h,double depthScale,
-                               MapRaster raster,double bx,double bz,double cell,float u,float v){
-        Key k=raster.key();
-        for(int dir=0;dir<4;dir++){
-            Key other=new Key(k.lod(),k.x()+(dir==0?-1:dir==1?1:0),k.z()+(dir==2?-1:dir==3?1:0));
-            if(state(other)!=MapTileCoverage.State.READY)continue;
-            MapRaster adjacent=pages.get(other);
-            for(int i=0;i<32;i++){
-                int x=dir==0?0:dir==1?31:i,z=dir==2?0:dir==3?31:i;
-                int nx=dir==0?31:dir==1?0:i,nz=dir==2?31:dir==3?0:i;
-                int at=z*32+x,next=nz*32+nx;
-                float top=raster.surface(at),bottom=adjacent.surface(next);
-                if(raster.coverage(at)==0||adjacent.coverage(next)==0||!Float.isFinite(top)||!Float.isFinite(bottom)||top<=bottom)continue;
-                wall(b,pose,p,w,h,depthScale,bx,bz,cell,x,z,dir,top,bottom,u,v,x+(dir==1?1:0),z+(dir==3?1:0),1);
-            }
-        }
-    }
+    long meshUploads(){return meshUploads;}
 
     int drawCalls(){return drawCalls;}
     int exactPages(){return exactPages;}
@@ -206,6 +274,7 @@ final class V4MapSession implements AutoCloseable {
     int quads(){return quads;}
     long uploads(){return uploads;}
     @Override public void close(){
+        if(terrain!=null){terrain.close();terrain=null;}retained=List.of();
         if(textureId!=null)Minecraft.getInstance().getTextureManager().release(textureId);
         texture=null;textureId=null;slots.clear();free.clear();
     }

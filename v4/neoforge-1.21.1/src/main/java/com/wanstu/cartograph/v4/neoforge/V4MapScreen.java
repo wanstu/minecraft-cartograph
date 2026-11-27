@@ -13,6 +13,7 @@ final class V4MapScreen extends Screen {
     private MapProjection projection;
     private MapViewport.Plan plan;
     private int lastWidth,lastHeight;
+    private MapRayPicker.Hit picked;
     private static final double[] ANGLES={90,60,45,30};
     V4MapScreen(V4MapSession session,double x,double z){
         super(Component.literal("Cartograph V4 Dev"));this.session=session;
@@ -48,13 +49,15 @@ final class V4MapScreen extends Screen {
                 graphics.fill(px-2,pz-2,px+3,pz+3,0xffffcc55);
             }
         }
-        graphics.fill(0,0,width,52,0xde151a20);
+        graphics.fill(0,0,width,64,0xde151a20);
         graphics.drawString(font,"Cartograph V4 | "+session.style.name()+" | LOD "+plan.lod(),8,6,0xffffffff);
         graphics.drawString(font,"Drag / scroll | 1-5 styles | R center | Esc close",8,17,0xffc1cad0);
         graphics.drawString(font,"T tilt "+(int)camera.elevationDegrees()+" | Q/E rotate "+(int)camera.yawDegrees()+" | N north-up",8,28,0xffc1cad0);
-        graphics.drawString(font,"X "+(int)camera.x()+" Z "+(int)camera.z()+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size()+" | quads "+session.quads()+" | uploads "+session.uploads(),8,39,0xff9fadb8);
+        graphics.drawString(font,"X "+(int)camera.x()+" Z "+(int)camera.z()+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size()+" | quads "+session.quads()+" | tex "+session.uploads()+" mesh "+session.meshUploads(),8,39,0xff9fadb8);
+        String hit=picked==null?"Right click: pick observed terrain":"Pick "+(int)Math.floor(picked.world().x())+" "+(int)Math.floor(picked.world().y())+" "+(int)Math.floor(picked.world().z())+" | LOD "+picked.lod()+(picked.side()?" side":" top");
+        graphics.drawString(font,hit,8,50,0xffc1cad0);
     }
-    @Override public boolean mouseClicked(double mx,double my,int button){if(button==0)return true;return super.mouseClicked(mx,my,button);}
+    @Override public boolean mouseClicked(double mx,double my,int button){if(button==0)return true;if(button==1&&my>=64){picked=session.pick(camera,mx-width/2.0,my-height/2.0);return true;}return super.mouseClicked(mx,my,button);}
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy){
         if(button!=0)return super.mouseDragged(mx,my,button,dx,dy);
         var p=camera.atHeight(-dx,-dy,camera.y());
@@ -63,7 +66,8 @@ final class V4MapScreen extends Screen {
     }
     @Override public boolean mouseScrolled(double mx,double my,double horizontal,double vertical){
         double next=Math.max(minScale(),Math.min(16,camera.pixelsPerBlock()*Math.pow(1.25,vertical)));
-        var anchor=camera.atHeight(mx-width/2.0,my-height/2.0,camera.y());
+        var hit=session.pick(camera,mx-width/2.0,my-height/2.0);
+        var anchor=hit==null?camera.atHeight(mx-width/2.0,my-height/2.0,camera.y()):hit.world();
         setCamera(camera.zoomAt(next,anchor));return true;
     }
     @Override public boolean keyPressed(int key,int scan,int modifiers){

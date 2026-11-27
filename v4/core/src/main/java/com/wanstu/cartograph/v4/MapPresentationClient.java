@@ -19,7 +19,7 @@ public final class MapPresentationClient {
     private final LinkedHashMap<Key,MapRaster> cache=new LinkedHashMap<>(16,.75f,true);
     private final Map<Key,Pending> pending=new HashMap<>();
     private final Map<Key,Long> retry=new HashMap<>();
-    private long seen,requests,accepted,discarded,failures,frame;
+    private long seen,requests,accepted,discarded,failures,frame,revision;
     private final Thread owner=Thread.currentThread();
     public MapPresentationClient(PresentationChanges changes,Function<Key,CompletableFuture<MapRaster>> source,int capacity,int concurrency){
         this.changes=Objects.requireNonNull(changes);this.source=Objects.requireNonNull(source);
@@ -30,9 +30,9 @@ public final class MapPresentationClient {
     private void synchronizeChanges(){
         var delta=changes.since(seen);seen=delta.sequence();
         if(delta.reset()){
-            cache.clear();retry.clear();for(Pending p:pending.values())p.obsolete=true;
+            if(!cache.isEmpty())revision++;cache.clear();retry.clear();for(Pending p:pending.values())p.obsolete=true;
         }else for(Key key:delta.keys()){
-            cache.remove(key);retry.remove(key);Pending p=pending.get(key);if(p!=null)p.obsolete=true;
+            if(cache.remove(key)!=null)revision++;retry.remove(key);Pending p=pending.get(key);if(p!=null)p.obsolete=true;
         }
     }
     /** Only plan requests. Previously resident pages remain available across pans and styles. */
@@ -52,7 +52,7 @@ public final class MapPresentationClient {
                 MapRaster raster=p.future.join();
                 if(raster==null||!key.equals(raster.key()))throw new IllegalStateException("Mismatched page");
                 while(cache.size()>=capacity){var oldest=cache.keySet().iterator();oldest.next();oldest.remove();}
-                cache.put(key,raster);retry.remove(key);accepted++;
+                cache.put(key,raster);retry.remove(key);accepted++;revision++;
             }catch(CompletionException|IllegalStateException e){failures++;retry.put(key,frame+30);}
         }
         // Protect visible resident pages from eviction by late arrivals.
@@ -65,5 +65,6 @@ public final class MapPresentationClient {
         }
     }
     public MapRaster get(Key key){owner();return cache.get(key);}
+    public long revision(){owner();return revision;}
     public Metrics metrics(){owner();return new Metrics(cache.size(),pending.size(),requests,accepted,discarded,failures);}
 }
