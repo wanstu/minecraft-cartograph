@@ -116,10 +116,36 @@ final class V4MapScreen extends Screen {
             if(overlap)continue;
             if(displayed>=96)break;
             used.add(new int[]{x,y});displayed++;
-            g.fill(x-4,y-4,x+5,y+5,0xff20262d);
-            g.renderOutline(x-3,y-3,7,7,0xff8ed8ef);
-            g.drawCenteredString(font,"S",x,y-4,0xff8ed8ef);
-            if(displayed<=32)g.drawCenteredString(font,font.plainSubstrByWidth(start.type(),100),x,y+7,0xffb7e1ee);
+            var description=StructureCatalog.describe(start.type());
+            drawStructureIcon(g,x,y,description.category());
+            if(displayed<=32){
+                String name=Component.translatableWithFallback(description.translationKey(),description.fallback()).getString();
+                g.drawCenteredString(font,font.plainSubstrByWidth(name,100),x,y+7,0xffb7e1ee);
+            }
+        }
+    }
+    // Monochrome 9x9 line pictograms; shared across styles, no texture uploads.
+    private static final String[][] STRUCTURE_ICONS={
+        {"....#....","...#.#...","..#...#..",".#.....#.","#########",".#.....#.",".#..#..#.",".#..#..#.",".#######."},
+        {"#.#.#.#.#","#####.###","#.......#","#.......#","#...#...#","#..#.#..#","#..#.#..#","#..#.#..#","#########"},
+        {"....#....","....##...","....#.#..","....#..#.","....#####","#########",".#.....#.","..#####..","........."},
+        {"..#####..",".#.....#.","#.......#","#..###..#","#..#.#..#","#..#.#..#","#..#.#..#","#..#.#..#","#########"},
+        {"..#####..",".#.....#.",".#.....#.",".#.....#.",".#.....#.",".#.....#.",".#.....#.",".#.....#.","#########"},
+        {"#.......#","###...###","#.#...#.#","#.#####.#","#.......#","#...#...#","#...#...#","#...#...#","#########"},
+        {"...###...","...#.#...","..#####..","..#...#..","..#####..","....#....","...###...","...#.#...","..#####.."},
+        {"....#....","...#.#...","..#...#..",".#.....#.","#...#...#",".#.....#.","..#...#..","...#.#...","....#...."}
+    };
+    private static void drawStructureIcon(GuiGraphics g,int x,int y,StructureCatalog.Category category){
+        g.fill(x-5,y-5,x+6,y+6,0xff20262d);
+        String[] pattern=STRUCTURE_ICONS[category.ordinal()];
+        for(int row=0;row<9;row++){
+            String line=pattern[row];
+            for(int col=0;col<9;){
+                if(line.charAt(col)!='#'){col++;continue;}
+                int end=col+1;while(end<9&&line.charAt(end)=='#')end++;
+                g.fill(x-4+col,y-4+row,x-4+end,y-3+row,0xff8ed8ef);
+                col=end;
+            }
         }
     }
     void beginRegion(){selectingRegion=true;regionCorner=null;setCamera(camera.withAngles(camera.yawDegrees(),90));}
