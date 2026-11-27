@@ -149,7 +149,7 @@ final class V4MapScreen extends Screen {
             String[] lines={"LOD "+plan.lod()+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size(),
                 "Draw "+session.drawCalls()+" | quads "+session.quads(),
                 "Tex "+session.uploads()+" | mesh "+session.meshUploads(),
-                session.contourStatus(),structureStatus,
+                session.contourStatus()+" | "+session.shoreStatus(),structureStatus,
                 picked==null?"Pick —":"Pick "+(int)Math.floor(picked.world().x())+" "+(int)Math.floor(picked.world().y())+" "+(int)Math.floor(picked.world().z())+" | LOD "+picked.lod()};
             for(int i=0;i<lines.length&&i*11+14<=d.h();i++)g.drawString(font,font.plainSubstrByWidth(lines[i],Math.max(1,d.w()-12)),d.x()+6,d.y()+5+i*11,0xffc3d4df);
         }

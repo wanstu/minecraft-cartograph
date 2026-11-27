@@ -31,8 +31,8 @@ final class MapStylePalette {
         }
         return rgb((int)((r+known/2)/known),(int)((g+known/2)/known),(int)((b+known/2)/known));
     }
-    static void color(int[][] pixels,int slot,int alpha,int satellite,Aggregate a){
-        long known=a.known();long[] histogram=a.histogram();
+    static void color(int[][] pixels,int slot,int alpha,int satellite,Aggregate a,long[] histogram){
+        long known=a.known();
         double wet=(double)a.wetCount()/known;
         // Modulate by water fraction and observed mean water depth, not inferred ocean/river identity.
         double depth=a.wetCount()==0?0:Math.min(1,(double)a.depthSum()/a.wetCount()/16);

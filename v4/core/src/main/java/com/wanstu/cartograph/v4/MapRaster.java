@@ -24,9 +24,10 @@ public final class MapRaster {
     private final BitSet completeGround,completeSurface;
     private final boolean empty;
     private final ReliefMesh relief;
+    private final MapShorelines shorelines;
     private final float minSurface,maxSurface;
-    private MapRaster(Key key,long generation,int[][] pixels,float[] surface,float[] ground,byte[] coverage,BitSet completeGround,BitSet completeSurface){
-        this.key=key;this.generation=generation;this.pixels=pixels;this.surface=surface;this.ground=ground;this.coverage=coverage;this.completeGround=completeGround;this.completeSurface=completeSurface;boolean any=false;for(byte b:coverage)if(b!=0){any=true;break;}empty=!any;relief=ReliefMesh.build(surface,coverage);
+    private MapRaster(Key key,long generation,int[][] pixels,float[] surface,float[] ground,byte[] coverage,BitSet completeGround,BitSet completeSurface,MapShorelines shorelines){
+        this.shorelines=shorelines;this.key=key;this.generation=generation;this.pixels=pixels;this.surface=surface;this.ground=ground;this.coverage=coverage;this.completeGround=completeGround;this.completeSurface=completeSurface;boolean any=false;for(byte b:coverage)if(b!=0){any=true;break;}empty=!any;relief=ReliefMesh.build(surface,coverage);
         float min=Float.POSITIVE_INFINITY,max=Float.NEGATIVE_INFINITY;
         for(int i=0;i<surface.length;i++)if(coverage[i]!=0&&Float.isFinite(surface[i])){min=Math.min(min,surface[i]);max=Math.max(max,surface[i]);}
         minSurface=min;maxSurface=max;
@@ -41,12 +42,13 @@ public final class MapRaster {
     public boolean completeSurface(int slot){return completeSurface.get(slot);}
     public boolean empty(){return empty;}
     public ReliefMesh relief(){return relief;}
+    public MapShorelines shorelines(){return shorelines;}
     public float minSurface(){return minSurface;}
     public float maxSurface(){return maxSurface;}
     private static int rgb(int r,int g,int b){return (r<<16)|(g<<8)|b;}
     static MapRaster build(WorldGeography.RenderPage page){
         var source=page.data();int[][] pixels=new int[Style.values().length][N];
-        float[] surface=new float[N],ground=new float[N];byte[] coverage=new byte[N];BitSet completeGround=new BitSet(N),completeSurface=new BitSet(N);
+        float[] surface=new float[N],ground=new float[N];byte[] coverage=new byte[N],shore=new byte[N];BitSet completeGround=new BitSet(N),completeSurface=new BitSet(N);
         Arrays.fill(surface,Float.NaN);Arrays.fill(ground,Float.NaN);
         long area=1L<<(2*source.key().lod());
         for(int i=0;i<N;i++){
@@ -59,8 +61,10 @@ public final class MapRaster {
             if(a.surfaceCount()>0)surface[i]=(float)((double)a.surfaceSum()/a.surfaceCount());
             if(a.groundCount()>0)ground[i]=(float)((double)a.groundSum()/a.groundCount());
             int sat=rgb(SRGB[(int)(a.redSum()/known)],SRGB[(int)(a.greenSum()/known)],SRGB[(int)(a.blueSum()/known)]);
-            MapStylePalette.color(pixels,i,alpha,sat,a);
+            long[] histogram=a.histogram();
+            shore[i]=MapShorelines.classify(a,area,histogram);
+            MapStylePalette.color(pixels,i,alpha,sat,a,histogram);
         }
-        return new MapRaster(source.key(),page.generation(),pixels,surface,ground,coverage,completeGround,completeSurface);
+        return new MapRaster(source.key(),page.generation(),pixels,surface,ground,coverage,completeGround,completeSurface,MapShorelines.build(source.key(),shore));
     }
 }
