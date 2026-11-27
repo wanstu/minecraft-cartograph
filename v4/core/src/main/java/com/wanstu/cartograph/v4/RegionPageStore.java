@@ -13,7 +13,7 @@ import java.util.concurrent.*;
 public final class RegionPageStore {
     public static final int EDGE = 32;
     static final int MAGIC = 0x43563450; // CV4P
-    static final int VERSION = 5;
+    static final int VERSION = 6;
     private static final LZ4Factory CODEC=LZ4Factory.safeInstance();
     private static final int MAX_RAW = 4 * 1024 * 1024;
     private static final int MAX_BATCH_PAGES=DiskGeographicPyramid.MAX_BATCH_CHUNKS*11;
@@ -337,7 +337,9 @@ public final class RegionPageStore {
             for(var f:palette.keySet()){out.writeUTF(f.materialKey());out.writeUTF(f.biomeKey());out.writeByte(f.terrain().ordinal());}
             out.writeInt(p.size);
         }
-        int n=p.size,bytes=n*stride;
+        int n=p.size;boolean dense=n==EDGE*EDGE;
+        if(dense)stride-=2;
+        int bytes=n*stride;
         byte[] prefix=header.toByteArray();
         if((long)prefix.length+bytes>MAX_RAW)throw new IOException("Page limit");
         byte[] body=Arrays.copyOf(prefix,prefix.length+bytes);
@@ -349,7 +351,7 @@ public final class RegionPageStore {
                 Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
                 if(e.feature!=lastFeature){lastFeature=e.feature;lastId=palette.get(e.feature);}
                 int pos=base+row++;
-                plane2(body,pos,n,slot);pos+=2*n;
+                if(!dense){plane2(body,pos,n,slot);pos+=2*n;}
                 plane2(body,pos,n,lastId);pos+=2*n;
                 plane4(body,pos,n,a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:(int)a.surfaceSum);pos+=4*n;
                 plane4(body,pos,n,a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:(int)a.groundSum);pos+=4*n;
@@ -362,7 +364,7 @@ public final class RegionPageStore {
             for(int slot=0;slot<ordered.length;slot++){
                 Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
                 int pos=base+row++;
-                plane2(body,pos,n,slot);pos+=2*n;
+                if(!dense){plane2(body,pos,n,slot);pos+=2*n;}
                 plane(body,pos,n,a.known,cw);pos+=cw*n;
                 plane(body,pos,n,a.surfaceCount,cw);pos+=cw*n;
                 plane(body,pos,n,a.groundCount,cw);pos+=cw*n;
@@ -411,6 +413,7 @@ public final class RegionPageStore {
                 }
                 int count=in.readInt();if(count<0||count>EDGE*EDGE)throw new IOException("Entries");
                 int lod=key.lod(),stride=stride(lod),cw=countWidth(lod),sw=colorWidth(lod);
+                boolean dense=count==EDGE*EDGE;if(dense)stride-=2;
                 if(in.available()!=count*stride)throw new IOException("Numeric page length");
                 int base=body.length-in.available();
                 byte[] rows=ROW_SCRATCH.get();
@@ -419,7 +422,7 @@ public final class RegionPageStore {
                 ByteBuffer cells=ByteBuffer.wrap(rows,0,count*stride);
                 Entry[] entries=new Entry[EDGE*EDGE];
                 for(int i=0;i<count;i++){
-                    int slot=Short.toUnsignedInt(cells.getShort()),feature=lod==0?Short.toUnsignedInt(cells.getShort()):0;
+                    int slot=dense?i:Short.toUnsignedInt(cells.getShort()),feature=lod==0?Short.toUnsignedInt(cells.getShort()):0;
                     if(feature>=palette.size())throw new IOException("Feature index");
                     if(key.lod()==0){
                         if(feature==0)throw new IOException("Missing leaf feature");

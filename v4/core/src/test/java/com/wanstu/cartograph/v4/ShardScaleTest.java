@@ -8,11 +8,11 @@ import static com.wanstu.cartograph.v4.GeographicPyramid.*;
 
 public final class ShardScaleTest {
     static void check(boolean ok,String label){if(!ok)throw new AssertionError(label);}
-    record Result(long writes,long flushes,long cacheBytes){}
+    record Result(long writes,long flushes,long cacheBytes,long source,long merge,long encode,long commit){}
     static Result build(Path root,RegionShard.Id id,Entry[][] samples,int batch,int cacheLimit,boolean fresh,boolean unique,FreshRegionBuilder.Columns[] packed)throws Exception{
         if(fresh){
             var result=FreshRegionBuilder.buildPacked(root,id,(x,z)->unique?uniqueColumns(x,z):packed[Math.floorMod(z,4)*4+Math.floorMod(x,4)]);
-            check(result.chunks()==4096,"fresh chunks");return new Result(result.pages(),result.flushes(),0);
+            check(result.chunks()==4096,"fresh chunks");return new Result(result.pages(),result.flushes(),0,result.sourceNanos(),result.mergeNanos(),result.encodeNanos(),result.commitNanos());
         }
         RegionShard shard=new RegionShard(root,id,128,cacheLimit);
         var pending=new ArrayList<DiskGeographicPyramid.ChunkSnapshot>(batch);
@@ -26,7 +26,7 @@ public final class ShardScaleTest {
             }
         if(!pending.isEmpty())shard.updateChunks(pending);
         check(shard.cacheBytes()<=cacheLimit,"cache budget");
-        return new Result(shard.diskWrites(),shard.flushes(),shard.cacheBytes());
+        return new Result(shard.diskWrites(),shard.flushes(),shard.cacheBytes(),0,0,0,0);
     }
     private static final FeatureDictionary.Feature GRASS=new FeatureDictionary.Feature("minecraft:grass_block","minecraft:plains",FeatureDictionary.Terrain.GRASS);
     private static final FeatureDictionary.Feature WATER=new FeatureDictionary.Feature("minecraft:water","minecraft:river",FeatureDictionary.Terrain.WATER);
@@ -67,9 +67,10 @@ public final class ShardScaleTest {
             List<Future<Result>> jobs=new ArrayList<>();
             // Bounded benchmark workload; at most workers tasks execute concurrently.
             for(var id:ids)jobs.add(pool.submit(()->build(root,id,samples,batch,cacheLimit,fresh,unique,packed)));
-            long writes=0,flushes=0;
-            for(var future:jobs){var r=future.get();writes+=r.writes;flushes+=r.flushes;}
+            long writes=0,flushes=0,source=0,merge=0,encode=0,commit=0;
+            for(var future:jobs){var r=future.get();writes+=r.writes;flushes+=r.flushes;source+=r.source;merge+=r.merge;encode+=r.encode;commit+=r.commit;}
             double seconds=(System.nanoTime()-start)/1e9,cpu=(os.getProcessCpuTime()-cpuStart)/1e9;
+            System.out.printf(Locale.ROOT,"workerWallSumMs source=%.1f merge=%.1f encode=%.1f commit=%.1f%n",source/1e6,merge/1e6,encode/1e6,commit/1e6);
             int chunks=ids.size()*4096;
             long known=0,reads=0;
             for(var id:ids){

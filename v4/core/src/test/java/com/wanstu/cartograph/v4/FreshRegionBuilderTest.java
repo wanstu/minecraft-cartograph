@@ -24,13 +24,13 @@ public final class FreshRegionBuilderTest {
             Map<Long,Entry[]> chunks=new HashMap<>();
             Random random=new Random(20261127);
             Set<Cell> visited=new HashSet<>();
-            int[][] coordinates={{-64,64},{-63,64},{-64,65},{-1,127},{-1,64},{-33,95},{-32,96}};
+            int[][] coordinates={{-64,64},{-63,64},{-64,65},{-63,65},{-1,127},{-1,64},{-33,95},{-32,96}};
             for(var coord:coordinates){
                 int cx=coord[0],cz=coord[1];
                 Entry[] data=new Entry[256];chunks.put(key(cx,cz),data);
                 for(int i=0;i<256;i++){
                     int x=cx*16+i%16,z=cz*16+i/16;
-                    if(random.nextInt(5)!=0){
+                    if((cx<=-63&&cz<=65)||random.nextInt(5)!=0){
                         boolean wet=random.nextBoolean();
                         int surface=random.nextInt(400)-64,ground=random.nextInt(8)==0?UNKNOWN_HEIGHT:surface-2;
                         if(random.nextInt(8)==0)surface=UNKNOWN_HEIGHT;
@@ -65,7 +65,7 @@ public final class FreshRegionBuilderTest {
             shard=new RegionShard(root,id,16,8*1024*1024);
             check(shard.get(new Cell(0,-1024,1024)).equals(replacement[0]),"incremental reopen");
             check(RegionShard.Id.ofCell(new Cell(10,-1,1)).equals(id),"negative coordinate ownership");
-            System.out.println("PASS: fresh builder vs independent oracle, "+visited.size()+" exact L0-L10 comparisons; sparse coverage, negative coordinates, no overwrite, staging failure and incremental reopen");
+            System.out.println("PASS: fresh builder vs independent oracle, "+visited.size()+" exact L0-L10 comparisons; dense/sparse coverage, negative coordinates, no overwrite, staging failure and incremental reopen");
         }finally{ScaleTest.delete(root);}
     }
     private static long key(int x,int z){return ((long)x<<32)|Integer.toUnsignedLong(z);}

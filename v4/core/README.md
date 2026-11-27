@@ -34,3 +34,9 @@ Experimental fresh-shard benchmark (102400 chunks, 25 shards, 2 workers, 256 MiB
 The fresh mode uses prebuilt repeated primitive snapshots; unique mode generates
 independent coordinate-seeded synthetic snapshots inside the timed workload.
 These are experimental shard builders, not the Minecraft runtime or render page assembly.
+Larger independent-snapshot benchmark (262144 chunks, 2 workers):
+
+    java '-Dcartograph.v4.encodeThreads=1' '-XX:ActiveProcessorCount=4' -Xmx256m -cp $cp com.wanstu.cartograph.v4.ShardScaleTest 8 2 256 unique
+
+The worker stage timings are summed elapsed time across workers, not CPU time.
+The JVM active processor setting is not a hard operating-system CPU limit.

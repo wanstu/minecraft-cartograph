@@ -30,6 +30,25 @@ public final class PageCodecTest {
         var key=new Key(0,0,0);
         var page=new Page(key,1,Map.of(0,Entry.leaf(feature,Integer.MAX_VALUE,Integer.MIN_VALUE,65535,65535,32768,0)));
         check(page.equals(RegionPageStore.decode(RegionPageStore.encode(page),key)),"leaf extremes");
-        System.out.println("PASS: exact unsigned widths, all LODs, extreme leaf, deterministic codec and truncated payload rejection");
+        for(int lod=0;lod<=10;lod++){
+            var dense=new java.util.HashMap<Integer,Entry>();
+            long capacity=1L<<(2*lod);
+            for(int i=0;i<1024;i++){
+                int value=(i*131)&65535;
+                if(lod==0)dense.put(i,Entry.leaf(feature,i-512,i-513,i%13,value,65535-value,i));
+                else{
+                    long[] hist=new long[FeatureDictionary.Terrain.values().length];hist[0]=capacity;
+                    dense.put(i,new Entry(new Aggregate(capacity,capacity,capacity,
+                        (i-512L)*capacity,(i-513L)*capacity,value*capacity,(65535L-value)*capacity,i*capacity,
+                        capacity,capacity*6,i-513,i-513,hist),null));
+                }
+            }
+            var denseKey=new Key(lod,-2,3);
+            var densePage=new Page(denseKey,9,dense);
+            check(densePage.equals(RegionPageStore.decode(RegionPageStore.encode(densePage),denseKey)),"dense page "+lod);
+            dense.remove(511);
+            var sparsePage=new Page(denseKey,10,dense);
+            check(sparsePage.equals(RegionPageStore.decode(RegionPageStore.encode(sparsePage),denseKey)),"sparse transition "+lod);
+        }        System.out.println("PASS: exact unsigned widths, all LODs, dense/sparse transitions, extreme leaf, deterministic codec and truncated payload rejection");
     }
 }

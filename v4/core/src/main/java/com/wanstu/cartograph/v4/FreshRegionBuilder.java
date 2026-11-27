@@ -14,6 +14,7 @@ public final class FreshRegionBuilder {
     private static final int KNOWN=0,SC=1,GC=2,WET=3,SS=4,GS=5,R=6,G=7,B=8,DEPTH=9,MIN=10,MAX=11,HIST=12;
     private static final int UNKNOWN=GeographicPyramid.UNKNOWN_HEIGHT;
     private static final LZ4Factory CODEC=LZ4Factory.safeInstance();
+    private static final ThreadLocal<byte[]> COMPRESS_SCRATCH=ThreadLocal.withInitial(()->new byte[128*1024]);
 
     /** A complete observed chunk, or null if it has not been generated. */
     @FunctionalInterface public interface Source { Entry[] chunk(int x,int z)throws IOException; }
@@ -49,12 +50,13 @@ public final class FreshRegionBuilder {
             return new Columns(f,s,g,d,r,gr,b);
         }
     }
-    public record Result(int chunks,long pages,long flushes){}
+    public record Result(int chunks,long pages,long flushes,long sourceNanos,long mergeNanos,long encodeNanos,long commitNanos){}
     private final PackedSource source;
     private final PageTransactionLog log;
     private final List<PageTransactionLog.Encoded> pending=new ArrayList<>();
     private int pendingBytes,chunks;
-    private long pages;
+    private final Packed[] scratch=new Packed[11];
+    private long pages,sourceNanos,mergeNanos,encodeNanos,commitNanos;
     private FreshRegionBuilder(Path stage,PackedSource source)throws IOException{
         this.source=source;log=new PageTransactionLog(stage);
     }
@@ -72,46 +74,53 @@ public final class FreshRegionBuilder {
             Packed p=b.buildPage(5,id.x(),id.z());
             for(int lod=6;lod<=10;lod++){
                 Key parent=new Key(lod,Math.floorDiv(p.key.x(),2),Math.floorDiv(p.key.z(),2));
-                Packed q=new Packed(parent);q.mergeChild(p);b.emit(q);p=q;
+                Packed q=b.page(parent);b.merge(q,p);b.emit(q);p=q;
             }
             b.flush();
             if(Files.exists(target))throw new IOException("Shard already published");
             Files.move(stage,target,StandardCopyOption.ATOMIC_MOVE);
-            return new Result(b.chunks,b.pages,b.log.flushes());
+            return new Result(b.chunks,b.pages,b.log.flushes(),b.sourceNanos,b.mergeNanos,b.encodeNanos,b.commitNanos);
         }finally{
             if(Files.exists(stage))try(var files=Files.walk(stage)){
                 for(Path file:files.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(file);
             }
         }
     }
+    private Packed page(Key key){
+        Packed p=scratch[key.lod()];
+        if(p==null){p=new Packed(key);scratch[key.lod()]=p;}
+        else p.reset(key);
+        return p;
+    }
     private Packed buildPage(int lod,int x,int z)throws IOException{
-        Packed p=new Packed(new Key(lod,x,z));
+        Packed p=page(new Key(lod,x,z));
         if(lod==0){
             int cx=Math.multiplyExact(x,2),cz=Math.multiplyExact(z,2);
             for(int dz=0;dz<2;dz++)for(int dx=0;dx<2;dx++){
-                Columns chunk=source.chunk(cx+dx,cz+dz);
+                long start=System.nanoTime();Columns chunk=source.chunk(cx+dx,cz+dz);sourceNanos+=System.nanoTime()-start;
                 if(chunk==null)continue;
                 chunks++;p.leaves[dz*2+dx]=chunk;p.count+=chunk.count;
             }
         }else{
             for(int dz=0;dz<2;dz++)for(int dx=0;dx<2;dx++)
-                p.mergeChild(buildPage(lod-1,x*2+dx,z*2+dz));
+                merge(p,buildPage(lod-1,x*2+dx,z*2+dz));
         }
         emit(p);
         return p;
     }
+    private void merge(Packed parent,Packed child){long start=System.nanoTime();parent.mergeChild(child);mergeNanos+=System.nanoTime()-start;}
     private void emit(Packed p)throws IOException{
         if(p.count==0)return;
-        byte[] bytes=p.encode();
+        long start=System.nanoTime();byte[] bytes=p.encode();encodeNanos+=System.nanoTime()-start;
         if(!pending.isEmpty()&&(pending.size()>=256||pendingBytes+bytes.length+24>8*1024*1024))flush();
         pending.add(new PageTransactionLog.Encoded(p.key,1,bytes));pendingBytes+=bytes.length+24;pages++;
     }
     private void flush()throws IOException{
         if(pending.isEmpty())return;
-        log.appendEncoded(pending);pending.clear();pendingBytes=0;
+        long start=System.nanoTime();log.appendEncoded(pending);commitNanos+=System.nanoTime()-start;pending.clear();pendingBytes=0;
     }
     private static final class Packed {
-        final Key key;
+        Key key;
         final long[][] data;
         final Columns[] leaves;
         int count;
@@ -120,6 +129,11 @@ public final class FreshRegionBuilder {
             boolean leaf=key.lod()==0;
             data=leaf?null:new long[HIST+H][N];
             leaves=leaf?new Columns[4]:null;
+        }
+        void reset(Key key){
+            this.key=key;count=0;
+            if(leaves!=null)Arrays.fill(leaves,null);
+            else for(long[] channel:data)Arrays.fill(channel,0);
         }
         private void mergeLeaf(Packed child,int ox,int oz){
             long[][] d=data;
@@ -170,13 +184,32 @@ public final class FreshRegionBuilder {
             }
         }
         private static void field(byte[] bytes,int pos,int n,long value,int width){
-            for(int j=width-1;j>=0;j--){bytes[pos+j*n]=(byte)value;value>>>=8;}
+            switch(width){
+                case 1 -> bytes[pos]=(byte)value;
+                case 2 -> {bytes[pos]=(byte)(value>>>8);bytes[pos+n]=(byte)value;}
+                case 4 -> {bytes[pos]=(byte)(value>>>24);bytes[pos+n]=(byte)(value>>>16);
+                    bytes[pos+2*n]=(byte)(value>>>8);bytes[pos+3*n]=(byte)value;}
+                case 8 -> {field(bytes,pos,n,value>>>32,4);field(bytes,pos+4*n,n,value,4);}
+                default -> throw new IllegalArgumentException("width");
+            }
         }
-        byte[] encode()throws IOException{
+        private static int channel(byte[] out,int pos,long[] values,int[] slots,int n,int width){
+            for(int b=width-1;b>=0;b--){
+                int shift=b*8;
+                if(slots==null){
+                    for(int i=0;i<n;i++)out[pos+i]=(byte)(values[i]>>>shift);
+                }else{
+                    for(int i=0;i<n;i++)out[pos+i]=(byte)(values[slots[i]]>>>shift);
+                }
+                pos+=n;
+            }
+            return pos;
+        }        byte[] encode()throws IOException{
             int lod=key.lod(),cw=countWidth(lod),sw=colorWidth(lod);
-            int stride=stride(lod);
+            boolean dense=count==N;
+            int stride=stride(lod)-(dense?2:0);
             Map<FeatureDictionary.Feature,Integer> palette=new LinkedHashMap<>();
-                        if(lod==0)for(int slot=0;slot<N;slot++){
+            if(lod==0)for(int slot=0;slot<N;slot++){
                 Columns c=chunkAt(slot);if(c==null)continue;
                 var f=c.features[columnAt(slot)];if(f!=null)palette.computeIfAbsent(f,k->palette.size()+1);
             }
@@ -188,31 +221,50 @@ public final class FreshRegionBuilder {
                 out.writeInt(count);
             }
             byte[] prefix=head.toByteArray(),body=Arrays.copyOf(prefix,prefix.length+count*stride);
-            int n=count,row=0;
-            for(int i=0;i<N;i++){
-                Columns c=lod==0?chunkAt(i):null;int col=columnAt(i);
-                if(lod==0?(c==null||c.features[col]==null):data[KNOWN][i]==0)continue;
-                int p=prefix.length+row++;
-                field(body,p,n,i,2);p+=2*n;
-                if(lod==0){
-                    field(body,p,n,palette.get(c.features[col]),2);p+=2*n;
+            int n=count,row=0,base=prefix.length;
+            FeatureDictionary.Feature previous=null;int previousId=0;
+            if(lod==0){
+                for(int i=0;i<N;i++){
+                    Columns c=chunkAt(i);int col=columnAt(i);
+                    if(c==null||c.features[col]==null)continue;
+                    int p=base+row++;
+                    if(!dense){field(body,p,n,i,2);p+=2*n;}
+                    var f=c.features[col];if(f!=previous){previous=f;previousId=palette.get(f);}
+                    field(body,p,n,previousId,2);p+=2*n;
                     field(body,p,n,c.surface[col],4);p+=4*n;
                     field(body,p,n,c.ground[col],4);p+=4*n;
                     field(body,p,n,c.depth[col],2);p+=2*n;
                     field(body,p,n,c.red[col],2);p+=2*n;
                     field(body,p,n,c.green[col],2);p+=2*n;
                     field(body,p,n,c.blue[col],2);
-                }else{
-                    for(int f=KNOWN;f<=WET;f++){field(body,p,n,data[f][i],cw);p+=cw*n;}
-                    field(body,p,n,data[SS][i],8);p+=8*n;field(body,p,n,data[GS][i],8);p+=8*n;
-                    for(int f=R;f<=DEPTH;f++){field(body,p,n,data[f][i],sw);p+=sw*n;}
-                    field(body,p,n,data[MIN][i],4);p+=4*n;field(body,p,n,data[MAX][i],4);p+=4*n;
-                    for(int f=HIST;f<HIST+H;f++){field(body,p,n,data[f][i],cw);p+=cw*n;}
                 }
+            }else{
+                // Dense pages dominate fresh builds. Encode contiguous channels directly,
+                // and use a single sparse slot list for partially observed pages.
+                int[] slots=dense?null:new int[n];
+                int pos=base;
+                if(!dense){
+                    for(int i=0;i<N;i++)if(data[KNOWN][i]!=0){
+                        slots[row]=i;field(body,pos+row,n,i,2);row++;
+                    }
+                    if(row!=n)throw new IOException("Incorrect page coverage");
+                    pos+=2*n;
+                }
+                for(int f=KNOWN;f<=WET;f++)pos=channel(body,pos,data[f],slots,n,cw);
+                pos=channel(body,pos,data[SS],slots,n,8);
+                pos=channel(body,pos,data[GS],slots,n,8);
+                for(int f=R;f<=DEPTH;f++)pos=channel(body,pos,data[f],slots,n,sw);
+                pos=channel(body,pos,data[MIN],slots,n,4);
+                pos=channel(body,pos,data[MAX],slots,n,4);
+                for(int f=HIST;f<HIST+H;f++)pos=channel(body,pos,data[f],slots,n,cw);
+                if(pos!=body.length)throw new IOException("Incorrect page size");
             }
             CRC32C crc=new CRC32C();crc.update(body);
             var codec=CODEC.fastCompressor();
-            byte[] encoded=new byte[8+codec.maxCompressedLength(body.length)];
+            if(body.length>4*1024*1024)throw new IOException("Page limit");
+            byte[] encoded=COMPRESS_SCRATCH.get();
+            int required=8+codec.maxCompressedLength(body.length);
+            if(encoded.length<required){encoded=new byte[required];COMPRESS_SCRATCH.set(encoded);}
             ByteBuffer.wrap(encoded).putInt(body.length).putInt((int)crc.getValue());
             int len=codec.compress(body,0,body.length,encoded,8,encoded.length-8);
             return Arrays.copyOf(encoded,8+len);
