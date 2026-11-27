@@ -41,7 +41,8 @@ final class V4MapScreen extends Screen {
     V4MapScreen(V4MapSession session,double x,double z){
         super(Component.literal("Cartograph V4"));this.session=session;layerPanel=new V4LayerPanel(session.layers);displayPanel=new V4DisplayPanel(session.display);
         var player=net.minecraft.client.Minecraft.getInstance().player;
-        camera=new MapCamera(x,player==null?64:player.getY(),z,1,session.yaw,session.elevation);
+        camera=session.camera==null?new MapCamera(x,player==null?64:player.getY(),z,1,0,90):session.camera;
+        session.camera=camera;
     }
     @Override protected void init(){gesture.cancel();layerPanel.release();viewPanel.release();displayPanel.release();contextMenu.close();contextMenu.release();hud=null;}
     @Override public boolean isPauseScreen(){return false;}
@@ -54,7 +55,7 @@ final class V4MapScreen extends Screen {
     private double minScale(){return Math.max(3.0/1024,Math.max(width,height)/(1024.0*32*12));}
     private void setCamera(MapCamera c){
         camera=new MapCamera(clamp(c.x()),c.y(),clamp(c.z()),c.pixelsPerBlock(),c.yawDegrees(),c.elevationDegrees());
-        session.yaw=camera.yawDegrees();session.elevation=camera.elevationDegrees();
+        session.camera=camera;
     }
     private void updatePlan(){
         double scale=Math.max(minScale(),Math.min(16,camera.pixelsPerBlock()));
@@ -68,6 +69,8 @@ final class V4MapScreen extends Screen {
     }
     @Override public void render(GuiGraphics graphics,int mouseX,int mouseY,float partialTick){
         graphics.fill(0,0,width,height,0xff242b30);
+        if(minecraft.level==null||!session.dimension.equals(minecraft.level.dimension().location().toString())||
+            session.io!=CartographV4Dev.localPresentation(minecraft.getSingleplayerServer()))return;
         updatePlan();session.prepare(plan.keys());
         session.draw(graphics,plan.keys(),camera,projection,width,height,hud());
         labelLayout.begin(hud());pendingLabels.clear();

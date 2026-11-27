@@ -23,7 +23,8 @@ final class V4MapSession implements AutoCloseable {
     final V4IconAtlas icons=new V4IconAtlas();
     final MapPresentationClient pages;
     MapRaster.Style style=MapRaster.Style.SATELLITE_MODERN;
-    double yaw=0,elevation=90;
+    MapCamera camera;
+    MapPreferences preferences(){return MapPreferences.capture(style,layers,display);}
     private static final int SIZE=1024,EDGE=32,COUNT=512;
     private record TextureKey(Key key,MapRaster.Style style,long generation){}
     private final LinkedHashMap<TextureKey,Integer> slots=new LinkedHashMap<>(16,.75f,true);
@@ -34,7 +35,8 @@ final class V4MapSession implements AutoCloseable {
     private List<Key> requested=List.of(),uploadOrder=List.of();
     private long uploads;
     private int drawCalls,exactPages,fallbackPages,quads;
-    V4MapSession(WorldIoService io,String dimension){
+    V4MapSession(WorldIoService io,String dimension,MapPreferences preferences,MapCamera camera){
+        this.camera=camera;this.style=preferences.style();preferences.apply(layers,display);
         this.io=io;this.dimension=dimension;markers=new V4MarkerState(io,dimension);regions=new V4RegionState(io,dimension);structureView=new StructureView((b,mask)->io.structures(dimension,b,mask));
         pages=new MapPresentationClient(io.presentationChanges(dimension),k->io.raster(dimension,k),512,4);
         for(int i=0;i<COUNT;i++)free.add(i);
