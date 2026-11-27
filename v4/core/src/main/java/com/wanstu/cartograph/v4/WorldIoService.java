@@ -122,6 +122,14 @@ public final class WorldIoService {
         directory(dimension);Objects.requireNonNull(change);
         return submit(()->{try{return markerStore(dimension).apply(expected,change);}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
     }
+    private NamedRegionStore regionStore(String dimension){return new NamedRegionStore(root.resolve(directory(dimension)).resolve("named-regions.cv4"));}
+    public CompletableFuture<NamedRegionStore.Snapshot> namedRegions(String dimension){
+        directory(dimension);return submit(()->{try{return regionStore(dimension).read();}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
+    }
+    public CompletableFuture<NamedRegionStore.Snapshot> changeRegion(String dimension,long expected,NamedRegionStore.Change change){
+        directory(dimension);Objects.requireNonNull(change);
+        return submit(()->{try{return regionStore(dimension).apply(expected,change);}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
+    }
     public int queued(){return io.getQueue().size();}
     public boolean failed(){return failure!=null;}
     /** Call only at world stop, not normal ticks. Existing queued IO is drained. */

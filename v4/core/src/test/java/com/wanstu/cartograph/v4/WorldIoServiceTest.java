@@ -38,6 +38,13 @@ public final class WorldIoServiceTest {
                 io.write("minecraft:overworld",-1,0,changed,List.of(start)).get(15,TimeUnit.SECONDS);
                 check(io.structureRevision("minecraft:overworld")==rev+1,"structure no-op");
                 check(io.structures("minecraft:the_nether",area).get(15,TimeUnit.SECONDS).starts().isEmpty(),"structure dimension isolation");
+                var region=NamedRegionTest.region(1,-10,-20,10,20);
+                var regionChange=NamedRegionTest.change(MarkerStore.Action.UPSERT,region);
+                long geoBeforeRegion=feed.sequence();
+                var regions=io.changeRegion("minecraft:overworld",0,regionChange).get(15,TimeUnit.SECONDS);
+                check(regions.active().equals(List.of(region))&&regions.revision()==1,"async region commit");
+                check(io.namedRegions("minecraft:the_nether").get(15,TimeUnit.SECONDS).active().isEmpty(),"region dimension isolation");
+                check(feed.sequence()==geoBeforeRegion,"region does not invalidate terrain");
                 var marker=MarkerStoreTest.marker(1);
                 var markerChange=MarkerStoreTest.change(MarkerStore.Action.UPSERT,marker);
                 var markers=io.changeMarker("minecraft:overworld",0,markerChange).get(15,TimeUnit.SECONDS);
@@ -55,6 +62,7 @@ public final class WorldIoServiceTest {
             io=new WorldIoService(root,1,16);
             try{
                 check(io.pendingDirty("minecraft:overworld").get(15,TimeUnit.SECONDS)==1,"durable dirty restart");
+                check(io.namedRegions("minecraft:overworld").get(15,TimeUnit.SECONDS).active().equals(List.of(NamedRegionTest.region(1,-10,-20,10,20))),"region restart");
                 check(io.structures("minecraft:overworld",new StructureIndex.Bounds(-2,-2,2,2)).get(15,TimeUnit.SECONDS).starts().equals(List.of(new StructureIndex.Start("minecraft:village_plains",-1,0))),"structure restart");
                 check(io.pendingDirty("minecraft:the_nether").get(15,TimeUnit.SECONDS)==0,"dirty dimension separation");
                 check(io.markers("minecraft:overworld").get(15,TimeUnit.SECONDS).active().equals(List.of(MarkerStoreTest.marker(1))),"markers restart");

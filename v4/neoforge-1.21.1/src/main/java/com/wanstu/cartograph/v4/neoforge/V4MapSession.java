@@ -16,6 +16,7 @@ final class V4MapSession implements AutoCloseable {
     final WorldIoService io;
     final String dimension;
     final V4MarkerState markers;
+    final V4RegionState regions;
     final StructureView structureView;
     boolean structuresVisible=true;
     final MapPresentationClient pages;
@@ -32,7 +33,7 @@ final class V4MapSession implements AutoCloseable {
     private long uploads;
     private int drawCalls,exactPages,fallbackPages,quads;
     V4MapSession(WorldIoService io,String dimension){
-        this.io=io;this.dimension=dimension;markers=new V4MarkerState(io,dimension);structureView=new StructureView(b->io.structures(dimension,b));
+        this.io=io;this.dimension=dimension;markers=new V4MarkerState(io,dimension);regions=new V4RegionState(io,dimension);structureView=new StructureView(b->io.structures(dimension,b));
         pages=new MapPresentationClient(io.presentationChanges(dimension),k->io.raster(dimension,k),512,4);
         for(int i=0;i<COUNT;i++)free.add(i);
     }
