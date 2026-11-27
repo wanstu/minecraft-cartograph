@@ -109,15 +109,19 @@ public final class RegionPageStore {
                 Entry v=e.getValue();
                 if(e.getKey()<0||e.getKey()>=EDGE*EDGE||v.stats.known>capacity||
                     (key.lod()==0)!=(v.feature!=null)||
-                    (v.feature!=null && (v.stats.histogram[v.feature.terrain().ordinal()]!=1 ||
-                     !v.equals(Entry.leaf(v.feature,v.stats.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(v.stats.surfaceSum),
-                       v.stats.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(v.stats.groundSum),
-                       (int)v.stats.depthSum,(int)v.stats.redSum,(int)v.stats.greenSum,(int)v.stats.blueSum)))))
+                    (v.feature!=null && !validLeaf(v)))
                     throw new IllegalArgumentException("Page slot");
             }
         }
     }
 
+    private static boolean validLeaf(Entry v){
+        Aggregate a=v.stats;
+        if(a.known!=1||a.histogram[v.feature.terrain().ordinal()]!=1)return false;
+        if(a.surfaceCount==1&&(a.surfaceSum<=Integer.MIN_VALUE||a.surfaceSum>Integer.MAX_VALUE))return false;
+        if(a.groundCount==1&&(a.minGround!=a.maxGround||a.groundSum!=a.minGround))return false;
+        return true;
+    }
     private final PageTransactionLog log;
     private final int maxCachedPages;
     private final long cacheByteLimit;
@@ -201,14 +205,15 @@ public final class RegionPageStore {
             out.writeLong(p.revision);
             // Region-local palette, independent of process-local IDs.
             Map<FeatureDictionary.Feature,Integer> palette=new LinkedHashMap<>();
-            var ordered=new TreeMap<>(p.entries);
-            for(Entry e:ordered.values())if(e.feature!=null)palette.computeIfAbsent(e.feature,f->palette.size()+1);
+            Entry[] ordered=new Entry[EDGE*EDGE];
+            p.entries.forEach((slot,e)->ordered[slot]=e);
+            for(Entry e:ordered)if(e!=null&&e.feature!=null)palette.computeIfAbsent(e.feature,f->palette.size()+1);
             out.writeInt(palette.size());
             for(var f:palette.keySet()){out.writeUTF(f.materialKey());out.writeUTF(f.biomeKey());out.writeByte(f.terrain().ordinal());}
-            out.writeInt(ordered.size());
-            for(var pair:ordered.entrySet()){
-                Entry e=pair.getValue();Aggregate a=e.stats;
-                out.writeShort(pair.getKey());out.writeShort(e.feature==null?0:palette.get(e.feature));
+            out.writeInt(p.entries.size());
+            for(int slot=0;slot<ordered.length;slot++){
+                Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
+                out.writeShort(slot);out.writeShort(e.feature==null?0:palette.get(e.feature));
                 if(p.key.lod()==0){
                     out.writeInt(a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.surfaceSum));
                     out.writeInt(a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.groundSum));
