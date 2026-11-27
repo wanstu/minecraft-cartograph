@@ -17,8 +17,7 @@ on the isolated flat world; LiveSavedParityProbe in v4/core/src/test validates r
 V4 and vanilla save material, biome and height. First run committed 25 active chunks;
 second logged 50 active, 51 commits at tick 200. Both saved and stopped normally.
 
-Current limitations: conservative recapture on load/save, no automatic archive scanner
-or saved-dirty consumption, no final production renderer or TPS/FPS validation. FrozenSaveCapture
+Current limitations: conservative cross-session live recapture and saved-source arbitration, no final production renderer or TPS/FPS validation. FrozenSaveCapture
 requires an initialized registry and a frozen save/copy; never call on the tick thread
 or against an actively changing source. Unknown material states fail closed. No deployment.
 ## Native map smoke
@@ -31,3 +30,13 @@ client screenshots verified satellite/hand modern, drag, wheel, center and
 reopen; no extra texture uploads after the hand style populated its seven tiles.
 This development UI is not ready for deployment; no remote transport, 2.5D,
 full visual style or complete gameplay-performance acceptance.
+The batched renderer draws all terrain patches in a single textured quad batch,
+using nearest sampling and explicit alpha blending. If an exact LOD tile is not
+yet available, cached coarser tiles are clipped to that tile's footprint;
+on zoom-out, available immediate finer children can fill corresponding quadrants.
+An authoritative empty page suppresses fallback. Coarse coverage remains an
+approximation at its original resolution, not proof of exact finer observation.
+Only the current style can be drawn. The 64-extra-page request budget includes
+parents and a best-effort adjacent ring; the ring prefetches CPU data only.
+The debug HUD reports exact+fallback visible tiles, cumulative uploads, and
+terrain batch draw calls. One call is not the entire game's draw count.

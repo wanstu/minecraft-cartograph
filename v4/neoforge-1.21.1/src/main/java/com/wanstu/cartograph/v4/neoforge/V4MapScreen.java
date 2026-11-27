@@ -5,7 +5,6 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
-import static com.wanstu.cartograph.v4.RegionPageStore.Key;
 
 /** First native 2D presentation slice. Camera controls do not mutate geography. */
 final class V4MapScreen extends Screen {
@@ -30,15 +29,7 @@ final class V4MapScreen extends Screen {
     @Override public void render(GuiGraphics graphics,int mouseX,int mouseY,float partialTick){
         graphics.fill(0,0,width,height,0xff242b30);
         updatePlan();session.prepare(plan.keys());
-        int drawn=0;
-        for(Key k:plan.keys()){
-            double blocks=32.0*(1<<k.lod());
-            int left=(int)Math.round(width/2.0+(k.x()*blocks-x)*scale);
-            int top=(int)Math.round(height/2.0+(k.z()*blocks-z)*scale);
-            int right=(int)Math.round(width/2.0+((k.x()+1)*blocks-x)*scale);
-            int bottom=(int)Math.round(height/2.0+((k.z()+1)*blocks-z)*scale);
-            if(session.draw(graphics,k,left,top,right-left,bottom-top))drawn++;
-        }
+        session.draw(graphics,plan.keys(),x,z,scale,width,height);
         if(minecraft!=null&&minecraft.player!=null){
             int px=(int)Math.round(width/2.0+(minecraft.player.getX()-x)*scale);
             int pz=(int)Math.round(height/2.0+(minecraft.player.getZ()-z)*scale);
@@ -50,7 +41,7 @@ final class V4MapScreen extends Screen {
         graphics.fill(0,0,width,42,0xde151a20);
         graphics.drawString(font,"Cartograph V4 | "+session.style.name()+" | LOD "+plan.lod(),8,7,0xffffffff);
         graphics.drawString(font,"Drag / scroll | 1-5 styles | R center | Esc close",8,19,0xffc1cad0);
-        graphics.drawString(font,"X "+(int)x+" Z "+(int)z+" | pages "+drawn+"/"+plan.keys().size()+" | uploads "+session.uploads(),8,31,0xff9fadb8);
+        graphics.drawString(font,"X "+(int)x+" Z "+(int)z+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size()+" | uploads "+session.uploads()+" | calls "+session.drawCalls(),8,31,0xff9fadb8);
     }
     @Override public boolean mouseClicked(double mx,double my,int button){if(button==0)return true;return super.mouseClicked(mx,my,button);}
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy){
