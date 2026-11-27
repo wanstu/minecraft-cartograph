@@ -40,3 +40,11 @@ Only the current style can be drawn. The 64-extra-page request budget includes
 parents and a best-effort adjacent ring; the ring prefetches CPU data only.
 The debug HUD reports exact+fallback visible tiles, cumulative uploads, and
 terrain batch draw calls. One call is not the entire game's draw count.
+The 2.5D prototype shares the same camera, atlas and geography: T cycles
+90/60/45/30 degrees, Q/E rotates 45 degrees, N restores north-up. Known
+equal-height top surfaces are merged and observed height differences form
+shaded sides. Drag/zoom currently use a reference-height plane, not depth
+picking. The relief path is a stepped heightfield with CPU-projected batches,
+not yet a GPU-resident mesh renderer or full production visual style.
+DADM tested an isolated elevated fixture at 90/60/45 degrees and 45-degree
+yaw, satellite/hand, drag, center and reopen. No hardware FPS acceptance.

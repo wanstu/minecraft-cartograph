@@ -38,6 +38,14 @@ public final class MapPresentationTest {
         long before=feed.sequence();for(int i=0;i<9000;i++)feed.changed(List.of(c));
         check(feed.since(before).reset(),"bounded journal overflow resets");
         client.tick(List.of(a));check(client.get(a)==null,"reset evicts stale cache");
+        var water=new FeatureDictionary.Feature("minecraft:water[level=0]","minecraft:ocean",FeatureDictionary.Terrain.WATER);
+        var shallow=Entry.leaf(water,62,61,1,20000,30000,65535);
+        var deep=Entry.leaf(water,62,42,20,20000,30000,65535);
+        var wet=MapRaster.build(new WorldGeography.RenderPage(20,new Page(a,20,Map.of(0,shallow,1,deep))));
+        for(var style:MapRaster.Style.values()){
+            check((wet.argb(style,1)&255)<(wet.argb(style,0)&255),"observed water depth darker in every style");
+            check(wet.coverage(0)==255&&wet.coverage(1)==255,"depth does not change coverage");
+        }
         System.out.println("PASS: bounded view, independent palettes/height/coverage, async cap, 1000 idle frames no requests, stale completion, local invalidation, pan reuse and journal overflow");
     }
 }

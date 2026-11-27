@@ -27,8 +27,9 @@ public final class MapRaster {
     private final float[] surface,ground;
     private final byte[] coverage;
     private final boolean empty;
+    private final ReliefMesh relief;
     private MapRaster(Key key,long generation,int[][] pixels,float[] surface,float[] ground,byte[] coverage){
-        this.key=key;this.generation=generation;this.pixels=pixels;this.surface=surface;this.ground=ground;this.coverage=coverage;boolean any=false;for(byte b:coverage)if(b!=0){any=true;break;}empty=!any;
+        this.key=key;this.generation=generation;this.pixels=pixels;this.surface=surface;this.ground=ground;this.coverage=coverage;boolean any=false;for(byte b:coverage)if(b!=0){any=true;break;}empty=!any;relief=ReliefMesh.build(surface,coverage);
     }
     public Key key(){return key;}
     public long generation(){return generation;}
@@ -37,7 +38,11 @@ public final class MapRaster {
     public float ground(int slot){return ground[slot];}
     public int coverage(int slot){return Byte.toUnsignedInt(coverage[slot]);}
     public boolean empty(){return empty;}
+    public ReliefMesh relief(){return relief;}
     private static int rgb(int r,int g,int b){return (r<<16)|(g<<8)|b;}
+    private static int darken(int c,double factor){
+        return rgb((int)Math.round(((c>>>16)&255)*factor),(int)Math.round(((c>>>8)&255)*factor),(int)Math.round((c&255)*factor));
+    }
     private static int mix(int a,int b,double t){
         return rgb((int)Math.round(((a>>>16)&255)*(1-t)+((b>>>16)&255)*t),
             (int)Math.round(((a>>>8)&255)*(1-t)+((b>>>8)&255)*t),
@@ -56,15 +61,17 @@ public final class MapRaster {
             if(a.surfaceCount()>0)surface[i]=(float)((double)a.surfaceSum()/a.surfaceCount());
             if(a.groundCount()>0)ground[i]=(float)((double)a.groundSum()/a.groundCount());
             int sat=rgb(SRGB[(int)(a.redSum()/known)],SRGB[(int)(a.greenSum()/known)],SRGB[(int)(a.blueSum()/known)]);
-            pixels[0][i]=alpha<<24|sat;
-            pixels[1][i]=alpha<<24|mix(sat,0xbca887,.32);
+            // Depth modulation is based only on observed water and is shared by every style.
+            double waterShade=a.wetCount()==0?1:1-.25*((double)a.wetCount()/known)*Math.min(1,(double)a.depthSum()/a.wetCount()/16);
+            pixels[0][i]=alpha<<24|darken(sat,waterShade);
+            pixels[1][i]=alpha<<24|darken(mix(sat,0xbca887,.32),waterShade);
             long[] hist=a.histogram();
             for(int style=0;style<3;style++){
                 long r=0,g=0,b=0;
                 for(int c=0;c<hist.length;c++){
                     int v=HAND[style][c];r+=hist[c]*((v>>>16)&255);g+=hist[c]*((v>>>8)&255);b+=hist[c]*(v&255);
                 }
-                pixels[style+2][i]=alpha<<24|rgb((int)(r/known),(int)(g/known),(int)(b/known));
+                pixels[style+2][i]=alpha<<24|darken(rgb((int)(r/known),(int)(g/known),(int)(b/known)),waterShade);
             }
         }
         return new MapRaster(source.key(),page.generation(),pixels,surface,ground,coverage);
