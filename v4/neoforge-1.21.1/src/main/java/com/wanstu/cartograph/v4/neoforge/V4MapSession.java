@@ -111,6 +111,8 @@ final class V4MapSession implements AutoCloseable {
     private List<Group> wantedGroups=List.of();
     private Set<Group> protectedGroups=Set.of();
     private List<Part> drawnParts=List.of();
+    private Map<Key,List<Part>> anchorParts=Map.of();
+    private List<Part> anchorDependencies=List.of();
     private List<Part> retained=List.of();
     private List<Key> lastDrawKeys;
     private long lastRevision=-1,lastUploads=-1;
@@ -269,7 +271,7 @@ final class V4MapSession implements AutoCloseable {
     /** Static world-relative vertices. Each camera movement changes just the affine transform. */
     void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height){
         drawCalls=quads=0;lastRenderedCamera=null;drawnParts=List.of();
-        if(texture==null)return;
+        if(texture==null){clearAnchors();return;}
         boolean raised=camera.elevationDegrees()!=90;
         graphics.flush();refresh(visible,raised);
         long start=System.nanoTime();int budget=2;
@@ -300,12 +302,30 @@ final class V4MapSession implements AutoCloseable {
                 drawCalls++;quads+=mesh.quads;rendered.addAll(group.parts);
             }
             drawnParts=List.copyOf(rendered);lastRenderedCamera=camera;
+            if(raised&&structuresVisible){
+                if(!anchorDependencies.equals(drawnParts)){
+                    var index=new HashMap<Key,List<Part>>();
+                    for(var part:drawnParts)index.computeIfAbsent(part.target,k->new ArrayList<>(4)).add(part);
+                    anchorParts=index;anchorDependencies=drawnParts;
+                }
+            }else clearAnchors();
             drawContours(graphics,Minecraft.getInstance().font,visible,camera,projection,width,height,depthScale);
         }finally{
             VertexBuffer.unbind();
             if(raised){RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableCull();RenderSystem.enableDepthTest();}
             RenderSystem.disableBlend();
         }
+    }
+    private void clearAnchors(){anchorParts=Map.of();anchorDependencies=List.of();}
+    SurfaceAnchor.Sample structureHeight(int lod,int x,int z){
+        var target=SurfaceAnchor.keyAt(lod,x,z);
+        var parts=anchorParts.get(target);
+        if(parts==null)return null;
+        for(var part:parts){
+            var sample=SurfaceAnchor.sample(target,part.patch,part.raster,x,z);
+            if(sample!=null)return sample;
+        }
+        return null;
     }
     long meshUploads(){return meshes.builds();}
     long meshBytes(){return meshes.bytes();}
@@ -341,7 +361,7 @@ final class V4MapSession implements AutoCloseable {
     long uploads(){return uploads;}
     @Override public void close(){
         if(contours!=null){contours.close();contours=null;}
-        meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();
+        meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();clearAnchors();
         if(textureId!=null)Minecraft.getInstance().getTextureManager().release(textureId);
         texture=null;textureId=null;slots.clear();free.clear();
     }

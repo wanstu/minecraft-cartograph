@@ -100,17 +100,27 @@ final class V4MapScreen extends Screen {
     }
     private void drawStructures(GuiGraphics g){
         if(!session.structuresVisible){structureStatus="Structures off";return;}
-        // Start-chunk centers are horizontal locations only. Do not invent an elevation in relief view.
-        if(camera.elevationDegrees()!=90){structureStatus="Structures: flat view only";return;}
-        var bounds=StructureView.bounds(projection.bounds(width,height,camera.y(),camera.y()));
+        boolean raised=camera.elevationDegrees()!=90;
+        double minY=raised&&minecraft.level!=null?minecraft.level.getMinBuildHeight():camera.y();
+        double maxY=raised&&minecraft.level!=null?minecraft.level.getMaxBuildHeight():camera.y();
+        var bounds=StructureView.bounds(projection.bounds(width,height,minY,maxY));
         var result=session.structureView.tick(bounds,session.io.structureRevision(session.dimension));
         structureStatus=result.limited()?"Structure view limited; zoom in":session.structureView.error()!=null?session.structureView.error():session.structureView.busy()?"Structures loading":"Structures "+result.starts().size();
         List<int[]> used=new ArrayList<>();
         for(var marker:drawnMarkers)used.add(new int[]{marker.x,marker.y});
         int displayed=0;
         for(var start:result.starts()){
-            int x=(int)Math.round(width/2.0+projection.screenX(start.x(),start.z()));
-            int y=(int)Math.round(height/2.0+projection.screenY(start.x(),camera.y(),start.z()));
+            double yAnchor=camera.y();
+            boolean approximate=!start.exactCenter();
+            if(raised){
+                var heightSample=session.structureHeight(plan.lod(),start.x(),start.z());
+                if(heightSample==null)continue; // No observed, currently rendered surface: no fabricated altitude.
+                yAnchor=heightSample.y();
+                approximate|=!heightSample.exact();
+            }
+            var projected=projection.project(start.x()+.5,yAnchor,start.z()+.5);
+            int x=(int)Math.round(width/2.0+projected.x());
+            int y=(int)Math.round(height/2.0+projected.y());
             if(x<8||x>=width-8||y<113||y>=height-12)continue;
             boolean overlap=false;for(int[] at:used)if(Math.abs(at[0]-x)<16&&Math.abs(at[1]-y)<16){overlap=true;break;}
             if(overlap)continue;
@@ -120,7 +130,7 @@ final class V4MapScreen extends Screen {
             drawStructureIcon(g,x,y,description.category());
             if(displayed<=32){
                 String name=Component.translatableWithFallback(description.translationKey(),description.fallback()).getString();
-                if(!start.exactCenter())name="~ "+name;
+                if(approximate)name="~ "+name;
                 g.drawCenteredString(font,font.plainSubstrByWidth(name,100),x,y+7,0xffb7e1ee);
             }
         }
