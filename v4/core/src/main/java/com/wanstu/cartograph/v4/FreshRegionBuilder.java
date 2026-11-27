@@ -29,6 +29,12 @@ public final class FreshRegionBuilder implements AutoCloseable {
             this.depth=depth.clone();this.red=red.clone();this.green=green.clone();this.blue=blue.clone();
             int n=0;for(var feature:this.features)if(feature!=null)n++;count=n;
         }
+        public Entry[] toEntries(){
+            Entry[] result=new Entry[256];
+            for(int i=0;i<256;i++)if(features[i]!=null)
+                result[i]=Entry.leaf(features[i],surface[i],ground[i],depth[i],red[i],green[i],blue[i]);
+            return result;
+        }
         public static Columns fromEntries(Entry[] entries)throws IOException{
             if(entries==null)return null;
             if(entries.length!=256)throw new IOException("Invalid chunk size");

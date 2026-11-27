@@ -33,6 +33,8 @@ public final class ActiveChunkScheduler implements Source {
     private static final Comparator<State> ORDER=Comparator.comparingLong((State s)->s.due)
         .thenComparingInt(s->s.pos.x).thenComparingInt(s->s.pos.z);
     private final Map<Position,State> active=new HashMap<>();
+    private static final int CLEAN_LIMIT=8192;
+    private final LinkedHashMap<Position,Boolean> cleanUnloaded=new LinkedHashMap<>();
     private final NavigableSet<State> dirtyQueue=new TreeSet<>(ORDER),reviewQueue=new TreeSet<>(ORDER);
     private final LinkedHashMap<Position,Long> inactive=new LinkedHashMap<>();
     private record Handoff(long revision,CompletableFuture<SavedDirtyIndex.Work> receipt){}
@@ -57,11 +59,15 @@ public final class ActiveChunkScheduler implements Source {
         if(s.ticket!=null)throw new IllegalStateException("Reserved");
         s.due=due;(s.dirty?dirtyQueue:reviewQueue).add(s);
     }
+    /** Same-session verified clean unloads may skip immediate recapture; no persisted trust. */
+    public void loadedObserved(int x,int z){owner();Position p=new Position(x,z);if(active.containsKey(p))return;loaded(x,z,!cleanUnloaded.containsKey(p));}
+    public boolean isActive(int x,int z){owner();return active.containsKey(new Position(x,z));}
     /** needsCapture is true when fresh facts are missing or saved-world identity is not verified. */
     public void loaded(int x,int z,boolean needsCapture){
         owner();Position p=new Position(x,z);
         State existing=active.get(p);
         if(existing!=null){if(needsCapture)changed(x,z);return;}
+        cleanUnloaded.remove(p);
         State s=new State(p,next());
         s.dirty=inactive.remove(p)!=null||needsCapture;
         handoffs.remove(p);
@@ -73,6 +79,7 @@ public final class ActiveChunkScheduler implements Source {
     /** Relevant mutation, or conservative save/biome/mod fallback. No duplicate queued nodes. */
     public void changed(int x,int z){
         owner();Position p=new Position(x,z);State s=active.get(p);
+        cleanUnloaded.remove(p);
         if(s==null){inactive.put(p,next());return;}
         if(s.ticket==null)removeQueued(s);
         s.revision=next();s.dirty=true;
@@ -84,6 +91,10 @@ public final class ActiveChunkScheduler implements Source {
         if(s.ticket==null)removeQueued(s);else reserved--;
         // An unfinished periodic review may have found a bypassed modification.
         if(s.dirty||s.ticket!=null)inactive.put(p,next());
+        else{
+            cleanUnloaded.put(p,Boolean.TRUE);
+            while(cleanUnloaded.size()>CLEAN_LIMIT){var it=cleanUnloaded.keySet().iterator();it.next();it.remove();}
+        }
     }
     /**
      * Shutdown phase, after lifecycle event intake and capture starts have stopped.
@@ -93,7 +104,7 @@ public final class ActiveChunkScheduler implements Source {
     public void prepareShutdown(){
         owner();
         for(State s:active.values())if(s.dirty||s.ticket!=null)inactive.put(s.pos,next());
-        active.clear();dirtyQueue.clear();reviewQueue.clear();reserved=0;
+        active.clear();dirtyQueue.clear();reviewQueue.clear();cleanUnloaded.clear();reserved=0;
     }
     /** Bounded handoff. The receiver must retain work until the matching saved revision is processed. */
     public int drainInactive(int max,SavedHandoff handoff){

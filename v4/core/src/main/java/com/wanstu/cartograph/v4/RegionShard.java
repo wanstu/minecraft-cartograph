@@ -38,6 +38,7 @@ public final class RegionShard {
         if(!id.equals(Id.ofCell(cell)))throw new IllegalArgumentException("Cell outside shard");
         return pyramid.get(cell);
     }
+    long revision(Key key){return store.revision(key);}
     Page readPage(Key key)throws IOException{return store.read(key);}
     public long diskWrites(){return store.diskWrites();}
     public long diskReads(){return store.diskReads();}

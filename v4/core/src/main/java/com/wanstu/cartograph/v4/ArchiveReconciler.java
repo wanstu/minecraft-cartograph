@@ -1,0 +1,129 @@
+package com.wanstu.cartograph.v4;
+
+import java.io.IOException;
+import java.nio.file.*;
+import java.util.*;
+import static com.wanstu.cartograph.v4.RegionPageStore.*;
+import static com.wanstu.cartograph.v4.ActiveChunkScheduler.Position;
+
+/** Bounded saved-world reconciliation, run exclusively by the world IO owner. */
+final class ArchiveReconciler implements AutoCloseable {
+    record Progress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending){}
+    private record Candidate(Path file,int rx,int rz,int x,int z,SavedDirtyIndex.Work work){}
+    private record Ready(Candidate candidate,byte[] hash,Entry[] columns,boolean alreadyMatches){}
+    private final Path regions;
+    private final int minY,height;
+    private final OfflineRegionBackfill.Mapper mapper;
+    private final SourceFingerprints fingerprints;
+    private SavedArchiveCursor cursor;
+    private boolean discovered;
+    private int sinceFlush;
+    private long decoded,unchanged,committed,deferred,errors;
+    ArchiveReconciler(Path regions,Path index,int minY,int height,OfflineRegionBackfill.Mapper mapper)throws IOException{
+        this.regions=regions;this.minY=minY;this.height=height;this.mapper=Objects.requireNonNull(mapper);
+        fingerprints=new SourceFingerprints(index);
+    }
+    Progress progress(SavedDirtyIndex dirty){return new Progress(decoded,unchanged,committed,deferred,errors,discovered,dirty.size());}
+    private Candidate dirty(SavedDirtyIndex.Work w){
+        int x=w.position().x(),z=w.position().z(),rx=Math.floorDiv(x,32),rz=Math.floorDiv(z,32);
+        return new Candidate(regions.resolve("r."+rx+"."+rz+".mca"),rx,rz,x,z,w);
+    }
+    Progress step(WorldGeography world,SavedDirtyIndex dirty,LiveArchiveGate gate,int max)throws IOException{
+        if(max<1||max>32)throw new IllegalArgumentException("Archive budget");
+        List<Candidate> candidates=new ArrayList<>();
+        // Reserve capacity for initial discovery even with a permanently deferred dirty item.
+        for(var w:dirty.peek(discovered?max:Math.max(1,max/4)))candidates.add(dirty(w));
+        if(!discovered&&candidates.size()<max){
+            if(Files.isDirectory(regions)){
+                if(cursor==null)cursor=new SavedArchiveCursor(regions);
+                try{
+                    var step=cursor.step(2,max-candidates.size());
+                    errors+=step.failedRegions().size();
+                    for(var c:step.candidates())candidates.add(new Candidate(c.path(),c.regionX(),c.regionZ(),c.chunk().x(),c.chunk().z(),null));
+                    if(step.exhausted()){discovered=true;cursor.close();cursor=null;}
+                }catch(IOException e){
+                    // Do not treat a failed region as successfully discovered. Report and
+                    // retry a new discovery pass on a later call (runtime backs off).
+                    errors++;cursor.close();cursor=null;return progress(dirty);
+                }
+            }else discovered=true;
+        }
+        Map<RegionShard.Id,List<Ready>> batches=new LinkedHashMap<>();
+        Set<Position> seen=new HashSet<>();
+        List<SavedDirtyIndex.Work> ack=new ArrayList<>();
+        List<SavedDirtyIndex.Work> retry=new ArrayList<>();
+        Set<Position> newRetry=new LinkedHashSet<>();
+        try{
+            for(Candidate c:candidates){
+                if(!seen.add(new Position(c.x,c.z)))continue;
+                if(!gate.begin(c.x,c.z)){deferred++;if(c.work!=null)retry.add(c.work);continue;}
+                boolean retained=false;
+                try{
+                    AnvilRegionReader.Encoded encoded;
+                    try(var reader=new AnvilRegionReader(c.file,c.rx,c.rz)){
+                        var identity=reader.identity(c.x,c.z);
+                        if(identity==null){deferred++;if(c.work!=null)retry.add(c.work);continue;}
+                        encoded=reader.encoded(identity);
+                    }catch(IOException e){errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    byte[] hash=encoded.fingerprint();
+                    long revision=world.chunkPageRevision(c.x,c.z);
+                    if(fingerprints.matches(c.x,c.z,revision,hash)&&gate.valid(c.x,c.z)){
+                        unchanged++;if(c.work!=null)ack.add(c.work);continue;
+                    }
+                    Entry[] columns;
+                    try{
+                        var source=SavedChunkSurface.decode(encoded.decode().nbt(),c.x,c.z,minY,height);
+                        var mapped=mapper.map(source);
+                        if(mapped==null)throw new IOException("Unmapped saved chunk");
+                        columns=mapped.toEntries();decoded++;
+                    }catch(SavedChunkSurface.NotFullyGeneratedException e){
+                        deferred++;if(c.work!=null)retry.add(c.work);continue;
+                    }catch(IOException|RuntimeException e){
+                        errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;
+                    }
+                    if(!gate.valid(c.x,c.z)){deferred++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    boolean equal=world.matchesChunk(c.x,c.z,columns);
+                    // A recently committed live capture is authoritative during this
+                    // server session. Never replace it with a conflicting disk snapshot.
+                    if(gate.protectedLive(c.x,c.z)&&!equal){
+                        deferred++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;
+                    }
+                    batches.computeIfAbsent(RegionShard.Id.ofChunk(c.x,c.z),k->new ArrayList<>())
+                        .add(new Ready(c,hash,columns,equal));
+                    retained=true;
+                }finally{if(!retained)gate.end(c.x,c.z);}
+            }
+            for(var batch:batches.entrySet()){
+                List<Ready> accepted=new ArrayList<>();
+                List<DiskGeographicPyramid.ChunkSnapshot> writes=new ArrayList<>();
+                for(Ready r:batch.getValue()){
+                    Candidate c=r.candidate;
+                    if(!gate.valid(c.x,c.z)){deferred++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    accepted.add(r);
+                    if(!r.alreadyMatches)writes.add(new DiskGeographicPyramid.ChunkSnapshot(c.x,c.z,r.columns));
+                }
+                if(!writes.isEmpty()){
+                    world.ensureShard(batch.getKey());world.updateChunks(batch.getKey(),writes);
+                }
+                for(Ready r:accepted){
+                    Candidate c=r.candidate;
+                    if(r.alreadyMatches)unchanged++;else committed++;
+                    if(!gate.valid(c.x,c.z)){if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    fingerprints.record(c.x,c.z,world.chunkPageRevision(c.x,c.z),r.hash);sinceFlush++;
+                    if(c.work!=null)ack.add(c.work);
+                }
+            }
+            // Only a durable geographic commit, or an exact matching source, may clear work.
+            if(!newRetry.isEmpty())dirty.mark(List.copyOf(newRetry));
+            dirty.acknowledgeBatch(ack);
+            for(var w:retry)dirty.rotate(w);
+            if(sinceFlush>=128||discovered){fingerprints.flush();sinceFlush=0;}
+            return progress(dirty);
+        }finally{
+            for(var batch:batches.values())for(Ready r:batch)gate.end(r.candidate.x,r.candidate.z);
+        }
+    }
+    @Override public void close()throws IOException{
+        try{if(cursor!=null)cursor.close();}finally{fingerprints.flush();}
+    }
+}

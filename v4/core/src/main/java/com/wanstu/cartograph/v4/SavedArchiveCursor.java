@@ -7,8 +7,8 @@ import java.util.*;
 /** Bounded, lazy discovery of already saved chunks. One region header resident at a time. */
 public final class SavedArchiveCursor implements AutoCloseable {
     public record Candidate(Path path,int regionX,int regionZ,AnvilRegionReader.SavedChunk chunk){}
-    public record Step(List<Candidate> candidates,int regionsOpened,boolean exhausted){
-        public Step{candidates=List.copyOf(candidates);}
+    public record Step(List<Candidate> candidates,int regionsOpened,boolean exhausted,List<Path> failedRegions){
+        public Step{candidates=List.copyOf(candidates);failedRegions=List.copyOf(failedRegions);}
     }
     private final DirectoryStream<Path> directory;
     private final Iterator<Path> files;
@@ -27,7 +27,7 @@ public final class SavedArchiveCursor implements AutoCloseable {
         owner();if(closed)throw new IllegalStateException("Closed archive cursor");
         if(maxRegions<1||maxRegions>32||maxChunks<1||maxChunks>1024)throw new IllegalArgumentException("Discovery budget");
         List<Candidate> result=new ArrayList<>();
-        int inspected=0,opened=0;
+        int inspected=0,opened=0;List<Path> failed=new ArrayList<>();
         try{
             while(result.size()<maxChunks){
                 if(chunks.hasNext()){result.add(new Candidate(current,rx,rz,chunks.next()));continue;}
@@ -42,11 +42,11 @@ public final class SavedArchiveCursor implements AutoCloseable {
                 if(!next.getFileName().toString().equals("r."+x+"."+z+".mca"))continue;
                 try(var reader=new AnvilRegionReader(next,x,z)){
                     chunks=reader.discover().iterator();
-                }
+                }catch(IOException e){failed.add(next);continue;}
                 current=next;rx=x;rz=z;opened++;
             }
         }catch(DirectoryIteratorException e){throw e.getCause();}
-        return new Step(result,opened,exhausted&&!chunks.hasNext());
+        return new Step(result,opened,exhausted&&!chunks.hasNext(),failed);
     }
     @Override public void close()throws IOException{owner();if(!closed){closed=true;directory.close();}}
 }

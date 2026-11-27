@@ -6,6 +6,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.level.dimension.DimensionType;
+import java.nio.file.Path;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.core.BlockPos;
 import net.neoforged.fml.common.Mod;
@@ -44,12 +46,12 @@ public final class CartographV4Dev {
     }
     private static void loaded(ChunkEvent.Load e){
         if(e.getLevel() instanceof ServerLevel level&&e.getChunk() instanceof LevelChunk){
-            ChunkPos p=e.getChunk().getPos();onServer(level,r->r.dimension(level).scheduler.loaded(p.x,p.z,true));
+            ChunkPos p=e.getChunk().getPos();onServer(level,r->{var d=r.dimension(level);d.gate.loaded(p.x,p.z);d.scheduler.loadedObserved(p.x,p.z);});
         }
     }
     private static void unloaded(ChunkEvent.Unload e){
         if(e.getLevel() instanceof ServerLevel level){
-            ChunkPos p=e.getChunk().getPos();onServer(level,r->r.dimension(level).scheduler.unloaded(p.x,p.z));
+            ChunkPos p=e.getChunk().getPos();onServer(level,r->{var d=r.dimension(level);d.scheduler.unloaded(p.x,p.z);d.gate.unloaded(p.x,p.z);});
         }
     }
     private static void saved(ChunkDataEvent.Save e){
@@ -82,10 +84,33 @@ public final class CartographV4Dev {
         final DirtyHandoffQueue dirty=new DirtyHandoffQueue(128);
         CompletableFuture<Integer> handoff;
         final String key;
+        final LiveArchiveGate gate;final Path regions;final int minY,height;
+        CompletableFuture<WorldIoService.ArchiveProgress> archive;
+        WorldIoService.ArchiveProgress progress;
+        long nextArchive;
         Dimension(ServerLevel level,WorldIoService io){
             key=level.dimension().location().toString();
+            gate=io.gate(key);
+            regions=DimensionType.getStorageFolder(level.dimension(),level.getServer().getWorldPath(LevelResource.ROOT)).resolve("region");
+            minY=level.getMinBuildHeight();height=level.getHeight();
             scheduler=new ActiveChunkScheduler(t->MinecraftSurfaceFacts.begin(level,t),12000,20,8);
             pump=new CapturePump(scheduler,(x,z,columns)->io.write(key,x,z,columns),2);
+        }
+        void archive(WorldIoService io,long tick){
+            if(archive!=null){
+                if(!archive.isDone())return;
+                try{
+                    var next=archive.join();
+                    boolean madeProgress=progress==null||next.committed()>progress.committed()||next.unchanged()>progress.unchanged();
+                    if(next.discovered())nextArchive=tick+(next.pending()>0&&madeProgress?2:100);
+                    else if(progress!=null&&next.sourceErrors()>progress.sourceErrors()&&!madeProgress)nextArchive=tick+20;
+                    progress=next;
+                }catch(CompletionException e){nextArchive=tick+200;}
+                archive=null;
+            }
+            if(tick<nextArchive||io.failed()||io.queued()>8)return;
+            nextArchive=tick+2;
+            archive=io.archiveStep(key,regions,minY,height,MinecraftSurfaceFacts::fromSaved,16);
         }
         void transfer(WorldIoService io){
             scheduler.drainInactiveAsync(16,dirty);
@@ -99,7 +124,7 @@ public final class CartographV4Dev {
         final MinecraftServer server;
         final WorldIoService io;
         final Map<ServerLevel,Dimension> dimensions=new LinkedHashMap<>();
-        int cursor;
+        int cursor,archiveCursor;
         long tick;
         Runtime(MinecraftServer server){
             this.server=server;
@@ -109,6 +134,8 @@ public final class CartographV4Dev {
         void tick(){
             tick++;
             if(tick%200==0)for(Dimension d:dimensions.values())LOG.info("V4 capture {}: {} / {}",d.key,d.scheduler.metrics(),d.pump.metrics());
+            if(tick%200==0)for(Dimension d:dimensions.values())if(d.progress!=null)LOG.info("V4 archive {}: {}",d.key,d.progress);
+            if(tick==1||tick%200==0)for(ServerLevel level:server.getAllLevels())dimension(level);
             List<Dimension> all=new ArrayList<>(dimensions.values());
             if(all.isEmpty())return;
             for(Dimension d:all)d.scheduler.advance(tick);
@@ -120,6 +147,9 @@ public final class CartographV4Dev {
                 long remaining=budget-(System.nanoTime()-start);
                 if(remaining<=0)break;
                 columns-=d.pump.tick(remaining,columns,1);
+            }
+            if(tick%2==0&&System.nanoTime()-start<budget&&io.queued()<=8){
+                Dimension d=all.get(Math.floorMod(archiveCursor++,all.size()));d.archive(io,tick);
             }
         }
         void stop(){

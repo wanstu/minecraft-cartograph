@@ -39,6 +39,15 @@ public final class AnvilRegionReaderTest {
                 try(var out=new RandomAccessFile(path.toFile(),"rw")){out.seek(4);out.writeInt((2<<8)|1);}
                 reject(region::discover);
             }
+            // A broken region must not prevent traversal of unrelated valid files.
+            Files.write(dir.resolve("r.1.1.mca"),new byte[]{1,2,3});
+            try(var cursor=new SavedArchiveCursor(dir)){
+                int failures=0;boolean done=false;
+                for(int i=0;i<10&&!done;i++){
+                    var step=cursor.step(2,4);failures+=step.failedRegions().size();done=step.exhausted();
+                }
+                check(done&&failures>=1,"corrupt regions reported without starvation");
+            }
             System.out.println("PASS: Anvil read-only discovery, negative coords, zlib/raw/external NBT, changed identity and overlapping sector rejection");
         }finally{ScaleTest.delete(dir);}
     }

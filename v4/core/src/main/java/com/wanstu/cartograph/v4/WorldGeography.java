@@ -92,6 +92,20 @@ public final class WorldGeography {
         }
         return result;
     }
+    private static Key chunkPage(int x,int z){return new Key(0,Math.floorDiv(x,2),Math.floorDiv(z,2));}
+    public long chunkPageRevision(int x,int z)throws IOException{
+        available();var id=RegionShard.Id.ofChunk(x,z);
+        return published.contains(id)?open(id).revision(chunkPage(x,z)):0;
+    }
+    public boolean matchesChunk(int x,int z,Entry[] columns)throws IOException{
+        available();if(columns.length!=256)throw new IllegalArgumentException("Chunk columns");
+        var id=RegionShard.Id.ofChunk(x,z);
+        if(!published.contains(id))return false;
+        Page p=open(id).readPage(chunkPage(x,z));
+        int ox=Math.floorMod(x,2)*16,oz=Math.floorMod(z,2)*16;
+        for(int i=0;i<256;i++)if(!Objects.equals(columns[i],p.entryAt((oz+i/16)*32+ox+i%16)))return false;
+        return true;
+    }
     /** Create a new empty shard without forcing any Minecraft chunk generation. */
     public void ensureShard(RegionShard.Id id)throws IOException{
         available();

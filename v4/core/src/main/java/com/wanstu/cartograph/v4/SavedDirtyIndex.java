@@ -36,6 +36,10 @@ public final class SavedDirtyIndex {
         for(var e:pending.entrySet()){if(result.size()==max)break;result.add(new Work(e.getKey(),e.getValue()));}
         return List.copyOf(result);
     }
+    /** Retry fairness only; persisted tokens remain unchanged. */
+    void rotate(Work w){
+        owner();if(current(w)){pending.remove(w.position);pending.put(w.position,w.token);}
+    }
     /** Acknowledgement is returned only after the batch is forced to disk. */
     public List<Work> mark(List<Position> positions)throws IOException{
         ready();Objects.requireNonNull(positions);

@@ -12,6 +12,20 @@ public final class AnvilRegionReader implements AutoCloseable {
     public static final int SECTOR=4096, SLOTS=1024, MAX_NBT=32*1024*1024;
     public record SavedChunk(int x,int z,int sector,int sectors,long timestamp){}
     public record Payload(SavedChunk identity,byte[] nbt){}
+    public record Encoded(SavedChunk identity,int codec,byte[] bytes){
+        public Encoded{bytes=bytes.clone();}
+        @Override public byte[] bytes(){return bytes.clone();}
+        public byte[] fingerprint(){
+            try{var digest=java.security.MessageDigest.getInstance("SHA-256");digest.update((byte)codec);return digest.digest(bytes);}
+            catch(java.security.NoSuchAlgorithmException e){throw new AssertionError(e);}
+        }
+        public Payload decode()throws IOException{
+            try(InputStream raw=new ByteArrayInputStream(bytes);InputStream decoded=switch(codec){
+                case 1 -> new GZIPInputStream(raw);case 2 -> new InflaterInputStream(raw);case 3 -> raw;
+                default -> throw new IOException("Unsupported Anvil compression "+codec);
+            }){return new Payload(identity,limited(decoded,MAX_NBT));}
+        }
+    }
     private final Path path;
     private final int rx,rz;
     private final FileChannel channel;
@@ -57,7 +71,8 @@ public final class AnvilRegionReader implements AutoCloseable {
         return entry(slot,location,b.getInt());
     }
     /** Caller must arbitrate against live capture; identity alone is not a content version. */
-    public Payload load(SavedChunk expected)throws IOException{
+    public Payload load(SavedChunk expected)throws IOException{return encoded(expected).decode();}
+    public Encoded encoded(SavedChunk expected)throws IOException{
         if(!expected.equals(identity(expected.x,expected.z)))throw new IOException("Region identity changed");
         long offset=(long)expected.sector*SECTOR;
         ByteBuffer h=ByteBuffer.allocate(5);read(h,offset);
@@ -73,18 +88,9 @@ public final class AnvilRegionReader implements AutoCloseable {
         }else{
             ByteBuffer data=ByteBuffer.allocate(length-1);read(data,offset+5);compressed=data.array();
         }
-        byte[] nbt;
-        try(InputStream raw=new ByteArrayInputStream(compressed);
-            InputStream decoded=switch(codec){
-                case 1 -> new GZIPInputStream(raw);
-                case 2 -> new InflaterInputStream(raw);
-                case 3 -> raw;
-                default -> throw new IOException("Unsupported Anvil compression "+codec);
-            }){
-            nbt=limited(decoded,MAX_NBT);
-        }
         if(!expected.equals(identity(expected.x,expected.z)))throw new IOException("Region changed while reading");
-        return new Payload(expected,nbt);
+        if(codec<1||codec>3)throw new IOException("Unsupported Anvil compression "+codec);
+        return new Encoded(expected,codec,compressed);
     }
     private static byte[] limited(InputStream input,int limit)throws IOException{
         ByteArrayOutputStream out=new ByteArrayOutputStream();
