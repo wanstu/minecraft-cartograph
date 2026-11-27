@@ -121,6 +121,7 @@ final class InGameMapTiles implements AutoCloseable {
     private final Map<TextureKey, CompletableFuture<Optional<PersistentRenderedAtlasStore.Snapshot>>> reads = new HashMap<>();
     private final Set<TextureKey> diskMisses = new HashSet<>();
     private final CartographBackendApi backend;
+    private final InGameMapOverview overview = new InGameMapOverview();
     private List<DrawTile> frame = List.of();
     private FrameView frameView;
     private long allocatedTexels;
@@ -187,8 +188,10 @@ final class InGameMapTiles implements AutoCloseable {
             return discard;
         });
         int remaining = MAX_PAINTED_TILES * Math.max(1, stride * stride / 4);
-        long deadline = System.nanoTime() + CPU_BUDGET_NS;
+        long now = System.nanoTime();
+        long deadline = now + CPU_BUDGET_NS;
         frameDeadline = deadline;
+        overview.update(worldId, dim, targetSignature, camera, now + CPU_BUDGET_NS / 2);
 
         Set<TextureKey> keep = new HashSet<>();
         for (Region region : visible) {
@@ -445,16 +448,20 @@ final class InGameMapTiles implements AutoCloseable {
     }
 
     void draw(MapGraphics graphics, InGameMapCamera camera) {
+        overview.draw(graphics, camera);
         for (DrawTile item : frame) {
-            Region region = item.region;
-            Atlas atlas = item.atlas;
-            int x = Math.round((float) camera.screenX((long) region.x * REGION_SIZE));
-            int y = Math.round((float) camera.screenY((long) region.z * REGION_SIZE));
-            int right = Math.round((float) camera.screenX(((long) region.x + 1) * REGION_SIZE));
-            int bottom = Math.round((float) camera.screenY(((long) region.z + 1) * REGION_SIZE));
-            if (right <= 0 || x >= camera.width() || bottom <= camera.top() || y >= camera.bottom()) continue;
-            atlas.texture.draw(graphics, x, y, right - x, bottom - y);
+            drawAtlas(graphics, camera, item.region.x, item.region.z, item.atlas.texture);
         }
+    }
+
+    static void drawAtlas(
+            MapGraphics graphics, InGameMapCamera camera, int regionX, int regionZ, MapGraphics.Texture texture) {
+        int x = (int) Math.round(camera.screenX((long) regionX * REGION_SIZE));
+        int y = (int) Math.round(camera.screenY((long) regionZ * REGION_SIZE));
+        int right = (int) Math.round(camera.screenX(((long) regionX + 1) * REGION_SIZE));
+        int bottom = (int) Math.round(camera.screenY(((long) regionZ + 1) * REGION_SIZE));
+        if (right <= 0 || x >= camera.width() || bottom <= camera.top() || y >= camera.bottom()) return;
+        texture.draw(graphics, x, y, right - x, bottom - y);
     }
 
     private static int region(double coordinate) {
@@ -463,6 +470,7 @@ final class InGameMapTiles implements AutoCloseable {
 
     @Override
     public void close() {
+        overview.close();
         for (Atlas atlas : atlases.values()) atlas.texture.close();
         atlases.clear();
         reads.values().forEach(future -> future.cancel(false));

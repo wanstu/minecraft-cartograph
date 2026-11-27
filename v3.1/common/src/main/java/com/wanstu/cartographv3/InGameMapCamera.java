@@ -42,11 +42,19 @@ final class InGameMapCamera {
     }
 
     void zoom(double factor, double mouseX, double mouseY) {
+        if (!Double.isFinite(factor) || factor <= 0) return;
+        double next = clampZoom(zoom * factor);
+        if (next == zoom) return;
         double x = worldX(mouseX);
         double z = worldZ(mouseY);
-        zoom = clampZoom(zoom * factor);
+        zoom = next;
         centerX += x - worldX(mouseX);
         centerZ += z - worldZ(mouseY);
+    }
+
+    void scroll(double steps, double mouseX, double mouseY) {
+        if (!Double.isFinite(steps)) return;
+        zoom(Math.pow(1.12, Math.clamp(steps, -1.0, 1.0)), mouseX, mouseY);
     }
 
     private static double clampZoom(double value) {

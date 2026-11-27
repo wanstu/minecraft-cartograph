@@ -713,7 +713,8 @@ final class InGameMapScreen extends AtlasScreenBase {
         }
         if (ui != null && !ui.blocked(x, y)) {
             menu = null;
-            zoom(Math.pow(1.12, scrollY), x, y);
+            camera.scroll(scrollY, x, y);
+            viewportDelay = 2;
         }
         return true;
     }

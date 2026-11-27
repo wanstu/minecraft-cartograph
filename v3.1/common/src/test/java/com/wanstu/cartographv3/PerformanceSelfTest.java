@@ -34,6 +34,8 @@ public final class PerformanceSelfTest {
         viewStateRoundTrip();
         memoryBoundAndEviction();
         knownAtlasBounds();
+        archivedMapRegions();
+        wheelKeepsWorldAnchor();
         visibleAtlasTilesPaintFirst();
         atlasReleaseWhileWriterBusy();
         atlasBlockReadCompatibility();
@@ -42,6 +44,77 @@ public final class PerformanceSelfTest {
         backgroundCompletionIsPerDimension();
         recentSavesShareBackgroundBudget();
         System.out.println("Cartograph performance regressions: " + checks + " checks passed");
+    }
+
+    private static void archivedMapRegions() throws Exception {
+        var tmp = java.nio.file.Files.createTempDirectory("cartograph-overview");
+        String dimension = "minecraft:overworld";
+        var first = new ChunkKey(dimension, -33, 32);
+        var next = new ChunkKey(dimension, -32, 32);
+        var elsewhere = new ChunkKey(dimension, 512, -193);
+        var left = SavedMapCoverage.Region.ofChunk(first.x(), first.z());
+        var right = SavedMapCoverage.Region.ofChunk(next.x(), next.z());
+        try {
+            for (ChunkKey key : List.of(first, next, elsewhere)) {
+                var bytes = java.nio.ByteBuffer.allocate(16 + SurfaceTile.PIXELS * 13);
+                bytes.putInt(0x43543331).putInt(1).putInt(key.x()).putInt(key.z());
+                for (int pixel = 0; pixel < SurfaceTile.PIXELS; pixel++) {
+                    bytes.putInt(5).putInt(4).putShort((short) 80).putShort((short) 79).put((byte) 0);
+                }
+                java.nio.file.Files.write(PersistentTileStore.file(tmp, key), bytes.array());
+            }
+            java.nio.file.Files.writeString(tmp.resolve("1_2.ct31.pending"), "uncommitted");
+            var source = new SavedMapCoverage(tmp, dimension);
+            source.start(Runnable::run);
+            require(source.regionsInBounds(-2, -1, 1, 1).size() == 2,
+                    "Far archived facts are indexed independently of the in-memory cache");
+            require(source.regionsInBounds(-2, -1, 1, 1)
+                            .equals(source.regionsInBounds(-2, -1, 1, 1)),
+                    "Repeated viewport queries retain archived coverage");
+            var facts = source.read(left, true, () -> true);
+            int span = SavedMapCoverage.REGION_CHUNKS + 2;
+            require(first.equals(facts[span + 32].key()) && next.equals(facts[span + 33].key()),
+                    "Negative archived region includes the saved neighbor for hand-drawn edges");
+            require(facts[span + 31] == null, "Unknown terrain remains absent");
+            require(Arrays.stream(source.read(left, true, () -> false)).allMatch(java.util.Objects::isNull),
+                    "Superseded overview read stops before decoding facts");
+
+            long initial = source.revision(left, true);
+            java.nio.file.Files.delete(PersistentTileStore.file(tmp, next));
+            source.changed(next.x(), next.z(), false);
+            require(source.revision(left, true) > initial && source.revision(right, false) > initial,
+                    "Deleting a saved tile invalidates its region and hand-drawn neighbors");
+            require(source.read(left, true, () -> true)[span + 33] == null,
+                    "An invalidated overview can clear a removed tile");
+            var far = SavedMapCoverage.Region.ofChunk(elsewhere.x(), elsewhere.z());
+            require(source.regionsInBounds(far.x(), far.x(), far.z(), far.z()).equals(List.of(far)),
+                    "Panning outside the remembered viewport still finds saved regions");
+            source.close();
+        } finally {
+            try (var files = java.nio.file.Files.list(tmp)) {
+                for (var file : files.toList()) java.nio.file.Files.deleteIfExists(file);
+            }
+            java.nio.file.Files.deleteIfExists(tmp);
+        }
+    }
+
+    private static void wheelKeepsWorldAnchor() {
+        var camera = new InGameMapCamera();
+        camera.resize(960, 510, 31, 2);
+        camera.restore(new InGameMapCamera.Position("minecraft:overworld", -6114.45, 9059.75, 0.0625));
+        double x = 350.75;
+        double z = 249.2;
+        double worldX = camera.worldX(x);
+        double worldZ = camera.worldZ(z);
+        camera.scroll(35, x, z);
+        require(Math.abs(camera.zoom() - 0.07) < 1e-10, "A combined wheel event changes one zoom step");
+        for (int i = 0; i < 80; i++) camera.scroll(1, x, z);
+        require(camera.zoom() == 64, "Wheel can reach maximum zoom");
+        for (int i = 0; i < 100; i++) camera.scroll(-1, x, z);
+        require(camera.zoom() == 0.0625, "Wheel can return to the far overview");
+        require(Math.abs(camera.worldX(x) - worldX) < 1e-7
+                        && Math.abs(camera.worldZ(z) - worldZ) < 1e-7,
+                "Zooming across all resolutions keeps the world point under the cursor");
     }
 
     private static void visibleAtlasTilesPaintFirst() {

@@ -40,7 +40,25 @@ final class PersistentTileStore {
         return thread;
     });
 
+    private static volatile SavedMapCoverage coverage;
+
     private PersistentTileStore() {}
+
+    static SavedMapCoverage savedCoverage(UUID worldId, String dimension, java.util.concurrent.Executor reader) {
+        Path directory = directory(worldId, dimension);
+        SavedMapCoverage active = coverage;
+        if (active != null && active.uses(directory)) return active;
+        if (active != null) active.close();
+        active = new SavedMapCoverage(directory, dimension);
+        coverage = active;
+        active.start(reader);
+        return active;
+    }
+
+    private static void coverageChanged(Path directory, ChunkKey key, boolean present) {
+        SavedMapCoverage active = coverage;
+        if (active != null && active.uses(directory)) active.changed(key.x(), key.z(), present);
+    }
 
     static Optional<SurfaceTile> load(UUID worldId, ChunkKey key) {
         return loadRaw(file(directory(worldId, key.dimension()), key), key);
@@ -54,7 +72,7 @@ final class PersistentTileStore {
         });
     }
 
-    private static Optional<SurfaceTile> loadRaw(Path file, ChunkKey key) {
+    static Optional<SurfaceTile> loadRaw(Path file, ChunkKey key) {
         if (!Files.isRegularFile(file)) return Optional.empty();
 
         try (DataInputStream input = new DataInputStream(
@@ -206,10 +224,12 @@ final class PersistentTileStore {
     }
 
     static void delete(UUID worldId, ChunkKey key) {
-        Path target = file(directory(worldId, key.dimension()), key);
+        Path directory = directory(worldId, key.dimension());
+        Path target = file(directory, key);
         WRITER.execute(() -> {
             try {
                 Files.deleteIfExists(target);
+                coverageChanged(directory, key, false);
             } catch (IOException ignored) {}
         });
     }
@@ -218,7 +238,8 @@ final class PersistentTileStore {
         if (worldId == null || tile == null || !tile.hasSurfaceFacts()) return;
 
         WRITER.execute(() -> {
-            Path target = file(directory(worldId, tile.key().dimension()), tile.key());
+            Path directory = directory(worldId, tile.key().dimension());
+            Path target = file(directory, tile.key());
             Path tmp = target.resolveSibling(
                     target.getFileName() + ".tmp-" + UUID.randomUUID());
             try {
@@ -237,6 +258,7 @@ final class PersistentTileStore {
                             tmp, target,
                             StandardCopyOption.REPLACE_EXISTING);
                 }
+                coverageChanged(directory, tile.key(), true);
             } catch (IOException failure) {
                 try { Files.deleteIfExists(tmp); } catch (IOException ignored) {}
             }
@@ -270,7 +292,7 @@ final class PersistentTileStore {
         }
     }
 
-    private static Path file(Path directory, ChunkKey key) {
+    static Path file(Path directory, ChunkKey key) {
         return directory.resolve(key.x() + "_" + key.z() + ".ct31");
     }
 

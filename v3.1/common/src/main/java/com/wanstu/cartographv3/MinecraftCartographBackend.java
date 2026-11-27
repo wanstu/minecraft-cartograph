@@ -14,7 +14,6 @@ import java.util.UUID;
  */
 final class MinecraftCartographBackend implements CartographBackendApi {
     private static final int MIN_PENDING_REQUESTS = 32;
-    private static final int MAX_RAW_VISIBLE_TILES = 4096;
     private static final int MAX_RAW_VISIBLE_RADIUS = 31;
 
     private final Minecraft minecraft = Minecraft.getInstance();

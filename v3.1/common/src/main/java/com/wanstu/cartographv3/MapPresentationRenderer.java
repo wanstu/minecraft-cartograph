@@ -72,6 +72,15 @@ final class MapPresentationRenderer {
         };
     }
 
+    static int overviewColor(SurfaceTile tile, Function<ChunkKey, SurfaceTile> neighbors) {
+        MapVisualStyleProcessor processor = CartographSettings.visualStyle().processor();
+        return switch (CartographSettings.drawingMode()) {
+            case SATELLITE -> processor.renderSatellite(SatelliteMapData.from(tile), SurfaceTile.SIZE)[0];
+            case HAND_DRAWN -> processor.renderHandDrawn(
+                    HandDrawnMapData.from(tile, neighbors), SurfaceTile.SIZE)[0];
+        };
+    }
+
     private static HandDrawnMapData handDrawnData(
             SurfaceTile tile, Function<ChunkKey, SurfaceTile> tileLookup) {
         DerivedKey key = new DerivedKey(tile.key(), dependencyFingerprint(tile, tileLookup),
