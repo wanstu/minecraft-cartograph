@@ -1,5 +1,7 @@
 package com.wanstu.cartographv3;
 
+import java.util.concurrent.atomic.AtomicLongArray;
+
 /** Built-in visual-style processors. Every style implements both data structures. */
 final class MapVisualStyleProcessors {
     static final MapVisualStyleProcessor MODERN = new Modern();
@@ -29,6 +31,9 @@ final class MapVisualStyleProcessors {
                     0xff5fa9e6, 0xffd95462, 0xffd5edf7, 0x30405c6b, 0x38486a7b,
                     0x4d2d4552, 0x302d4552, 0xffe8f5fa, 0xff5fa9e6,
                     0xeff8fcff, 0x50405b69);
+
+    private static final int SATELLITE_CACHE_BITS = 12;
+    private static final AtomicLongArray SATELLITE_COLORS = new AtomicLongArray(1 << SATELLITE_CACHE_BITS);
 
     private MapVisualStyleProcessors() {}
 
@@ -95,7 +100,15 @@ final class MapVisualStyleProcessors {
         }
     }
 
-    private enum StyleKind { MODERN, ANCIENT, ANIME }
+    private enum StyleKind {
+        MODERN(3), ANCIENT(7), ANIME(5);
+
+        final int noiseRange;
+
+        StyleKind(int noiseRange) {
+            this.noiseRange = noiseRange;
+        }
+    }
 
     private static void styleSatellite(
             SatelliteMapData data, int[] pixels, int stride, StyleKind style) {
@@ -111,7 +124,7 @@ final class MapVisualStyleProcessors {
                 boolean water = data.waterAt(index);
                 int relief = data.facts().reliefHeightAt(index);
                 int color = pixels[z * edge + x];
-                color = applyStyle(color, water, baseX + sx, baseZ + sz, style, false);
+                color = applySatelliteStyle(color, water, baseX + sx, baseZ + sz, style);
 
                 if (relief != SurfaceTile.UNKNOWN_HEIGHT) {
                     int left = data.reliefAt(sx - stride, sz, relief);
@@ -127,8 +140,6 @@ final class MapVisualStyleProcessors {
             HandDrawnMapData data, int[] pixels, int stride, StyleKind style) {
         int edge = SurfaceTile.SIZE / stride;
         int sampleOffset = Math.max(0, stride / 2);
-        int baseX = data.key().x() * SurfaceTile.SIZE;
-        int baseZ = data.key().z() * SurfaceTile.SIZE;
         int shorelineRadius = Math.max(2, Math.min(HandDrawnMapData.CELL_SIZE, stride));
         for (int z = 0; z < edge; z++) {
             for (int x = 0; x < edge; x++) {
@@ -137,7 +148,7 @@ final class MapVisualStyleProcessors {
                 int waterPercent = data.waterPercentAtPixel(sx, sz);
                 boolean water = waterPercent >= HandDrawnMapData.WATER_THRESHOLD;
                 int color = pixels[z * edge + x];
-                color = applyStyle(color, water, baseX + sx, baseZ + sz, style, true);
+                color = styleColor(color, water, style, true);
 
                 if (water) {
                     int depth = data.waterDepthAtPixel(sx, sz);
@@ -170,27 +181,40 @@ final class MapVisualStyleProcessors {
         }
     }
 
-    private static int applyStyle(
-            int rgb, boolean water, int worldX, int worldZ, StyleKind style, boolean handDrawn) {
+    private static int applySatelliteStyle(int rgb, boolean water, int worldX, int worldZ, StyleKind style) {
+        if (rgb == 0) return 0;
+        // Cache the position-independent RGB conversion. Grain and relief
+        // still depend on the original pixel and its location.
+        int key = (((rgb & 0xffffff) << 3) | (style.ordinal() << 1) | (water ? 1 : 0)) + 1;
+        int slot = (key * 0x9e3779b9) >>> (Integer.SIZE - SATELLITE_CACHE_BITS);
+        long cached = SATELLITE_COLORS.getOpaque(slot);
+        int color;
+        if ((int) (cached >>> Integer.SIZE) == key) {
+            color = (int) cached;
+        } else {
+            color = styleColor(rgb, water, style, false);
+            SATELLITE_COLORS.setOpaque(slot, ((long) key << Integer.SIZE) | Integer.toUnsignedLong(color));
+        }
+        return offset(color, noise(worldX, worldZ, style.noiseRange) - style.noiseRange / 2);
+    }
+
+    private static int styleColor(int rgb, boolean water, StyleKind style, boolean handDrawn) {
         if (rgb == 0) return 0;
         return switch (style) {
-            case MODERN -> modern(rgb, water, worldX, worldZ, handDrawn);
-            case ANCIENT -> ancient(rgb, water, worldX, worldZ, handDrawn);
-            case ANIME -> anime(rgb, water, worldX, worldZ, handDrawn);
+            case MODERN -> modern(rgb, water, handDrawn);
+            case ANCIENT -> ancient(rgb, water, handDrawn);
+            case ANIME -> anime(rgb, water, handDrawn);
         };
     }
 
-    private static int modern(
-            int rgb, boolean water, int worldX, int worldZ, boolean handDrawn) {
+    private static int modern(int rgb, boolean water, boolean handDrawn) {
         int paper = water ? 0x91bbc6 : 0xe7ede8;
         int result = mix(rgb, paper, water ? (handDrawn ? 38 : 18) : (handDrawn ? 32 : 12));
         result = desaturate(result, handDrawn ? 25 : 10);
-        result = adjust(result, handDrawn ? 1.06 : 1.02);
-        return handDrawn ? result : offset(result, noise(worldX, worldZ, 3) - 1);
+        return adjust(result, handDrawn ? 1.06 : 1.02);
     }
 
-    private static int ancient(
-            int rgb, boolean water, int worldX, int worldZ, boolean handDrawn) {
+    private static int ancient(int rgb, boolean water, boolean handDrawn) {
         int result;
         if (water) {
             result = mix(rgb, 0x789895, handDrawn ? 62 : 52);
@@ -206,18 +230,15 @@ final class MapVisualStyleProcessors {
             result = mix(sepia(rgb), 0xd1b47b, 32);
             result = desaturate(result, 18);
         }
-        result = quantizeColor(result, handDrawn ? 18 : 12);
-        return handDrawn ? result : offset(result, noise(worldX, worldZ, 7) - 3);
+        return quantizeColor(result, handDrawn ? 18 : 12);
     }
 
-    private static int anime(
-            int rgb, boolean water, int worldX, int worldZ, boolean handDrawn) {
+    private static int anime(int rgb, boolean water, boolean handDrawn) {
         int target = water ? 0x6cbfe7 : 0x9fd17b;
         int result = mix(rgb, target, handDrawn ? 34 : 15);
         result = saturate(result, handDrawn ? 32 : 18);
         result = adjust(result, handDrawn ? 1.08 : 1.04);
-        result = quantizeColor(result, handDrawn ? 18 : 10);
-        return handDrawn ? result : offset(result, noise(worldX, worldZ, 5) - 2);
+        return quantizeColor(result, handDrawn ? 18 : 10);
     }
 
     private static int applyHandDrawnForest(
@@ -278,6 +299,7 @@ final class MapVisualStyleProcessors {
 
     private static int applyRelief(
             int color, int relief, int left, int up, StyleKind style, boolean handDrawn) {
+        if (relief == left && relief == up) return color;
         int gradient = Math.max(Math.abs(relief - left), Math.abs(relief - up));
         int step = style == StyleKind.ANCIENT ? 8 : style == StyleKind.ANIME ? 10 : 12;
         boolean contour = Math.floorDiv(relief, step) != Math.floorDiv(left, step)
