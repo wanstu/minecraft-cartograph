@@ -120,7 +120,18 @@ public final class SavedChunkSurface {
             if(!(start.get("id") instanceof String id))throw new IOException("Structure start id");
             if(id.equals("INVALID")||id.equals("minecraft:empty"))continue;
             if(number(start,"ChunkX")!=x||number(start,"ChunkZ")!=z)throw new IOException("Structure start coordinates");
-            try{out.add(new StructureIndex.Start(entry.getKey(),x,z));}
+            try{
+                var footprint=new StructureIndex.Footprint();
+                if(start.get("Children") instanceof List<?> pieces){
+                    for(Object piece:pieces){
+                        Object box=compound(piece).get("BB");
+                        if(box instanceof int[] bb&&bb.length==6&&bb[1]<=bb[4])
+                            footprint.add(bb[0],bb[2],bb[3],bb[5]);
+                        else footprint.invalidate();
+                    }
+                }
+                out.add(footprint.finish(entry.getKey(),x,z));
+            }
             catch(IllegalArgumentException ex){throw new IOException("Structure key",ex);}
         }
         return List.copyOf(out);
@@ -175,6 +186,7 @@ public final class SavedChunkSurface {
                 else if(depth==0&&key.equals("sections")&&type==9)value=sections(depth+1);
                 else if(depth==0&&key.equals("structures")&&type==10)value=compound(depth+1,Set.of("starts"));
                 else if(depth==1&&key.equals("starts")&&type==10)value=structureStarts(depth+1);
+                else if(depth==3&&key.equals("Children")&&type==9)value=structurePieces(depth+1);
                 else if(keep==SECTION&&(key.equals("block_states")||key.equals("biomes"))&&type==10)value=compound(depth+1,PALETTE);
                 else value=value(type,depth+1);
                 if(m.put(key,value)!=null)throw new IOException("Duplicate NBT key");
@@ -185,9 +197,17 @@ public final class SavedChunkSurface {
             while(true){
                 int type=in.readUnsignedByte();if(type==0)return out;
                 String key=in.readUTF();
-                if(type!=10||out.size()>=128||out.put(key,compound(depth+1,Set.of("id","ChunkX","ChunkZ")))!=null)
+                if(type!=10||out.size()>=128||out.put(key,compound(depth+1,Set.of("id","ChunkX","ChunkZ","Children")))!=null)
                     throw new IOException("Structure start compound");
             }
+        }
+        private List<?> structurePieces(int depth)throws IOException{
+            visit(depth);int type=in.readUnsignedByte(),n=count(1);
+            if(n>MAX_NODES||(type==0&&n!=0))throw new IOException("Structure piece list");
+            if(type!=10||n>4096){for(int i=0;i<n;i++)skip(type,depth+1);return List.of();}
+            List<Object> pieces=new ArrayList<>(n);
+            for(int i=0;i<n;i++)pieces.add(compound(depth+1,Set.of("BB")));
+            return pieces;
         }
         private List<?> sections(int depth)throws IOException{
             visit(depth);int type=in.readUnsignedByte(),n=count(1);

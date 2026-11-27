@@ -49,7 +49,9 @@ public final class SavedChunkSurfaceTest{
             tag(out,10,"structures");tag(out,10,"starts");
             tag(out,10,"minecraft:village_plains");
             str(out,"id","minecraft:village_plains");integer(out,"ChunkX",x);integer(out,"ChunkZ",z);
-            tag(out,9,"Children");out.writeByte(10);out.writeInt(1);str(out,"id","ignored_piece");end(out);end(out);
+            tag(out,9,"Children");out.writeByte(10);out.writeInt(2);
+            str(out,"id","ignored_piece");tag(out,11,"BB");out.writeInt(6);for(int v:new int[]{-40,64,48,-20,75,60})out.writeInt(v);end(out);
+            str(out,"id","ignored_piece");tag(out,11,"BB");out.writeInt(6);for(int v:new int[]{-22,60,60,-10,72,80})out.writeInt(v);end(out);end(out);
             tag(out,10,"minecraft:stronghold");str(out,"id","INVALID");end(out);
             end(out);tag(out,10,"References");longs(out,"minecraft:monument",new long[]{42});end(out);end(out);end(out);
         }
@@ -57,7 +59,7 @@ public final class SavedChunkSurfaceTest{
     }
     public static void main(String[] args)throws Exception{
         byte[] bytes=fixture();
-        check(SavedChunkSurface.decode(withStarts(bytes,-2,3),-2,3,-16,16).starts().equals(List.of(new StructureIndex.Start("minecraft:village_plains",-2,3))),"real start only, references and invalid excluded");
+        check(SavedChunkSurface.decode(withStarts(bytes,-2,3),-2,3,-16,16).starts().equals(List.of(new StructureIndex.Start("minecraft:village_plains",-2,3,-25,64,true))),"real start only, references and invalid excluded");
         try{SavedChunkSurface.decode(withStarts(bytes,-1,3),-2,3,-16,16);throw new AssertionError("mismatched start");}catch(IOException expected){}
         var s=SavedChunkSurface.decode(bytes,-2,3,-16,16);
         var c=s.columns();

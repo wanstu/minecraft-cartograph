@@ -91,7 +91,7 @@ public final class ArchiveReconcilerTest{
             try(var archive=new ArchiveReconciler(regions,target.resolve("structure-fixture-source"),-16,16,
                     source->FreshRegionBuilder.Columns.fromEntries(map(source)),structures,()->{})){
                 var p=drain(archive,world,dirty,gate);
-                check(p.committed()==0&&structures.matches(-2,3,List.of(new StructureIndex.Start("minecraft:village_plains",-2,3))),"saved structure only update");
+                check(p.committed()==0&&structures.matches(-2,3,List.of(new StructureIndex.Start("minecraft:village_plains",-2,3,-25,64,true))),"saved structure only update");
             }
             structures.replace(-2,3,List.of(new StructureIndex.Start("test:live",-2,3)));gate.committed(-2,3);
             write(file,modified);

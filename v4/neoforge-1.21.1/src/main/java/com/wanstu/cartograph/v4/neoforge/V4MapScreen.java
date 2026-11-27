@@ -120,6 +120,7 @@ final class V4MapScreen extends Screen {
             drawStructureIcon(g,x,y,description.category());
             if(displayed<=32){
                 String name=Component.translatableWithFallback(description.translationKey(),description.fallback()).getString();
+                if(!start.exactCenter())name="~ "+name;
                 g.drawCenteredString(font,font.plainSubstrByWidth(name,100),x,y+7,0xffb7e1ee);
             }
         }

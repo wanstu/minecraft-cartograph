@@ -44,7 +44,7 @@ public final class WorldIoService {
             var it=dimensions.values().iterator();it.next().close();it.remove();
         }
         Path path=root.resolve(directory(key));
-        d=new Dimension(new WorldGeography(path,4,32,8L*1024*1024,8L*1024*1024,presentationChanges(key)),new SavedDirtyIndex(path),new StructureIndex(path.resolve("structures")));
+        d=new Dimension(new WorldGeography(path,4,32,8L*1024*1024,8L*1024*1024,presentationChanges(key)),new SavedDirtyIndex(path),new StructureIndex(path.resolve("structures-v2")));
         dimensions.put(key,d);return d;
     }
     private <T> CompletableFuture<T> submit(Callable<T> operation){
@@ -97,7 +97,7 @@ public final class WorldIoService {
         directory(dimension);Objects.requireNonNull(regions);Objects.requireNonNull(mapper);
         return submit(()->{
             var d=open(dimension);
-            if(d.archive==null)d.archive=new ArchiveReconciler(regions,root.resolve(directory(dimension)).resolve("source-structures"),minY,height,mapper,d.structures,()->structureCounter(dimension).incrementAndGet());
+            if(d.archive==null)d.archive=new ArchiveReconciler(regions,root.resolve(directory(dimension)).resolve("source-structures-v2"),minY,height,mapper,d.structures,()->structureCounter(dimension).incrementAndGet());
             var p=d.archive.step(d.world,d.dirty,gate(dimension),max);
             return new ArchiveProgress(p.decoded(),p.unchanged(),p.committed(),p.deferred(),p.sourceErrors(),p.discovered(),p.pending());
         });

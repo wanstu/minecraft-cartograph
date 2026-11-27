@@ -108,7 +108,13 @@ public final class CartographV4Dev {
                         var start=entry.getValue();var id=registry.getKey(entry.getKey());
                         if(start==null||!start.isValid()||id==null)continue;
                         if(start.getChunkPos().x!=x||start.getChunkPos().z!=z)continue;
-                        starts.add(new StructureIndex.Start(id.toString(),x,z));
+                        var footprint=new StructureIndex.Footprint();
+                        var pieces=start.getPieces();
+                        if(pieces.size()<=4096)for(var piece:pieces){
+                            var box=piece.getBoundingBox();
+                            footprint.add(box.minX(),box.minZ(),box.maxX(),box.maxZ());
+                        }else footprint.invalidate();
+                        starts.add(footprint.finish(id.toString(),x,z));
                     }
                 }
                 return io.write(key,x,z,columns,starts);
