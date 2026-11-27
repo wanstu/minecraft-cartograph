@@ -96,7 +96,7 @@ final class V4ContourLayer implements AutoCloseable {
         finally{VertexBuffer.unbind();}
     }
     void drawLabels(GuiGraphics graphics,Font font,MapCamera camera,MapProjection p,int width,int height,
-                    Object terrain,java.util.function.Predicate<ContourLabelVisibility.Anchor> occlusionCheck){
+                    MapHudLayout hud,Object terrain,java.util.function.Predicate<ContourLabelVisibility.Anchor> occlusionCheck){
         if(buffer==null)return;
         boolean raised=camera.elevationDegrees()!=90;
         if(raised)visibility.begin(camera,terrain);
@@ -106,7 +106,7 @@ final class V4ContourLayer implements AutoCloseable {
             int x=(int)Math.round(width/2.0+p.screenX(label.x(),label.z()));
             int y=(int)Math.round(height/2.0+p.screenY(label.x(),label.y(),label.z()));
             String value=Integer.toString(label.height());int w=font.width(value);
-            if(x-w/2<4||x+w/2>width-4||y<114||y>height-12)continue;
+            if(!hud.permitsLabel(x,y,w/2+3,7))continue;
             boolean overlap=false;
             for(int[] prev:occupied)if(Math.abs(prev[0]-x)<(prev[2]+w)/2+24&&Math.abs(prev[1]-y)<24){overlap=true;break;}
             if(overlap)continue;

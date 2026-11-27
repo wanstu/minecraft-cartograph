@@ -14,16 +14,14 @@ final class V4LayerPanel {
     private static final StructureCatalog.Category[] CATEGORIES=StructureCatalog.Category.values();
     private final MapLayers state;
     private boolean open,dragging,captured;
-    private int x=-1,y=24,w,h,scroll,rows;
+    private int x=-1,y=38,w,h,scroll,rows;
     V4LayerPanel(MapLayers state){this.state=state;}
-    private int buttonX(int width){return Math.max(0,width-84);}
-    private boolean button(double mx,double my,int width){return mx>=buttonX(width)&&mx<width-4&&my>=3&&my<22;}
     private static String tr(String key){return Component.translatable("cartograph_v4.layers."+key).getString();}
     private void layout(int width,int height){
         w=Math.min(192,Math.max(1,width-8));
         rows=Math.max(0,Math.min(COUNT,(height-HEADER-8)/ROW));
         h=HEADER+rows*ROW;
-        if(x<0)x=width-w-4;
+        if(x<0)x=34;
         x=Math.max(0,Math.min(x,width-w));y=Math.max(0,Math.min(y,height-h));
         scroll=Math.max(0,Math.min(scroll,COUNT-rows));
     }
@@ -31,9 +29,6 @@ final class V4LayerPanel {
     boolean isOpen(){return open;}
     void close(){open=false;dragging=false;}
     void render(GuiGraphics g,Font font,int width,int height,int mx,int my){
-        int bx=buttonX(width);
-        g.fill(bx,3,width-4,22,open?0xff39566a:0xff2c3943);
-        g.drawCenteredString(font,font.plainSubstrByWidth(tr("title"),Math.max(1,width-4-bx-6)),(bx+width-4)/2,9,0xffe4edf3);
         if(!open)return;
         layout(width,height);
         g.fill(x,y,x+w,y+h,0xff202932);
@@ -64,9 +59,8 @@ final class V4LayerPanel {
         }
     }
     boolean click(double mx,double my,int button,int width,int height){
-        if(!open&&!button(mx,my,width))return false;
+        if(!open)return false;
         captured=true;
-        if(!open){if(button==0)toggle();return true;}
         layout(width,height);
         if(mx<x||mx>=x+w||my<y||my>=y+h){close();return true;}
         if(button!=0)return true;

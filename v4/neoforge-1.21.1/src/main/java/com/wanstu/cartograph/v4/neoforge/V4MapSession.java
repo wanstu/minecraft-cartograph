@@ -285,7 +285,7 @@ final class V4MapSession implements AutoCloseable {
         return complete&&picker.result()==null;
     }
     /** Static world-relative vertices. Each camera movement changes just the affine transform. */
-    void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height){
+    void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height,MapHudLayout hud){
         drawCalls=quads=0;lastRenderedCamera=null;drawnParts=List.of();
         if(texture==null){clearAnchors();return;}
         boolean raised=camera.elevationDegrees()!=90;
@@ -332,7 +332,7 @@ final class V4MapSession implements AutoCloseable {
             RenderSystem.disableBlend();
         }
         if(layers.visible(MapLayers.Layer.CONTOURS)&&contours!=null)
-            contours.drawLabels(graphics,Minecraft.getInstance().font,camera,projection,width,height,drawnParts,
+            contours.drawLabels(graphics,Minecraft.getInstance().font,camera,projection,width,height,hud,drawnParts,
                 anchor->contourAnchorVisible(camera,anchor));
     }
     private void clearAnchors(){anchorParts=Map.of();anchorDependencies=List.of();}

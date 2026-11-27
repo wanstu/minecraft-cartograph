@@ -3,6 +3,7 @@ package com.wanstu.cartograph.v4.neoforge;
 import com.wanstu.cartograph.v4.*;
 import com.wanstu.cartograph.v4.MarkerStore.Marker;
 import com.wanstu.cartograph.v4.MapLayers.Layer;
+import com.wanstu.cartograph.v4.MapHudLayout.Action;
 import java.util.*;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -13,6 +14,10 @@ import org.lwjgl.glfw.GLFW;
 final class V4MapScreen extends Screen {
     private final V4MapSession session;
     private final V4LayerPanel layerPanel;
+    private final MapHudLayout.Gesture gesture=new MapHudLayout.Gesture();
+    private MapHudLayout hud;
+    private int hudWidth,hudHeight;
+    private boolean diagnostics,hudDiagnostics;
     private MapCamera camera,lastCamera;
     private MapProjection projection;
     private MapViewport.Plan plan;
@@ -25,11 +30,16 @@ final class V4MapScreen extends Screen {
     private int[] regionCorner;
     private static final double[] ANGLES={90,60,45,30};
     V4MapScreen(V4MapSession session,double x,double z){
-        super(Component.literal("Cartograph V4 Dev"));this.session=session;layerPanel=new V4LayerPanel(session.layers);
+        super(Component.literal("Cartograph V4"));this.session=session;layerPanel=new V4LayerPanel(session.layers);
         var player=net.minecraft.client.Minecraft.getInstance().player;
         camera=new MapCamera(x,player==null?64:player.getY(),z,1,session.yaw,session.elevation);
     }
+    @Override protected void init(){gesture.cancel();layerPanel.release();hud=null;}
     @Override public boolean isPauseScreen(){return false;}
+    private MapHudLayout hud(){
+        if(hud==null||hudWidth!=width||hudHeight!=height||hudDiagnostics!=diagnostics){hud=new MapHudLayout(width,height,diagnostics);hudWidth=width;hudHeight=height;hudDiagnostics=diagnostics;}
+        return hud;
+    }
     private static double clamp(double v){return Math.max(-29_999_999,Math.min(29_999_999,v));}
     private double minScale(){return Math.max(3.0/1024,Math.max(width,height)/(1024.0*32*12));}
     private void setCamera(MapCamera c){
@@ -49,32 +59,81 @@ final class V4MapScreen extends Screen {
     @Override public void render(GuiGraphics graphics,int mouseX,int mouseY,float partialTick){
         graphics.fill(0,0,width,height,0xff242b30);
         updatePlan();session.prepare(plan.keys());
-        session.draw(graphics,plan.keys(),camera,projection,width,height);
+        session.draw(graphics,plan.keys(),camera,projection,width,height,hud());
         drawRegions(graphics,mouseX,mouseY);
         if(minecraft!=null&&minecraft.player!=null){
             var p=projection.project(minecraft.player.getX(),minecraft.player.getY(),minecraft.player.getZ());
             int px=(int)Math.round(width/2.0+p.x()),pz=(int)Math.round(height/2.0+p.y());
-            if(px>=0&&px<width&&pz>=0&&pz<height){
+            if(hud().permitsLabel(px,pz,5,5)){
                 graphics.fill(px-4,pz-4,px+5,pz+5,0xff111111);
                 graphics.fill(px-2,pz-2,px+3,pz+3,0xffffcc55);
             }
         }
         drawMarkers(graphics);
         drawStructures(graphics);
-        graphics.fill(0,0,width,107,0xde151a20);
-        graphics.drawString(font,font.plainSubstrByWidth("Cartograph V4 | "+session.style.name()+" | LOD "+plan.lod(),Math.max(1,width-96)),8,6,0xffffffff);
-        graphics.drawString(font,"Drag / scroll | 1-5 styles | R center | Esc close",8,17,0xffc1cad0);
-        graphics.drawString(font,"T tilt "+(int)camera.elevationDegrees()+" | Q/E rotate "+(int)camera.yawDegrees()+" | N north-up",8,28,0xffc1cad0);
-        graphics.drawString(font,"X "+(int)camera.x()+" Z "+(int)camera.z()+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size()+" | quads "+session.quads()+" | tex "+session.uploads()+" mesh "+session.meshUploads(),8,39,0xff9fadb8);
-        String hit=picked==null?"Right click: add / edit marker":"Pick "+(int)Math.floor(picked.world().x())+" "+(int)Math.floor(picked.world().y())+" "+(int)Math.floor(picked.world().z())+" | LOD "+picked.lod()+(picked.side()?" side":" top");
-        graphics.drawString(font,hit,8,50,0xffc1cad0);
-        graphics.drawString(font,"C: "+session.contourStatus(),8,61,0xffc1cad0);
-        String m=session.markers.busy()?"Markers loading/saving":session.markers.error!=null?"Marker error: "+session.markers.error:"B: manage markers | V: "+(session.layers.visible(Layer.MARKERS)?"hide":"show");
-        graphics.drawString(font,font.plainSubstrByWidth(m,Math.max(1,width-16)),8,72,0xffc1cad0);
-        graphics.drawString(font,font.plainSubstrByWidth("S: "+structureStatus,Math.max(1,width-16)),8,83,0xffc1cad0);
-        String regionHint=selectingRegion?(regionCorner==null?"Right click first corner":"Right click second corner")+" | Esc cancel":session.regions.error!=null?session.regions.error:"G: regions | H: "+(session.layers.visible(Layer.REGIONS)?"hide":"show");
-        graphics.drawString(font,font.plainSubstrByWidth(regionHint,Math.max(1,width-16)),8,94,0xffc1cad0);
+        drawHud(graphics,mouseX,mouseY);
         layerPanel.render(graphics,font,width,height,mouseX,mouseY);
+    }
+    private static String tr(String key,Object... args){return Component.translatable("cartograph_v4.hud."+key,args).getString();}
+    private void activate(Action action){
+        gesture.cancel();
+        switch(action){
+            case LAYERS->layerPanel.toggle();
+            case MARKERS->minecraft.setScreen(new V4MarkerManager(this,session));
+            case REGIONS->minecraft.setScreen(new V4RegionManager(this,session.regions));
+            case DIAGNOSTICS->diagnostics=!diagnostics;
+            case ZOOM_IN->zoomCenter(1.25);
+            case ZOOM_OUT->zoomCenter(.8);
+            case CENTER->centerPlayer();
+            case NORTH->setCamera(camera.withAngles(0,90));
+            case CLOSE->onClose();
+        }
+    }
+    private void centerPlayer(){
+        if(minecraft!=null&&minecraft.player!=null)setCamera(new MapCamera(minecraft.player.getX(),minecraft.player.getY(),minecraft.player.getZ(),camera.pixelsPerBlock(),camera.yawDegrees(),camera.elevationDegrees()));
+    }
+    private void zoomCenter(double factor){
+        setCamera(camera.zoomAt(Math.max(minScale(),Math.min(16,camera.pixelsPerBlock()*factor)),new MapCamera.World(camera.x(),camera.y(),camera.z())));
+    }
+    private static void panel(GuiGraphics g,MapHudLayout.Rect r,int color){if(r.w()>0&&r.h()>0)g.fill(r.x(),r.y(),r.x()+r.w(),r.y()+r.h(),color);}
+    private void drawHud(GuiGraphics g,int mx,int my){
+        var layout=hud();
+        panel(g,layout.header(),0xef192329);panel(g,layout.status(),0xe9192329);
+        int available=Math.max(1,width-38);
+        g.drawString(font,font.plainSubstrByWidth("Cartograph  |  "+session.dimension,available),8,5,0xffecf2f5);
+        String coords=tr("center_coords",(int)Math.floor(camera.x()),(int)Math.floor(camera.z()));
+        String style=tr("style."+session.style.name().toLowerCase(Locale.ROOT));
+        g.drawString(font,font.plainSubstrByWidth(coords+"  |  "+style+"  |  "+(int)camera.elevationDegrees()+"°",available),8,18,0xffbacbd4);
+        String status=selectingRegion?tr(regionCorner==null?"first_corner":"second_corner"):
+            session.markers.error!=null?session.markers.error:session.regions.error!=null?session.regions.error:
+            session.markers.busy()||session.regions.busy()?tr("loading"):tr("hint");
+        if(height>=18)g.drawString(font,font.plainSubstrByWidth(status,Math.max(1,width-12)),6,height-13,0xffc7d6df);
+        var d=layout.debug();
+        if(d.w()>0){
+            panel(g,d,0xf3212e37);
+            String[] lines={"LOD "+plan.lod()+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size(),
+                "Draw "+session.drawCalls()+" | quads "+session.quads(),
+                "Tex "+session.uploads()+" | mesh "+session.meshUploads(),
+                session.contourStatus(),structureStatus,
+                picked==null?"Pick —":"Pick "+(int)Math.floor(picked.world().x())+" "+(int)Math.floor(picked.world().y())+" "+(int)Math.floor(picked.world().z())+" | LOD "+picked.lod()};
+            for(int i=0;i<lines.length&&i*11+14<=d.h();i++)g.drawString(font,font.plainSubstrByWidth(lines[i],Math.max(1,d.w()-12)),d.x()+6,d.y()+5+i*11,0xffc3d4df);
+        }
+        Action hovered=null;MapHudLayout.Rect hoverRect=null;
+        for(var control:layout.controls()){
+            var r=control.bounds();boolean hover=r.contains(mx,my);
+            boolean active=control.action()==Action.LAYERS&&layerPanel.isOpen()||control.action()==Action.DIAGNOSTICS&&diagnostics;
+            panel(g,r,active?0xff405a69:hover?0xff374954:0xeb202e37);
+            g.renderOutline(r.x(),r.y(),r.w(),r.h(),0xff627b8a);
+            String symbol=switch(control.action()){case LAYERS->"≡";case MARKERS->"◆";case REGIONS->"□";case DIAGNOSTICS->"i";case ZOOM_IN->"+";case ZOOM_OUT->"−";case CENTER->"⊙";case NORTH->"N";case CLOSE->"×";};
+            g.drawCenteredString(font,symbol,r.x()+r.w()/2,r.y()+Math.max(0,(r.h()-8)/2),0xffe4eef4);
+            if(hover){hovered=control.action();hoverRect=r;}
+        }
+        if(hovered!=null&&!layerPanel.isOpen()){
+            String label=font.plainSubstrByWidth(tr(hovered.name().toLowerCase(Locale.ROOT)),Math.max(1,width-12));
+            int w=font.width(label)+8,x=Math.max(0,Math.min(width-w,hoverRect.x()+hoverRect.w()+4)),y=Math.max(32,Math.min(height-35,hoverRect.y()));
+            if(hoverRect.x()>width/2)x=Math.max(0,hoverRect.x()-w-4);
+            g.fill(x,y,x+w,y+15,0xff182229);g.drawString(font,label,x+4,y+4,0xffe4eef4);
+        }
     }
     void centerOn(Marker m){setCamera(new MapCamera(m.x(),m.y(),m.z(),camera.pixelsPerBlock(),camera.yawDegrees(),camera.elevationDegrees()));}
     private void drawMarkers(GuiGraphics g){
@@ -84,7 +143,7 @@ final class V4MapScreen extends Screen {
         for(Marker m:snapshot.active()){
             var p=projection.project(m.x()+.5,m.y()+1,m.z()+.5);
             int x=(int)Math.round(width/2.0+p.x()),y=(int)Math.round(height/2.0+p.y());
-            if(x<8||x>=width-8||y<113||y>=height-12)continue;
+            if(!hud().permitsLabel(x,y,7,7))continue;
             boolean overlap=false;
             for(var prev:drawnMarkers)if(Math.abs(prev.x-x)<12&&Math.abs(prev.y-y)<12){overlap=true;break;}
             if(overlap)continue;
@@ -97,7 +156,7 @@ final class V4MapScreen extends Screen {
             g.drawCenteredString(font,symbol,x,y-4,color);
             if(drawnMarkers.size()<=48){
                 String name=font.plainSubstrByWidth(m.name(),100);
-                g.drawCenteredString(font,name,x,y+7,0xffffffff);
+                if(hud().permitsLabel(x,y+11,font.width(name)/2+2,6))g.drawCenteredString(font,name,x,y+7,0xffffffff);
             }
         }
     }
@@ -124,7 +183,7 @@ final class V4MapScreen extends Screen {
             var projected=projection.project(start.x()+.5,yAnchor,start.z()+.5);
             int x=(int)Math.round(width/2.0+projected.x());
             int y=(int)Math.round(height/2.0+projected.y());
-            if(x<8||x>=width-8||y<113||y>=height-12)continue;
+            if(!hud().permitsLabel(x,y,7,7))continue;
             boolean overlap=false;for(int[] at:used)if(Math.abs(at[0]-x)<16&&Math.abs(at[1]-y)<16){overlap=true;break;}
             if(overlap)continue;
             if(displayed>=96)break;
@@ -134,7 +193,8 @@ final class V4MapScreen extends Screen {
             if(displayed<=32){
                 String name=Component.translatableWithFallback(description.translationKey(),description.fallback()).getString();
                 if(approximate)name="~ "+name;
-                g.drawCenteredString(font,font.plainSubstrByWidth(name,100),x,y+7,0xffb7e1ee);
+                name=font.plainSubstrByWidth(name,100);
+                if(hud().permitsLabel(x,y+11,font.width(name)/2+2,6))g.drawCenteredString(font,name,x,y+7,0xffb7e1ee);
             }
         }
     }
@@ -194,13 +254,16 @@ final class V4MapScreen extends Screen {
             g.fill(-hw,-hh,hw,hh,0x18000000|color);
             g.renderOutline(-hw,-hh,2*hw,2*hh,0xc0000000|color);
         }finally{g.pose().popPose();}
-        if(!name.isEmpty()&&px>=8&&px<width-8&&py>=113&&py<height-12&&hw>=15&&hh>=8)
+        if(!name.isEmpty()&&hud().permitsLabel((int)px,(int)py,Math.min(60,font.width(name)/2+2),7)&&hw>=15&&hh>=8)
             g.drawCenteredString(font,font.plainSubstrByWidth(name,120),(int)px,(int)py-4,0xff000000|color);
     }
     @Override public boolean mouseClicked(double mx,double my,int button){
+        gesture.press(false,button);
         if(layerPanel.click(mx,my,button,width,height))return true;
-        if(my<107)return true;
-        if(button==0)return true;
+        var action=hud().actionAt(mx,my);
+        if(action!=null){if(button==0)activate(action);return true;}
+        if(hud().blocks(mx,my))return true;
+        if(button==0){gesture.press(true,button);return true;}
         if(button!=1)return super.mouseClicked(mx,my,button);
         if(selectingRegion){
             if(camera.elevationDegrees()!=90||session.regions.busy()||session.regions.snapshot==null)return true;
@@ -221,25 +284,27 @@ final class V4MapScreen extends Screen {
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy){
         if(layerPanel.drag(dx,dy,width,height))return true;
         if(button!=0)return super.mouseDragged(mx,my,button,dx,dy);
-        if(my<107)return true;
+        if(!gesture.canPan(button))return true;
         var p=camera.atHeight(-dx,-dy,camera.y());
         setCamera(new MapCamera(p.x(),camera.y(),p.z(),camera.pixelsPerBlock(),camera.yawDegrees(),camera.elevationDegrees()));
         return true;
     }
     @Override public boolean mouseReleased(double mx,double my,int button){
+        gesture.release(button);
         if(layerPanel.release())return true;
         return super.mouseReleased(mx,my,button);
     }
     @Override public boolean mouseScrolled(double mx,double my,double horizontal,double vertical){
-        if(layerPanel.scroll(vertical,width,height)||my<107)return true;
+        if(layerPanel.scroll(vertical,width,height)||hud().blocks(mx,my))return true;
         double next=Math.max(minScale(),Math.min(16,camera.pixelsPerBlock()*Math.pow(1.25,vertical)));
         var hit=session.pick(camera,mx-width/2.0,my-height/2.0);
         var anchor=hit==null?camera.atHeight(mx-width/2.0,my-height/2.0,camera.y()):hit.world();
         setCamera(camera.zoomAt(next,anchor));return true;
     }
     @Override public boolean keyPressed(int key,int scan,int modifiers){
-        if(key==GLFW.GLFW_KEY_L){layerPanel.toggle();return true;}
+        if(key==GLFW.GLFW_KEY_L){gesture.cancel();layerPanel.toggle();return true;}
         if(layerPanel.isOpen()){if(key==GLFW.GLFW_KEY_ESCAPE)layerPanel.close();return true;}
+        if(key==GLFW.GLFW_KEY_F3){diagnostics=!diagnostics;gesture.cancel();return true;}
         if(selectingRegion&&key==GLFW.GLFW_KEY_ESCAPE){selectingRegion=false;regionCorner=null;return true;}
         if(selectingRegion&&key==GLFW.GLFW_KEY_T)return true;
         if(key==GLFW.GLFW_KEY_G){minecraft.setScreen(new V4RegionManager(this,session.regions));return true;}
@@ -250,9 +315,7 @@ final class V4MapScreen extends Screen {
         if(key==GLFW.GLFW_KEY_C){session.layers.toggle(Layer.CONTOURS);return true;}
         if(key==GLFW.GLFW_KEY_M){onClose();return true;}
         if(key>=GLFW.GLFW_KEY_1&&key<=GLFW.GLFW_KEY_5){session.style=MapRaster.Style.values()[key-GLFW.GLFW_KEY_1];return true;}
-        if(key==GLFW.GLFW_KEY_R&&minecraft!=null&&minecraft.player!=null){
-            setCamera(new MapCamera(minecraft.player.getX(),minecraft.player.getY(),minecraft.player.getZ(),camera.pixelsPerBlock(),camera.yawDegrees(),camera.elevationDegrees()));return true;
-        }
+        if(key==GLFW.GLFW_KEY_R){centerPlayer();return true;}
         if(key==GLFW.GLFW_KEY_T){
             int i=0;while(i<ANGLES.length-1&&ANGLES[i]!=camera.elevationDegrees())i++;
             setCamera(camera.withAngles(camera.yawDegrees(),ANGLES[(i+1)%ANGLES.length]));return true;
