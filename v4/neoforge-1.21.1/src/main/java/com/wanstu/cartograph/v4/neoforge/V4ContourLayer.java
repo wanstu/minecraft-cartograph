@@ -9,7 +9,7 @@ import net.minecraft.client.renderer.GameRenderer;
 import java.util.*;
 import static com.wanstu.cartograph.v4.RegionPageStore.Key;
 
-/** Separate north-up/rotated flat overlay. Contour calculation is asynchronous; bounded GPU vertex packing runs on the render thread. */
+/** Shared flat/raised depth-aware overlay. Contour calculation is asynchronous; bounded GPU vertex packing runs on the render thread. */
 final class V4ContourLayer implements AutoCloseable {
     private static final int MAX_DRAW_SEGMENTS=8192,MAX_LABELS=16;
     private record Label(double x,double z,int height){}
@@ -20,24 +20,27 @@ final class V4ContourLayer implements AutoCloseable {
     private double originX,originZ;
     private int segments;
     private long uploads;
-    private boolean limited;
+    private boolean limited,lastRaised;
     void draw(GuiGraphics graphics,Font font,List<ContourOverlayCache.Input> inputs,MapCamera camera,
-              MapProjection projection,int width,int height){
+              MapProjection projection,int width,int height,double depthScale){
+        boolean raised=camera.elevationDegrees()!=90;
         var snapshot=cache.tick(inputs);
         List<ContourOverlayCache.Lines> ready=new ArrayList<>();
         int count=0;limited=snapshot.limited();
         for(var lines:snapshot.ready()){
-            if(lines.size()==0)continue;
-            if(count+lines.size()>MAX_DRAW_SEGMENTS){limited=true;continue;}
-            count+=lines.size();ready.add(lines);
+            int size=raised?lines.drapedSize():lines.size();
+            if(size==0)continue;
+            if(count+size>MAX_DRAW_SEGMENTS){limited=true;continue;}
+            count+=size;ready.add(lines);
         }
         ready.sort(Comparator.comparingInt((ContourOverlayCache.Lines l)->l.input().key().lod())
             .thenComparingInt(l->l.input().key().x()).thenComparingInt(l->l.input().key().z()));
-        if(!ready.equals(retained)){
-            graphics.flush();rebuild(ready);
+        if(raised!=lastRaised||!ready.equals(retained)){
+            graphics.flush();rebuild(ready,raised);lastRaised=raised;
         }
         if(buffer==null)return;
-        double[] m=MapTransform.coefficients(camera,originX,0,originZ,width,height,0,false);
+        double[] m=MapTransform.coefficients(camera,originX,0,originZ,width,height,depthScale,raised);
+        if(raised)m[11]+=.01; // bias only depth, not the projected height
         var affine=new org.joml.Matrix4f().set(
             (float)m[0],(float)m[4],(float)m[8],0,
             (float)m[1],(float)m[5],(float)m[9],0,
@@ -46,13 +49,14 @@ final class V4ContourLayer implements AutoCloseable {
         var matrix=new org.joml.Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose()).mul(affine);
         graphics.flush();
         RenderSystem.setShaderColor(1,1,1,1);
-        RenderSystem.enableBlend();RenderSystem.defaultBlendFunc();RenderSystem.disableDepthTest();
+        RenderSystem.enableBlend();RenderSystem.defaultBlendFunc();
+        if(raised){RenderSystem.enableDepthTest();RenderSystem.depthMask(false);}else RenderSystem.disableDepthTest();
         buffer.bind();
         try{buffer.drawWithShader(matrix,RenderSystem.getProjectionMatrix(),GameRenderer.getPositionColorShader());}
-        finally{VertexBuffer.unbind();RenderSystem.enableDepthTest();RenderSystem.disableBlend();}
-        drawLabels(graphics,font,projection,width,height);
+        finally{VertexBuffer.unbind();RenderSystem.depthMask(true);RenderSystem.enableDepthTest();RenderSystem.disableBlend();}
+        if(!raised)drawLabels(graphics,font,projection,width,height);
     }
-    private void rebuild(List<ContourOverlayCache.Lines> ready){
+    private void rebuild(List<ContourOverlayCache.Lines> ready,boolean raised){
         if(buffer!=null){buffer.close();buffer=null;}
         retained=List.copyOf(ready);segments=0;labels=List.of();
         if(ready.isEmpty())return;
@@ -63,17 +67,20 @@ final class V4ContourLayer implements AutoCloseable {
         for(var lines:ready){
             Key k=lines.input().key();double cell=1<<k.lod(),bx=k.x()*32*cell,bz=k.z()*32*cell;
             int step=ContourLines.interval(k.lod()),best=-1;double longest=0;boolean bestMajor=false;
-            for(int i=0;i<lines.size();i++){
-                double x0=lines.value(i,0),z0=lines.value(i,1),x1=lines.value(i,2),z1=lines.value(i,3);
-                int h=(int)lines.value(i,4);boolean major=Math.floorMod(h,step*5)==0;
+            int size=raised?lines.drapedSize():lines.size();
+            for(int i=0;i<size;i++){
+                double x0=raised?lines.drapedValue(i,0):lines.value(i,0),z0=raised?lines.drapedValue(i,1):lines.value(i,1);
+                double x1=raised?lines.drapedValue(i,2):lines.value(i,2),z1=raised?lines.drapedValue(i,3):lines.value(i,3);
+                float y=raised?lines.drapedValue(i,4):0;
+                int h=(int)(raised?lines.drapedValue(i,5):lines.value(i,4));boolean major=Math.floorMod(h,step*5)==0;
                 int r=major?255:38,g=major?230:35,b=major?181:28,a=major?225:155;
-                builder.addVertex((float)(bx+x0*cell-originX),0,(float)(bz+z0*cell-originZ)).setColor(r,g,b,a);
-                builder.addVertex((float)(bx+x1*cell-originX),0,(float)(bz+z1*cell-originZ)).setColor(r,g,b,a);
+                builder.addVertex((float)(bx+x0*cell-originX),y,(float)(bz+z0*cell-originZ)).setColor(r,g,b,a);
+                builder.addVertex((float)(bx+x1*cell-originX),y,(float)(bz+z1*cell-originZ)).setColor(r,g,b,a);
                 segments++;
                 double length=Math.hypot(x1-x0,z1-z0);
                 if(best<0||(major&&!bestMajor)||(major==bestMajor&&length>longest)){best=i;bestMajor=major;longest=length;}
             }
-            if(best>=0)candidates.add(new Label(bx+(lines.value(best,0)+lines.value(best,2))*.5*cell,
+            if(!raised&&best>=0)candidates.add(new Label(bx+(lines.value(best,0)+lines.value(best,2))*.5*cell,
                 bz+(lines.value(best,1)+lines.value(best,3))*.5*cell,(int)lines.value(best,4)));
         }
         labels=List.copyOf(candidates);

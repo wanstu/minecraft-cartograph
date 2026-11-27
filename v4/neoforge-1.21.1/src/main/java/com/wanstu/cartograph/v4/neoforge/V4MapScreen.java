@@ -41,7 +41,6 @@ final class V4MapScreen extends Screen {
         graphics.fill(0,0,width,height,0xff242b30);
         updatePlan();session.prepare(plan.keys());
         session.draw(graphics,plan.keys(),camera,projection,width,height);
-        session.drawContours(graphics,font,plan.keys(),camera,projection,width,height);
         if(minecraft!=null&&minecraft.player!=null){
             var p=projection.project(minecraft.player.getX(),minecraft.player.getY(),minecraft.player.getZ());
             int px=(int)Math.round(width/2.0+p.x()),pz=(int)Math.round(height/2.0+p.y());

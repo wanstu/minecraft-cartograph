@@ -296,6 +296,7 @@ final class V4MapSession implements AutoCloseable {
                 drawCalls++;quads+=mesh.quads;rendered.addAll(group.parts);
             }
             drawnParts=List.copyOf(rendered);lastRenderedCamera=camera;
+            drawContours(graphics,Minecraft.getInstance().font,visible,camera,projection,width,height,depthScale);
         }finally{
             VertexBuffer.unbind();
             if(raised){RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableCull();RenderSystem.enableDepthTest();}
@@ -306,8 +307,8 @@ final class V4MapSession implements AutoCloseable {
     long meshBytes(){return meshes.bytes();}
     boolean contoursEnabled;
     private V4ContourLayer contours;
-    void drawContours(GuiGraphics graphics,net.minecraft.client.gui.Font font,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height){
-        if(!contoursEnabled||camera.elevationDegrees()!=90)return;
+    void drawContours(GuiGraphics graphics,net.minecraft.client.gui.Font font,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height,double depthScale){
+        if(!contoursEnabled)return;
         if(contours==null)contours=new V4ContourLayer();
         Set<Key> exact=new HashSet<>();
         for(var part:drawnParts)if(part.target.equals(part.patch.source()))exact.add(part.target);
@@ -317,15 +318,15 @@ final class V4MapSession implements AutoCloseable {
             var center=pages.get(k);
             if(center==null||center.empty())continue;
             inputs.add(new ContourOverlayCache.Input(center,
-                pages.get(new Key(k.lod(),k.x()+1,k.z())),
-                pages.get(new Key(k.lod(),k.x(),k.z()+1)),
-                pages.get(new Key(k.lod(),k.x()+1,k.z()+1))));
+                contourNeighbor(exact,k,1,0),contourNeighbor(exact,k,0,1),contourNeighbor(exact,k,1,1)));
         }
-        contours.draw(graphics,font,inputs,camera,projection,width,height);
+        contours.draw(graphics,font,inputs,camera,projection,width,height,depthScale);
+    }
+    private MapRaster contourNeighbor(Set<Key> exact,Key k,int dx,int dz){
+        Key neighbor=new Key(k.lod(),k.x()+dx,k.z()+dz);return exact.contains(neighbor)?pages.get(neighbor):null;
     }
     String contourStatus(){
         if(!contoursEnabled)return "Contours off";
-        if(elevation!=90)return "Contours: flat view only";
         if(contours==null)return "Contours loading";
         return "Contours "+contours.segments()+" | VBO "+contours.uploads()+(contours.limited()?" | budget limited":"");
     }
