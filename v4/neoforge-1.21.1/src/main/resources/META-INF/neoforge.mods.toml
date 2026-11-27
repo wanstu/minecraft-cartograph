@@ -1,0 +1,22 @@
+modLoader="javafml"
+loaderVersion="[1,)"
+license="All Rights Reserved"
+[[mods]]
+modId="cartograph_v4_dev"
+version="0.4.0-dev"
+displayName="Cartograph V4 Development Capture"
+description='''Isolated development-only capture adapter; no map frontend.'''
+[[dependencies.cartograph_v4_dev]]
+modId="neoforge"
+type="required"
+versionRange="[21.1.265,)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.cartograph_v4_dev]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1]"
+ordering="NONE"
+side="BOTH"
+[[mixins]]
+config="cartograph_v4_dev.mixins.json"

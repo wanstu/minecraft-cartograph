@@ -23,7 +23,8 @@ public final class WorldGeography {
     private final Set<RegionShard.Id> published=new HashSet<>();
     private final LinkedHashMap<RegionShard.Id,RegionShard> shards=new LinkedHashMap<>(16,.75f,true);
     private final LinkedHashMap<Key,Cached> pages=new LinkedHashMap<>(16,.75f,true);
-    private long bytes,hits,assemblies,sourceReads,scanBytes,invalidations,generation;
+    private static final java.util.concurrent.atomic.AtomicLong GENERATIONS=new java.util.concurrent.atomic.AtomicLong();
+    private long bytes,hits,assemblies,sourceReads,scanBytes,invalidations;
     private IOException failure;
     private final Thread owner=Thread.currentThread();
     public WorldGeography(Path root,int shardLimit,int pageLimit,long pageBudget,long shardBudget)throws IOException{
@@ -79,7 +80,7 @@ public final class WorldGeography {
             }
         }
         // Generation is a process-local upload token. Changes and evictions get new tokens.
-        long token=Math.incrementExact(generation);generation=token;assemblies++;
+        long token=GENERATIONS.updateAndGet(Math::incrementExact);assemblies++;
         Page p=Page.fromSlots(key,token,slots);
         RenderPage result=new RenderPage(token,p);
         long weight=RegionPageStore.estimatedWeight(p);
@@ -90,6 +91,11 @@ public final class WorldGeography {
             pages.put(key,new Cached(result,weight));bytes+=weight;
         }
         return result;
+    }
+    /** Create a new empty shard without forcing any Minecraft chunk generation. */
+    public void ensureShard(RegionShard.Id id)throws IOException{
+        available();
+        if(!published.contains(id))buildFresh(id,(x,z)->null);
     }
     /** Fresh-only backfill owned by this IO worker. No map viewport dependency. */
     public FreshRegionBuilder.Result buildFresh(RegionShard.Id id,FreshRegionBuilder.PackedSource source)throws IOException{

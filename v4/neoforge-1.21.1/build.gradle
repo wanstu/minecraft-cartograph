@@ -1,0 +1,24 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+version = '0.4.0-dev'
+group = 'com.wanstu.cartograph.v4'
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+base { archivesName = 'Cartograph-V4-Dev' }
+neoForge {
+    version = providers.gradleProperty('neo_version').getOrElse('21.1.265')
+    parchment {
+        mappingsVersion = '2024.11.17'
+        minecraftVersion = '1.21.1'
+    }
+    runs {
+        server { server(); programArgument '--nogui' }
+        client { client() }
+    }
+    mods { cartograph_v4_dev { sourceSet(sourceSets.main) } }
+}
+sourceSets.main.java.srcDir '../core/src/main/java'
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+tasks.withType(JavaExec).configureEach { standardInput = System.in }
