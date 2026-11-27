@@ -98,6 +98,15 @@ public final class WorldIoService {
     public CompletableFuture<Integer> pendingDirty(String dimension){
         directory(dimension);return submit(()->open(dimension).dirty.size());
     }
+    private MarkerStore markerStore(String dimension){return new MarkerStore(root.resolve(directory(dimension)).resolve("markers.cv4"));}
+    public CompletableFuture<MarkerStore.Snapshot> markers(String dimension){
+        directory(dimension);
+        return submit(()->{try{return markerStore(dimension).read();}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
+    }
+    public CompletableFuture<MarkerStore.Snapshot> changeMarker(String dimension,long expected,MarkerStore.Change change){
+        directory(dimension);Objects.requireNonNull(change);
+        return submit(()->{try{return markerStore(dimension).apply(expected,change);}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
+    }
     public int queued(){return io.getQueue().size();}
     public boolean failed(){return failure!=null;}
     /** Call only at world stop, not normal ticks. Existing queued IO is drained. */

@@ -29,6 +29,16 @@ public final class WorldIoServiceTest {
                 check(feed.since(before).keys().contains(key)&&feed.since(before).keys().size()==11,"durable local invalidation");
                 var updated=io.raster("minecraft:overworld",key).get(15,TimeUnit.SECONDS);
                 check(updated.generation()!=raster.generation()&&updated.surface(16)==75,"updated async raster");
+                var marker=MarkerStoreTest.marker(1);
+                var markerChange=MarkerStoreTest.change(MarkerStore.Action.UPSERT,marker);
+                var markers=io.changeMarker("minecraft:overworld",0,markerChange).get(15,TimeUnit.SECONDS);
+                check(markers.active().equals(List.of(marker))&&markers.revision()==1,"async marker commit");
+                check(io.markers("minecraft:the_nether").get(15,TimeUnit.SECONDS).active().isEmpty(),"marker dimension isolation");
+                try{
+                    io.changeMarker("minecraft:overworld",0,markerChange).get(15,TimeUnit.SECONDS);
+                    throw new AssertionError("Stale marker accepted");
+                }catch(ExecutionException expected){check(expected.getCause() instanceof IllegalStateException,"stale marker failure");}
+                check(io.markers("minecraft:overworld").get(15,TimeUnit.SECONDS).equals(markers),"stale mutation preserves data");
                 var queue=new DirtyHandoffQueue(4);
                 var receipt=queue.submit(new InactiveDirty(new Position(-1,0),1));
                 check(io.handoff("minecraft:overworld",queue).get(15,TimeUnit.SECONDS)==1&&receipt.isDone(),"dirty handoff");
@@ -37,8 +47,16 @@ public final class WorldIoServiceTest {
             try{
                 check(io.pendingDirty("minecraft:overworld").get(15,TimeUnit.SECONDS)==1,"durable dirty restart");
                 check(io.pendingDirty("minecraft:the_nether").get(15,TimeUnit.SECONDS)==0,"dirty dimension separation");
+                check(io.markers("minecraft:overworld").get(15,TimeUnit.SECONDS).active().equals(List.of(MarkerStoreTest.marker(1))),"markers restart");
+                Path markerFile=root.resolve(HexFormat.of().formatHex("minecraft:overworld".getBytes(java.nio.charset.StandardCharsets.UTF_8))).resolve("markers.cv4");
+                byte[] broken=Files.readAllBytes(markerFile);broken[broken.length-1]^=1;Files.write(markerFile,broken);
+                try{
+                    io.markers("minecraft:overworld").get(15,TimeUnit.SECONDS);
+                    throw new AssertionError("Corrupt marker read accepted");
+                }catch(ExecutionException expected){check(expected.getCause() instanceof java.io.UncheckedIOException,"marker corruption failure");}
+                check(!io.failed()&&io.raster("minecraft:overworld",Key.of(new GeographicPyramid.Cell(0,-16,0))).get(15,TimeUnit.SECONDS).surface(16)==75,"marker failure does not poison geography");
             }finally{check(io.close(15,TimeUnit.SECONDS),"close");}
-            System.out.println("PASS: shared world IO, dimension isolation/eviction, live snapshot durable, read, dirty handoff and restart");
+            System.out.println("PASS: shared world IO, dimension isolation/eviction, live snapshot durable, read, dirty handoff and restart, marker durable receipts and corruption isolation");
         }finally{ScaleTest.delete(root);}
     }
 }

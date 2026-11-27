@@ -27,9 +27,10 @@ public final class CartographV4Client {
         WorldIoService io=server==null?null:CartographV4Dev.localPresentation(server);
         String dimension=mc.level==null?null:mc.level.dimension().location().toString();
         if(session!=null&&(io!=session.io||!session.dimension.equals(dimension))){
-            if(mc.screen instanceof V4MapScreen)mc.setScreen(null);
+            if(mc.screen instanceof V4MapScreen||mc.screen instanceof V4MarkerEditor||mc.screen instanceof V4MarkerManager)mc.setScreen(null);
             session.close();session=null;
         }
+        if(session!=null)session.markers.tick();
         while(OPEN.consumeClick()){
             if(mc.player==null||io==null||dimension==null)continue;
             if(mc.screen instanceof V4MapScreen){mc.setScreen(null);continue;}
