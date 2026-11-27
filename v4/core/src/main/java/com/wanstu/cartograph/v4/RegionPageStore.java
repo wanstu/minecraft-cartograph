@@ -12,8 +12,8 @@ import java.util.concurrent.*;
 /** V4-only pages. A store instance is owned by one writer/IO worker for one world/dimension. */
 public final class RegionPageStore {
     public static final int EDGE = 32;
-    private static final int MAGIC = 0x43563450; // CV4P
-    private static final int VERSION = 5;
+    static final int MAGIC = 0x43563450; // CV4P
+    static final int VERSION = 5;
     private static final LZ4Factory CODEC=LZ4Factory.safeInstance();
     private static final int MAX_RAW = 4 * 1024 * 1024;
     private static final int MAX_BATCH_PAGES=DiskGeographicPyramid.MAX_BATCH_CHUNKS*11;
@@ -158,7 +158,7 @@ public final class RegionPageStore {
         }
         @Override public int hashCode(){return 31*Objects.hash(key,revision)+Arrays.hashCode(slots);}
     }
-    private static boolean validLeaf(Entry v){
+    static boolean validLeaf(Entry v){
         Aggregate a=v.stats;
         if(a.known!=1||a.histogram[v.feature.terrain().ordinal()]!=1)return false;
         if(a.surfaceCount==1&&(a.surfaceSum<=Integer.MIN_VALUE||a.surfaceSum>Integer.MAX_VALUE))return false;
@@ -290,19 +290,10 @@ public final class RegionPageStore {
         return Arrays.asList(result);
     }
     // Counts use the smallest exact unsigned width for the LOD capacity.
-    private static int countWidth(int lod){return lod<=3?1:lod<=7?2:4;}
-    private static int colorWidth(int lod){return lod<=8?4:8;}
-    private static int stride(int lod){
+    static int countWidth(int lod){return lod<=3?1:lod<=7?2:4;}
+    static int colorWidth(int lod){return lod<=8?4:8;}
+    static int stride(int lod){
         return lod==0?20:2+(4+CLASSES)*countWidth(lod)+16+4*colorWidth(lod)+8;
-    }
-    private static void putUnsigned(ByteBuffer out,long n,int width){
-        switch(width){
-            case 1 -> out.put((byte)n);
-            case 2 -> out.putShort((short)n);
-            case 4 -> out.putInt((int)n);
-            case 8 -> out.putLong(n);
-            default -> throw new IllegalArgumentException("width");
-        }
     }
     private static long getUnsigned(ByteBuffer in,int width){
         return switch(width){
@@ -315,6 +306,22 @@ public final class RegionPageStore {
     }
     /** Thread-owned scratch bounded by one full page; never escapes to stored pages or results. */
     private static final ThreadLocal<byte[]> ROW_SCRATCH=ThreadLocal.withInitial(()->new byte[EDGE*EDGE*stride(10)]);
+    private static void plane2(byte[] b,int p,int n,int value){
+        b[p]=(byte)(value>>>8);b[p+n]=(byte)value;
+    }
+    private static void plane4(byte[] b,int p,int n,int value){
+        b[p]=(byte)(value>>>24);b[p+n]=(byte)(value>>>16);
+        b[p+2*n]=(byte)(value>>>8);b[p+3*n]=(byte)value;
+    }
+    private static void plane(byte[] b,int p,int n,long value,int width){
+        switch(width){
+            case 1 -> b[p]=(byte)value;
+            case 2 -> plane2(b,p,n,(int)value);
+            case 4 -> plane4(b,p,n,(int)value);
+            case 8 -> {plane4(b,p,n,(int)(value>>>32));plane4(b,p+4*n,n,(int)value);}
+            default -> throw new IllegalArgumentException("width");
+        }
+    }
     static byte[] encode(Page p)throws IOException{
         ByteArrayOutputStream header=new ByteArrayOutputStream(256);
         Map<FeatureDictionary.Feature,Integer> palette=new LinkedHashMap<>();
@@ -333,34 +340,45 @@ public final class RegionPageStore {
         int n=p.size,bytes=n*stride;
         byte[] prefix=header.toByteArray();
         if((long)prefix.length+bytes>MAX_RAW)throw new IOException("Page limit");
-        byte[] rowMajor=ROW_SCRATCH.get();
-        ByteBuffer cells=ByteBuffer.wrap(rowMajor,0,bytes);
-        for(int slot=0;slot<ordered.length;slot++){
-            Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
-            cells.putShort((short)slot);
-            if(lod==0){
-                cells.putShort((short)(int)palette.get(e.feature));
-                cells.putInt(a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.surfaceSum));
-                cells.putInt(a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:Math.toIntExact(a.groundSum));
-                cells.putShort((short)a.depthSum).putShort((short)a.redSum);
-                cells.putShort((short)a.greenSum).putShort((short)a.blueSum);
-                continue;
-            }
-            putUnsigned(cells,a.known,cw);putUnsigned(cells,a.surfaceCount,cw);
-            putUnsigned(cells,a.groundCount,cw);putUnsigned(cells,a.wetCount,cw);
-            cells.putLong(a.surfaceSum).putLong(a.groundSum);
-            putUnsigned(cells,a.redSum,sw);putUnsigned(cells,a.greenSum,sw);
-            putUnsigned(cells,a.blueSum,sw);putUnsigned(cells,a.depthSum,sw);
-            cells.putInt(a.minGround).putInt(a.maxGround);
-            for(long value:a.histogram)putUnsigned(cells,value,cw);
-        }
-        if(cells.position()!=bytes)throw new IOException("Incorrect numeric record length");
         byte[] body=Arrays.copyOf(prefix,prefix.length+bytes);
-        // Directly produce the final byte planes. No intermediate planes array or stream copy.
-        int base=prefix.length;
-        for(int col=0;col<stride;col++)
-            for(int row=0,offset=col,dest=base+col*n;row<n;row++,offset+=stride,dest++)
-                body[dest]=rowMajor[offset];
+        int row=0,base=prefix.length;
+        FeatureDictionary.Feature lastFeature=null;
+        int lastId=0;
+        if(lod==0){
+            for(int slot=0;slot<ordered.length;slot++){
+                Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
+                if(e.feature!=lastFeature){lastFeature=e.feature;lastId=palette.get(e.feature);}
+                int pos=base+row++;
+                plane2(body,pos,n,slot);pos+=2*n;
+                plane2(body,pos,n,lastId);pos+=2*n;
+                plane4(body,pos,n,a.surfaceCount==0?GeographicPyramid.UNKNOWN_HEIGHT:(int)a.surfaceSum);pos+=4*n;
+                plane4(body,pos,n,a.groundCount==0?GeographicPyramid.UNKNOWN_HEIGHT:(int)a.groundSum);pos+=4*n;
+                plane2(body,pos,n,(int)a.depthSum);pos+=2*n;
+                plane2(body,pos,n,(int)a.redSum);pos+=2*n;
+                plane2(body,pos,n,(int)a.greenSum);pos+=2*n;
+                plane2(body,pos,n,(int)a.blueSum);
+            }
+        }else{
+            for(int slot=0;slot<ordered.length;slot++){
+                Entry e=ordered[slot];if(e==null)continue;Aggregate a=e.stats;
+                int pos=base+row++;
+                plane2(body,pos,n,slot);pos+=2*n;
+                plane(body,pos,n,a.known,cw);pos+=cw*n;
+                plane(body,pos,n,a.surfaceCount,cw);pos+=cw*n;
+                plane(body,pos,n,a.groundCount,cw);pos+=cw*n;
+                plane(body,pos,n,a.wetCount,cw);pos+=cw*n;
+                plane(body,pos,n,a.surfaceSum,8);pos+=8*n;
+                plane(body,pos,n,a.groundSum,8);pos+=8*n;
+                plane(body,pos,n,a.redSum,sw);pos+=sw*n;
+                plane(body,pos,n,a.greenSum,sw);pos+=sw*n;
+                plane(body,pos,n,a.blueSum,sw);pos+=sw*n;
+                plane(body,pos,n,a.depthSum,sw);pos+=sw*n;
+                plane4(body,pos,n,a.minGround);pos+=4*n;
+                plane4(body,pos,n,a.maxGround);pos+=4*n;
+                for(long value:a.histogram){plane(body,pos,n,value,cw);pos+=cw*n;}
+            }
+        }
+        if(row!=n)throw new IOException("Incorrect numeric record count");
         CRC32C crc=new CRC32C();crc.update(body);
         var compressor=CODEC.fastCompressor();
         byte[] compressed=new byte[8+compressor.maxCompressedLength(body.length)];

@@ -10,7 +10,7 @@ PowerShell, from this directory, with LZ4_JAR set to the jar path:
     $src = Get-ChildItem src -Recurse -Filter '*.java' | ForEach-Object FullName
     javac --release 21 -cp $env:LZ4_JAR -d out $src
     $cp = "out;$env:LZ4_JAR"
-    foreach ($test in 'FoundationTest','CameraTest','RegionStoreTest','WorkerTest','CapturePumpTest','DensePyramidTest','PageCodecTest') {
+    foreach ($test in 'FoundationTest','CameraTest','RegionStoreTest','WorkerTest','CapturePumpTest','DensePyramidTest','PageCodecTest','FreshRegionBuilderTest') {
         java -Xmx256m -cp $cp "com.wanstu.cartograph.v4.$test"
         if ($LASTEXITCODE -ne 0) { throw "$test failed" }
     }
@@ -26,3 +26,11 @@ transactions. It is not a game benchmark. Optional encoder thread count:
 V4 only: no compatibility or migration, including earlier experimental formats.
 Use an empty V4 database. Never point this store at a legacy cache directory.
 See docs/CARTOGRAPH_V4_ARCHITECTURE.md for gates and measured limitations.
+Experimental fresh-shard benchmark (102400 chunks, 25 shards, 2 workers, 256 MiB):
+
+    java '-Dcartograph.v4.encodeThreads=1' '-XX:ActiveProcessorCount=4' -Xmx256m -cp $cp com.wanstu.cartograph.v4.ShardScaleTest 5 2 256 fresh
+    java '-Dcartograph.v4.encodeThreads=1' '-XX:ActiveProcessorCount=4' -Xmx256m -cp $cp com.wanstu.cartograph.v4.ShardScaleTest 5 2 256 unique
+
+The fresh mode uses prebuilt repeated primitive snapshots; unique mode generates
+independent coordinate-seeded synthetic snapshots inside the timed workload.
+These are experimental shard builders, not the Minecraft runtime or render page assembly.

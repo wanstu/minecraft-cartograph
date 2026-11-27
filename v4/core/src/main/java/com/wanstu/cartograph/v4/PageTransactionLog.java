@@ -52,9 +52,17 @@ final class PageTransactionLog {
         }catch(IllegalArgumentException e){throw new IOException("Invalid transaction key",e);}
         return pending;
     }
+    record Encoded(RegionPageStore.Key key,long revision,byte[] data){}
     void append(List<RegionPageStore.Page> pages,List<byte[]> payloads)throws IOException{
+        List<Encoded> encoded=new ArrayList<>(pages.size());
+        for(int i=0;i<pages.size();i++)encoded.add(new Encoded(pages.get(i).key(),pages.get(i).revision(),payloads.get(i)));
+        appendEncoded(encoded);
+    }
+    void appendEncoded(List<Encoded> pages)throws IOException{
+        if(pages.isEmpty()||pages.size()>DiskGeographicPyramid.MAX_BATCH_CHUNKS*11)
+            throw new IOException("Invalid transaction page count");
         long length=4;
-        for(byte[] data:payloads)length+=24L+data.length;
+        for(Encoded p:pages)length+=24L+p.data.length;
         if(length>MAX)throw new IOException("Transaction limit");
         byte[] body=new byte[(int)length];
         ByteBuffer out=ByteBuffer.wrap(body);
@@ -62,12 +70,12 @@ final class PageTransactionLog {
         try(var fileOut=new RandomAccessFile(file.toFile(),"rw")){
             long start=fileOut.length();
             Map<RegionPageStore.Key,Pointer> next=new HashMap<>();
-            for(int i=0;i<pages.size();i++){
-                var page=pages.get(i);byte[] data=payloads.get(i);var key=page.key();
-                if(data.length<1||data.length>MAX_PAGE||page.revision()<=revision(key))
+            for(Encoded page:pages){
+                byte[] data=page.data;var key=page.key;
+                if(data.length<1||data.length>MAX_PAGE||page.revision<=revision(key))
                     throw new IOException("Invalid transaction page");
-                out.putInt(key.lod()).putInt(key.x()).putInt(key.z()).putLong(page.revision()).putInt(data.length);
-                if(next.put(key,new Pointer(start+8+out.position(),data.length,page.revision()))!=null)
+                out.putInt(key.lod()).putInt(key.x()).putInt(key.z()).putLong(page.revision).putInt(data.length);
+                if(next.put(key,new Pointer(start+8+out.position(),data.length,page.revision))!=null)
                     throw new IOException("Duplicate page");
                 out.put(data);
             }

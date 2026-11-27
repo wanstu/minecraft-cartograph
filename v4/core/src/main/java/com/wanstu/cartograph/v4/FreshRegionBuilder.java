@@ -1,0 +1,221 @@
+package com.wanstu.cartograph.v4;
+
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import java.util.zip.CRC32C;
+import java.nio.ByteBuffer;
+import net.jpountz.lz4.LZ4Factory;
+import static com.wanstu.cartograph.v4.RegionPageStore.*;
+
+/** Fresh-shard-only bottom-up builder. Each physical LOD page is generated once. */
+public final class FreshRegionBuilder {
+    private static final int N=32*32,H=FeatureDictionary.Terrain.values().length;
+    private static final int KNOWN=0,SC=1,GC=2,WET=3,SS=4,GS=5,R=6,G=7,B=8,DEPTH=9,MIN=10,MAX=11,HIST=12;
+    private static final int UNKNOWN=GeographicPyramid.UNKNOWN_HEIGHT;
+    private static final LZ4Factory CODEC=LZ4Factory.safeInstance();
+
+    /** A complete observed chunk, or null if it has not been generated. */
+    @FunctionalInterface public interface Source { Entry[] chunk(int x,int z)throws IOException; }
+    @FunctionalInterface public interface PackedSource { Columns chunk(int x,int z)throws IOException; }
+    /** Immutable dense chunk snapshot. Null feature marks an unobserved column. */
+    public static final class Columns {
+        private final FeatureDictionary.Feature[] features;
+        private final int[] surface,ground;
+        private final char[] depth,red,green,blue;
+        private final int count;
+        public Columns(FeatureDictionary.Feature[] features,int[] surface,int[] ground,
+                       char[] depth,char[] red,char[] green,char[] blue){
+            if(features.length!=256||surface.length!=256||ground.length!=256||
+                depth.length!=256||red.length!=256||green.length!=256||blue.length!=256)
+                throw new IllegalArgumentException("Chunk column length");
+            this.features=features.clone();this.surface=surface.clone();this.ground=ground.clone();
+            this.depth=depth.clone();this.red=red.clone();this.green=green.clone();this.blue=blue.clone();
+            int n=0;for(var feature:this.features)if(feature!=null)n++;count=n;
+        }
+        public static Columns fromEntries(Entry[] entries)throws IOException{
+            if(entries==null)return null;
+            if(entries.length!=256)throw new IOException("Invalid chunk size");
+            var f=new FeatureDictionary.Feature[256];
+            int[] s=new int[256],g=new int[256];char[] d=new char[256],r=new char[256],gr=new char[256],b=new char[256];
+            for(int i=0;i<256;i++){
+                Entry e=entries[i];if(e==null)continue;
+                if(e.feature()==null||!RegionPageStore.validLeaf(e))throw new IOException("Invalid leaf");
+                Aggregate a=e.stats();f[i]=e.feature();
+                s[i]=a.surfaceCount()==0?UNKNOWN:(int)a.surfaceSum();
+                g[i]=a.groundCount()==0?UNKNOWN:(int)a.groundSum();
+                d[i]=(char)a.depthSum();r[i]=(char)a.redSum();gr[i]=(char)a.greenSum();b[i]=(char)a.blueSum();
+            }
+            return new Columns(f,s,g,d,r,gr,b);
+        }
+    }
+    public record Result(int chunks,long pages,long flushes){}
+    private final PackedSource source;
+    private final PageTransactionLog log;
+    private final List<PageTransactionLog.Encoded> pending=new ArrayList<>();
+    private int pendingBytes,chunks;
+    private long pages;
+    private FreshRegionBuilder(Path stage,PackedSource source)throws IOException{
+        this.source=source;log=new PageTransactionLog(stage);
+    }
+    public static Result build(Path root,RegionShard.Id id,Source source)throws IOException{
+        return buildPacked(root,id,(x,z)->Columns.fromEntries(source.chunk(x,z)));
+    }
+    public static Result buildPacked(Path root,RegionShard.Id id,PackedSource source)throws IOException{
+        Objects.requireNonNull(source);
+        Files.createDirectories(root);
+        Path target=id.directory(root);
+        if(Files.exists(target))throw new IOException("Fresh builder cannot overwrite an existing shard");
+        Path stage=Files.createTempDirectory(root,".building-");
+        try{
+            var b=new FreshRegionBuilder(stage,source);
+            Packed p=b.buildPage(5,id.x(),id.z());
+            for(int lod=6;lod<=10;lod++){
+                Key parent=new Key(lod,Math.floorDiv(p.key.x(),2),Math.floorDiv(p.key.z(),2));
+                Packed q=new Packed(parent);q.mergeChild(p);b.emit(q);p=q;
+            }
+            b.flush();
+            if(Files.exists(target))throw new IOException("Shard already published");
+            Files.move(stage,target,StandardCopyOption.ATOMIC_MOVE);
+            return new Result(b.chunks,b.pages,b.log.flushes());
+        }finally{
+            if(Files.exists(stage))try(var files=Files.walk(stage)){
+                for(Path file:files.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(file);
+            }
+        }
+    }
+    private Packed buildPage(int lod,int x,int z)throws IOException{
+        Packed p=new Packed(new Key(lod,x,z));
+        if(lod==0){
+            int cx=Math.multiplyExact(x,2),cz=Math.multiplyExact(z,2);
+            for(int dz=0;dz<2;dz++)for(int dx=0;dx<2;dx++){
+                Columns chunk=source.chunk(cx+dx,cz+dz);
+                if(chunk==null)continue;
+                chunks++;p.leaves[dz*2+dx]=chunk;p.count+=chunk.count;
+            }
+        }else{
+            for(int dz=0;dz<2;dz++)for(int dx=0;dx<2;dx++)
+                p.mergeChild(buildPage(lod-1,x*2+dx,z*2+dz));
+        }
+        emit(p);
+        return p;
+    }
+    private void emit(Packed p)throws IOException{
+        if(p.count==0)return;
+        byte[] bytes=p.encode();
+        if(!pending.isEmpty()&&(pending.size()>=256||pendingBytes+bytes.length+24>8*1024*1024))flush();
+        pending.add(new PageTransactionLog.Encoded(p.key,1,bytes));pendingBytes+=bytes.length+24;pages++;
+    }
+    private void flush()throws IOException{
+        if(pending.isEmpty())return;
+        log.appendEncoded(pending);pending.clear();pendingBytes=0;
+    }
+    private static final class Packed {
+        final Key key;
+        final long[][] data;
+        final Columns[] leaves;
+        int count;
+        Packed(Key key){
+            this.key=key;
+            boolean leaf=key.lod()==0;
+            data=leaf?null:new long[HIST+H][N];
+            leaves=leaf?new Columns[4]:null;
+        }
+        private void mergeLeaf(Packed child,int ox,int oz){
+            long[][] d=data;
+            for(int quadrant=0;quadrant<4;quadrant++){
+                Columns c=child.leaves[quadrant];if(c==null||c.count==0)continue;
+                int qx=(quadrant%2)*8,qz=(quadrant/2)*8;
+                for(int z=0;z<8;z++)for(int x=0;x<8;x++){
+                    int from=z*32+x*2,to=(z+oz+qz)*32+x+ox+qx;
+                    int min=Integer.MAX_VALUE,max=Integer.MIN_VALUE;
+                    for(int k=0;k<4;k++){
+                        int i=from+(k/2)*16+k%2;
+                        var f=c.features[i];if(f==null)continue;
+                        int s=c.surface[i],g=c.ground[i],depth=c.depth[i];
+                        d[KNOWN][to]++;
+                        if(s!=UNKNOWN){d[SC][to]++;d[SS][to]+=s;}
+                        if(g!=UNKNOWN){
+                            d[GC][to]++;d[GS][to]+=g;min=Math.min(min,g);max=Math.max(max,g);
+                        }
+                        if(depth>0)d[WET][to]++;
+                        d[DEPTH][to]+=depth;d[R][to]+=c.red[i];d[G][to]+=c.green[i];d[B][to]+=c.blue[i];
+                        d[HIST+f.terrain().ordinal()][to]++;
+                    }
+                    if(d[KNOWN][to]==0)continue;
+                    count++;d[MIN][to]=d[GC][to]==0?UNKNOWN:min;d[MAX][to]=d[GC][to]==0?UNKNOWN:max;
+                }
+            }
+        }
+        private Columns chunkAt(int slot){return leaves[(slot/512)*2+(slot%32)/16];}
+        private static int columnAt(int slot){return ((slot/32)%16)*16+slot%16;}
+        void mergeChild(Packed child){
+            if(child.count==0)return;
+            int ox=Math.floorMod(child.key.x(),2)*16,oz=Math.floorMod(child.key.z(),2)*16;
+            if(child.leaves!=null){mergeLeaf(child,ox,oz);return;}
+            long[][] c=child.data,d=data;
+            for(int z=0;z<16;z++)for(int x=0;x<16;x++){
+                int i=z*64+x*2,j=i+1,k=i+32,l=k+1,to=(z+oz)*32+x+ox;
+                long n=c[KNOWN][i]+c[KNOWN][j]+c[KNOWN][k]+c[KNOWN][l];
+                if(n==0)continue;
+                count++;d[KNOWN][to]=n;
+                for(int f=1;f<MIN;f++)d[f][to]=c[f][i]+c[f][j]+c[f][k]+c[f][l];
+                int min=Integer.MAX_VALUE,max=Integer.MIN_VALUE;
+                if(c[GC][i]!=0){min=(int)c[MIN][i];max=(int)c[MAX][i];}
+                if(c[GC][j]!=0){min=Math.min(min,(int)c[MIN][j]);max=Math.max(max,(int)c[MAX][j]);}
+                if(c[GC][k]!=0){min=Math.min(min,(int)c[MIN][k]);max=Math.max(max,(int)c[MAX][k]);}
+                if(c[GC][l]!=0){min=Math.min(min,(int)c[MIN][l]);max=Math.max(max,(int)c[MAX][l]);}
+                d[MIN][to]=d[GC][to]==0?UNKNOWN:min;d[MAX][to]=d[GC][to]==0?UNKNOWN:max;
+                for(int f=HIST;f<HIST+H;f++)d[f][to]=c[f][i]+c[f][j]+c[f][k]+c[f][l];
+            }
+        }
+        private static void field(byte[] bytes,int pos,int n,long value,int width){
+            for(int j=width-1;j>=0;j--){bytes[pos+j*n]=(byte)value;value>>>=8;}
+        }
+        byte[] encode()throws IOException{
+            int lod=key.lod(),cw=countWidth(lod),sw=colorWidth(lod);
+            int stride=stride(lod);
+            Map<FeatureDictionary.Feature,Integer> palette=new LinkedHashMap<>();
+                        if(lod==0)for(int slot=0;slot<N;slot++){
+                Columns c=chunkAt(slot);if(c==null)continue;
+                var f=c.features[columnAt(slot)];if(f!=null)palette.computeIfAbsent(f,k->palette.size()+1);
+            }
+            ByteArrayOutputStream head=new ByteArrayOutputStream();
+            try(var out=new DataOutputStream(head)){
+                out.writeInt(MAGIC);out.writeInt(VERSION);out.writeInt(lod);out.writeInt(key.x());out.writeInt(key.z());out.writeLong(1);
+                out.writeInt(palette.size());
+                for(var f:palette.keySet()){out.writeUTF(f.materialKey());out.writeUTF(f.biomeKey());out.writeByte(f.terrain().ordinal());}
+                out.writeInt(count);
+            }
+            byte[] prefix=head.toByteArray(),body=Arrays.copyOf(prefix,prefix.length+count*stride);
+            int n=count,row=0;
+            for(int i=0;i<N;i++){
+                Columns c=lod==0?chunkAt(i):null;int col=columnAt(i);
+                if(lod==0?(c==null||c.features[col]==null):data[KNOWN][i]==0)continue;
+                int p=prefix.length+row++;
+                field(body,p,n,i,2);p+=2*n;
+                if(lod==0){
+                    field(body,p,n,palette.get(c.features[col]),2);p+=2*n;
+                    field(body,p,n,c.surface[col],4);p+=4*n;
+                    field(body,p,n,c.ground[col],4);p+=4*n;
+                    field(body,p,n,c.depth[col],2);p+=2*n;
+                    field(body,p,n,c.red[col],2);p+=2*n;
+                    field(body,p,n,c.green[col],2);p+=2*n;
+                    field(body,p,n,c.blue[col],2);
+                }else{
+                    for(int f=KNOWN;f<=WET;f++){field(body,p,n,data[f][i],cw);p+=cw*n;}
+                    field(body,p,n,data[SS][i],8);p+=8*n;field(body,p,n,data[GS][i],8);p+=8*n;
+                    for(int f=R;f<=DEPTH;f++){field(body,p,n,data[f][i],sw);p+=sw*n;}
+                    field(body,p,n,data[MIN][i],4);p+=4*n;field(body,p,n,data[MAX][i],4);p+=4*n;
+                    for(int f=HIST;f<HIST+H;f++){field(body,p,n,data[f][i],cw);p+=cw*n;}
+                }
+            }
+            CRC32C crc=new CRC32C();crc.update(body);
+            var codec=CODEC.fastCompressor();
+            byte[] encoded=new byte[8+codec.maxCompressedLength(body.length)];
+            ByteBuffer.wrap(encoded).putInt(body.length).putInt((int)crc.getValue());
+            int len=codec.compress(body,0,body.length,encoded,8,encoded.length-8);
+            return Arrays.copyOf(encoded,8+len);
+        }
+    }
+}

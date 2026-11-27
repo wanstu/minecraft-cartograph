@@ -25,7 +25,8 @@ public final class ScaleTest {
     static void run(Path root,int edge,int batch,Entry[][] samples)throws Exception{
         var store=new RegionPageStore(root,128,16L*1024*1024);
         var pyramid=new DiskGeographicPyramid(store,10);
-        long start=System.nanoTime();int chunks=0;
+        var os=(com.sun.management.OperatingSystemMXBean)java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+        long cpuStart=os.getProcessCpuTime(),start=System.nanoTime();int chunks=0;
         var pending=new ArrayList<DiskGeographicPyramid.ChunkSnapshot>();
         // Spatially ordered 4x4 groups: mirrors a region-file discovery iterator.
         int tile=batch>=256?16:batch>=64?8:4;
@@ -39,6 +40,8 @@ public final class ScaleTest {
             }
         if(!pending.isEmpty())pyramid.updateChunks(pending);
         double seconds=(System.nanoTime()-start)/1e9;
+        double cpuSeconds=(os.getProcessCpuTime()-cpuStart)/1e9;
+        System.out.printf(Locale.ROOT,"processCpuSeconds=%.3f avgCpuCores=%.2f cpuMicrosPerChunk=%.2f%n",cpuSeconds,cpuSeconds/seconds,cpuSeconds*1e6/chunks);
         long writes=store.diskWrites(),reads=store.diskReads(),flushes=store.durableFlushes();
         long encode=store.encodeNanos(),append=store.appendNanos(),cache=store.cacheNanos();
         long bytes;
