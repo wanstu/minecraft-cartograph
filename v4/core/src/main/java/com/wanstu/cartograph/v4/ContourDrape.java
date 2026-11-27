@@ -34,7 +34,7 @@ public final class ContourDrape {
             float y=raster.surface(slot),ground=raster.ground(slot);
             // The raw surface may be a roof, canopy or water above the relief ground.
             // Do not project a ground isoline onto that unrelated upper surface.
-            if(!raster.completeGround(slot)||!Float.isFinite(y)||y!=ground)continue;
+            if(!raster.completeGround(slot)||!raster.completeSurface(slot)||!Float.isFinite(y)||y!=ground)continue;
             out.add(new Line(s.x0()+a*dx,s.z0()+a*dz,s.x0()+b*dx,s.z0()+b*dz,y,s.height()));
         }
         return List.copyOf(out);

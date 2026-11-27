@@ -26,6 +26,12 @@ public final class ContourDrapeTest{
         var three=ContourDrape.split(in,new ContourLines.Segment(1.5,1.8,2.5,2.8,65));
         check(three.size()==3,"separate X/Z crossings");
         for(var line:three)check(line.height()==65,"original contour value preserved");
-        System.out.println("PASS: exposed surface drape, cell split, cross-page seam, hidden/unknown exclusion");
+        var f=new FeatureDictionary.Feature("minecraft:stone","minecraft:plains",FeatureDictionary.Terrain.ROCK);
+        long[] hist=new long[FeatureDictionary.Terrain.values().length];hist[FeatureDictionary.Terrain.ROCK.ordinal()]=4;
+        var partial=new Entry(new Aggregate(4,3,4,195,260,400,400,400,0,0,65,65,hist),null);
+        var partialRaster=MapRaster.build(new WorldGeography.RenderPage(1,new Page(new Key(1,0,0),1,Map.of(0,partial))));
+        check(partialRaster.completeGround(0)&&!partialRaster.completeSurface(0),"independent completeness");
+        check(ContourDrape.split(new ContourOverlayCache.Input(partialRaster,null,null,null),new ContourLines.Segment(.1,.1,.9,.9,65)).isEmpty(),"partial surface not draped");
+        System.out.println("PASS: exposed surface drape, cell split, cross-page seam, hidden/unknown/partial surface exclusion");
     }
 }

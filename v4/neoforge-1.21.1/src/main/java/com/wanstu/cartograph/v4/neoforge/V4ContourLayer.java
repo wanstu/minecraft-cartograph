@@ -12,10 +12,10 @@ import static com.wanstu.cartograph.v4.RegionPageStore.Key;
 /** Shared flat/raised depth-aware overlay. Contour calculation is asynchronous; bounded GPU vertex packing runs on the render thread. */
 final class V4ContourLayer implements AutoCloseable {
     private static final int MAX_DRAW_SEGMENTS=8192,MAX_LABELS=16;
-    private record Label(double x,double z,int height){}
+    private final ContourLabelVisibility visibility=new ContourLabelVisibility();
     private final ContourOverlayCache cache=new ContourOverlayCache();
     private List<ContourOverlayCache.Lines> retained=List.of();
-    private List<Label> labels=List.of();
+    private List<ContourLabelVisibility.Anchor> labels=List.of();
     private VertexBuffer buffer;
     private double originX,originZ;
     private int segments;
@@ -54,16 +54,15 @@ final class V4ContourLayer implements AutoCloseable {
         buffer.bind();
         try{buffer.drawWithShader(matrix,RenderSystem.getProjectionMatrix(),GameRenderer.getPositionColorShader());}
         finally{VertexBuffer.unbind();RenderSystem.depthMask(true);RenderSystem.enableDepthTest();RenderSystem.disableBlend();}
-        if(!raised)drawLabels(graphics,font,projection,width,height);
     }
     private void rebuild(List<ContourOverlayCache.Lines> ready,boolean raised){
         if(buffer!=null){buffer.close();buffer=null;}
-        retained=List.copyOf(ready);segments=0;labels=List.of();
+        retained=List.copyOf(ready);segments=0;labels=List.of();visibility.clear();
         if(ready.isEmpty())return;
         Key first=ready.getFirst().input().key();
         originX=first.x()*32.0*(1<<first.lod());originZ=first.z()*32.0*(1<<first.lod());
         var builder=Tesselator.getInstance().begin(VertexFormat.Mode.DEBUG_LINES,DefaultVertexFormat.POSITION_COLOR);
-        List<Label> candidates=new ArrayList<>();
+        List<ContourLabelVisibility.Anchor> candidates=new ArrayList<>();
         for(var lines:ready){
             Key k=lines.input().key();double cell=1<<k.lod(),bx=k.x()*32*cell,bz=k.z()*32*cell;
             int step=ContourLines.interval(k.lod()),best=-1;double longest=0;boolean bestMajor=false;
@@ -80,8 +79,13 @@ final class V4ContourLayer implements AutoCloseable {
                 double length=Math.hypot(x1-x0,z1-z0);
                 if(best<0||(major&&!bestMajor)||(major==bestMajor&&length>longest)){best=i;bestMajor=major;longest=length;}
             }
-            if(!raised&&best>=0)candidates.add(new Label(bx+(lines.value(best,0)+lines.value(best,2))*.5*cell,
-                bz+(lines.value(best,1)+lines.value(best,3))*.5*cell,(int)lines.value(best,4)));
+            if(best>=0){
+                double x0=raised?lines.drapedValue(best,0):lines.value(best,0),z0=raised?lines.drapedValue(best,1):lines.value(best,1);
+                double x1=raised?lines.drapedValue(best,2):lines.value(best,2),z1=raised?lines.drapedValue(best,3):lines.value(best,3);
+                int h=(int)(raised?lines.drapedValue(best,5):lines.value(best,4));
+                double y=raised?lines.drapedValue(best,4):h;
+                candidates.add(new ContourLabelVisibility.Anchor(bx+(x0+x1)*.5*cell,y,bz+(z0+z1)*.5*cell,h));
+            }
         }
         labels=List.copyOf(candidates);
         var data=builder.build();
@@ -91,17 +95,22 @@ final class V4ContourLayer implements AutoCloseable {
         catch(RuntimeException|Error ex){next.close();throw ex;}
         finally{VertexBuffer.unbind();}
     }
-    private void drawLabels(GuiGraphics graphics,Font font,MapProjection p,int width,int height){
+    void drawLabels(GuiGraphics graphics,Font font,MapCamera camera,MapProjection p,int width,int height,
+                    Object terrain,java.util.function.Predicate<ContourLabelVisibility.Anchor> occlusionCheck){
+        if(buffer==null)return;
+        boolean raised=camera.elevationDegrees()!=90;
+        if(raised)visibility.begin(camera,terrain);
         List<int[]> occupied=new ArrayList<>();
-        for(Label label:labels){
+        for(var label:labels){
             if(occupied.size()>=MAX_LABELS)break;
-            int x=(int)Math.round(width/2.0+p.screenX(label.x,label.z));
-            int y=(int)Math.round(height/2.0+p.screenY(label.x,label.height,label.z));
-            String value=Integer.toString(label.height);int w=font.width(value);
-            if(x-w/2<4||x+w/2>width-4||y<76||y>height-12)continue;
+            int x=(int)Math.round(width/2.0+p.screenX(label.x(),label.z()));
+            int y=(int)Math.round(height/2.0+p.screenY(label.x(),label.y(),label.z()));
+            String value=Integer.toString(label.height());int w=font.width(value);
+            if(x-w/2<4||x+w/2>width-4||y<114||y>height-12)continue;
             boolean overlap=false;
             for(int[] prev:occupied)if(Math.abs(prev[0]-x)<(prev[2]+w)/2+24&&Math.abs(prev[1]-y)<24){overlap=true;break;}
             if(overlap)continue;
+            if(raised&&!visibility.visible(label,occlusionCheck))continue;
             occupied.add(new int[]{x,y,w});
             graphics.fill(x-w/2-2,y-6,x+(w+1)/2+2,y+5,0xb52a2621);
             graphics.drawString(font,value,x-w/2,y-4,0xffffebc7,false);
@@ -111,6 +120,6 @@ final class V4ContourLayer implements AutoCloseable {
     long uploads(){return uploads;}
     boolean limited(){return limited;}
     @Override public void close(){
-        cache.close();if(buffer!=null){buffer.close();buffer=null;}retained=List.of();labels=List.of();
+        cache.close();if(buffer!=null){buffer.close();buffer=null;}retained=List.of();labels=List.of();visibility.clear();
     }
 }

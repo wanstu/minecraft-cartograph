@@ -217,7 +217,12 @@ final class V4MapSession implements AutoCloseable {
     }
     /** One face traversal, shared between retained geometry construction and precise CPU picking. */
     private void emit(List<Part> parts,boolean raised,MapRayPicker picker,Faces sink){
+        emit(parts,raised,picker,sink,Integer.MAX_VALUE);
+    }
+    /** Work cap counts traversed parts and all potential mesh/edge visits, not just emitted faces. */
+    private boolean emit(List<Part> parts,boolean raised,MapRayPicker picker,Faces sink,int workBudget){
         for(Part part:parts){
+            if(--workBudget<0)return false;
             var patch=part.patch;var raster=part.raster;
             double cell=1<<patch.source().lod();
             double bx=patch.source().x()*32.0*cell,bz=patch.source().z()*32.0*cell;
@@ -231,6 +236,8 @@ final class V4MapSession implements AutoCloseable {
                 top(sink,part,bx,bz,cell,x0,z0,x1,z1,0);continue;
             }
             var mesh=raster.relief();
+            workBudget-=mesh.topCount()+mesh.wallCount()+part.adjacent.size()*32;
+            if(workBudget<0)return false;
             for(int i=0;i<mesh.topCount();i++){
                 double left=Math.max(x0,mesh.topX(i)),right=Math.min(x1,mesh.topX(i)+mesh.topWidth(i));
                 double near=Math.max(z0,mesh.topZ(i)),far=Math.min(z1,mesh.topZ(i)+mesh.topDepth(i));
@@ -253,6 +260,7 @@ final class V4MapSession implements AutoCloseable {
                 }
             }
         }
+        return true;
     }
     private static void top(Faces sink,Part p,double bx,double bz,double cell,double x0,double z0,double x1,double z1,double y){
         sink.face(p,bx+x0*cell,y,bz+z0*cell,bx+x1*cell,y,bz+z1*cell,x0,z0,x1,z1,255);
@@ -267,6 +275,14 @@ final class V4MapSession implements AutoCloseable {
         var picker=new MapRayPicker(camera,sx,sy);
         emit(drawnParts,lastRaised,picker,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->picker.face(part.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1));
         return picker.result();
+    }
+    private boolean contourAnchorVisible(MapCamera camera,ContourLabelVisibility.Anchor anchor){
+        if(!camera.equals(lastRenderedCamera))return false;
+        var screen=camera.project(new MapCamera.World(anchor.x(),anchor.y(),anchor.z()));
+        var picker=new MapRayPicker(camera,screen.x(),screen.y(),screen.depth()+.0001);
+        boolean complete=emit(drawnParts,true,picker,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->
+            picker.face(part.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1),8192);
+        return complete&&picker.result()==null;
     }
     /** Static world-relative vertices. Each camera movement changes just the affine transform. */
     void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height){
@@ -315,6 +331,9 @@ final class V4MapSession implements AutoCloseable {
             if(raised){RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableCull();RenderSystem.enableDepthTest();}
             RenderSystem.disableBlend();
         }
+        if(layers.visible(MapLayers.Layer.CONTOURS)&&contours!=null)
+            contours.drawLabels(graphics,Minecraft.getInstance().font,camera,projection,width,height,drawnParts,
+                anchor->contourAnchorVisible(camera,anchor));
     }
     private void clearAnchors(){anchorParts=Map.of();anchorDependencies=List.of();}
     SurfaceAnchor.Sample structureHeight(int lod,int x,int z){

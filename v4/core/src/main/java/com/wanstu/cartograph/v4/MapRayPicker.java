@@ -6,7 +6,12 @@ public final class MapRayPicker {
     private final MapCamera.World start,dir;
     private final boolean raised;
     private Hit best;
-    public MapRayPicker(MapCamera camera,double sx,double sy){
+    private final double minimumDepth;
+    public MapRayPicker(MapCamera camera,double sx,double sy){this(camera,sx,sy,Double.NEGATIVE_INFINITY);}
+    /** Ignore intersections at or behind an existing visible-surface anchor. */
+    public MapRayPicker(MapCamera camera,double sx,double sy,double minimumDepth){
+        if(Double.isNaN(minimumDepth))throw new IllegalArgumentException("Minimum depth");
+        this.minimumDepth=minimumDepth;
         raised=camera.elevationDegrees()!=90;
         start=camera.unproject(new MapCamera.Screen(sx,sy,0));
         double yaw=Math.toRadians(camera.yawDegrees()),pitch=Math.toRadians(camera.elevationDegrees());
@@ -17,7 +22,7 @@ public final class MapRayPicker {
     public boolean mayHit(double x0,double z0,double x1,double z1,double minY,double maxY){
         if(!Double.isFinite(minY)||!Double.isFinite(maxY)||minY>maxY)return false;
         double t0=(minY-start.y())/dir.y(),t1=(maxY-start.y())/dir.y();
-        if(best!=null&&t1<=best.depth())return false;
+        if(t1<=minimumDepth||(best!=null&&t1<=best.depth()))return false;
         double ax=start.x()+t0*dir.x(),bx=start.x()+t1*dir.x();
         double az=start.z()+t0*dir.z(),bz=start.z()+t1*dir.z();
         double eps=1e-7;
@@ -38,7 +43,7 @@ public final class MapRayPicker {
             if(Math.abs(dir.z())<1e-12)return;
             t=(z0-start.z())/dir.z();
         }
-        if(best!=null&&t<=best.depth())return;
+        if(t<=minimumDepth||(best!=null&&t<=best.depth()))return;
         double x=start.x()+t*dir.x(),y=start.y()+t*dir.y(),z=start.z()+t*dir.z();
         double eps=1e-7;
         if(x<Math.min(x0,x1)-eps||x>Math.max(x0,x1)+eps||y<Math.min(y0,y1)-eps||y>Math.max(y0,y1)+eps||
