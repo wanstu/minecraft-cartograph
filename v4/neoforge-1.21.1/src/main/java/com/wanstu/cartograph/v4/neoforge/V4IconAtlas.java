@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import com.wanstu.cartograph.v4.MapIcons;
+import com.wanstu.cartograph.v4.PlayerHeading;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.GameRenderer;
@@ -15,7 +16,7 @@ import java.util.*;
 final class V4IconAtlas implements AutoCloseable {
     private ResourceLocation id;
     private static final int EDGE=MapIcons.SIZE,STRIDE=EDGE+4,W=MapIcons.COLUMNS*STRIDE,H=MapIcons.rows()*STRIDE;
-    private record Draw(MapIcons.Icon icon,int cx,int cy,int size,int argb){}
+    private record Draw(MapIcons.Icon icon,double cx,double cy,int size,int argb,double cos,double sin){}
     private final List<Draw> pending=new ArrayList<>(256);
     private void ensure(){
         if(id!=null)return;
@@ -28,7 +29,18 @@ final class V4IconAtlas implements AutoCloseable {
         id=Minecraft.getInstance().getTextureManager().register("cartograph_v4_icons",texture);
     }
     void draw(MapIcons.Icon icon,int cx,int cy,int size,int argb){
-        if(size>0&&pending.size()<512)pending.add(new Draw(icon,cx,cy,size,argb));
+        if(size>0&&pending.size()<512)pending.add(new Draw(icon,cx,cy,size,argb,1,0));
+    }
+    void player(double cx,double cy,PlayerHeading.Direction direction){
+        if(pending.size()>510)return;
+        // The masks point up in texture space. Rotate their tip to the projected heading.
+        double cos=-direction.y(),sin=direction.x();
+        pending.add(new Draw(MapIcons.Icon.PLAYER_BORDER,cx,cy,PlayerHeading.SIZE,0xff20262d,cos,sin));
+        pending.add(new Draw(MapIcons.Icon.PLAYER_FILL,cx,cy,PlayerHeading.SIZE,0xffffd566,cos,sin));
+    }
+    private static void vertex(BufferBuilder b,org.joml.Matrix4f pose,Draw d,double x,double y,float u,float v){
+        b.addVertex(pose,(float)(d.cx+x*d.cos-y*d.sin),(float)(d.cy+x*d.sin+y*d.cos),0)
+            .setUv(u,v).setColor(d.argb);
     }
     void flush(GuiGraphics g){
         if(pending.isEmpty())return;
@@ -42,11 +54,11 @@ final class V4IconAtlas implements AutoCloseable {
             for(var d:pending){
                 int ox=d.icon.ordinal()%MapIcons.COLUMNS*STRIDE+2,oy=d.icon.ordinal()/MapIcons.COLUMNS*STRIDE+2;
                 float u=ox/(float)W,v=oy/(float)H,u1=(ox+EDGE)/(float)W,v1=(oy+EDGE)/(float)H;
-                int x=d.cx-d.size/2,y=d.cy-d.size/2,x1=x+d.size,y1=y+d.size;
-                b.addVertex(pose,x,y1,0).setUv(u,v1).setColor(d.argb);
-                b.addVertex(pose,x1,y1,0).setUv(u1,v1).setColor(d.argb);
-                b.addVertex(pose,x1,y,0).setUv(u1,v).setColor(d.argb);
-                b.addVertex(pose,x,y,0).setUv(u,v).setColor(d.argb);
+                double half=d.size*.5;
+                vertex(b,pose,d,-half,half,u,v1);
+                vertex(b,pose,d,half,half,u1,v1);
+                vertex(b,pose,d,half,-half,u1,v);
+                vertex(b,pose,d,-half,-half,u,v);
             }
             BufferUploader.drawWithShader(b.buildOrThrow());
         }finally{pending.clear();RenderSystem.enableDepthTest();RenderSystem.disableBlend();}

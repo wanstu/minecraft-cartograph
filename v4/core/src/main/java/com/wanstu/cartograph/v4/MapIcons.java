@@ -8,7 +8,7 @@ public final class MapIcons {
     public enum Icon {
         LAYERS,VIEW,PIN,REGION,INFO,PLUS,MINUS,CENTER,NORTH,CLOSE,
         HOME,FLAG,MINE,PORT,FARM,LANDMARK,WATER,UNDERGROUND,PORTAL,NETHER,END,OTHER,
-        EDIT,COPY
+        EDIT,COPY,PLAYER_BORDER,PLAYER_FILL
     }
     private static final String[] PATHS={
         "2,6 8,2 14,6 8,10 2,6;2,9 8,13 14,9;2,12 8,15 14,12",
@@ -53,8 +53,27 @@ public final class MapIcons {
         return switch(action){case ADD->Icon.PLUS;case EDIT->Icon.EDIT;case CENTER->Icon.CENTER;case COPY->Icon.COPY;case NEW_REGION->Icon.REGION;};
     }
     public static int rows(){return (Icon.values().length+COLUMNS-1)/COLUMNS;}
+    private static byte[] playerMask(boolean border){
+        // North-pointing, symmetric concave dart. Inner mask leaves a narrow contrast edge.
+        double[] xs=border?new double[]{8,14,8,2}:new double[]{8,12.5,8,3.5};
+        double[] ys=border?new double[]{1,14,11,14}:new double[]{2.5,12.2,10,12.2};
+        byte[] out=new byte[SIZE*SIZE];
+        for(int y=0;y<SIZE;y++)for(int x=0;x<SIZE;x++){
+            int n=0;
+            for(int sy=0;sy<4;sy++)for(int sx=0;sx<4;sx++){
+                double px=x+(sx+.5)/4,py=y+(sy+.5)/4;
+                boolean inside=false;
+                for(int i=0,j=3;i<4;j=i++)
+                    if((ys[i]>py)!=(ys[j]>py)&&px<(xs[j]-xs[i])*(py-ys[i])/(ys[j]-ys[i])+xs[i])inside=!inside;
+                if(inside)n++;
+            }
+            out[y*SIZE+x]=(byte)((n*255+8)/16);
+        }
+        return out;
+    }
     /** A fixed 4x4 subpixel coverage calculation with a single stroke weight. */
     public static byte[] raster(Icon icon){
+        if(icon==Icon.PLAYER_BORDER||icon==Icon.PLAYER_FILL)return playerMask(icon==Icon.PLAYER_BORDER);
         List<double[]> segments=new ArrayList<>();
         for(String path:PATHS[icon.ordinal()].split(";")){
             String[] points=path.split(" ");

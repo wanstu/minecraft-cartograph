@@ -68,11 +68,13 @@ final class V4MapScreen extends Screen {
         labelLayout.begin(hud());pendingLabels.clear();
         drawRegions(graphics,mouseX,mouseY);
         if(minecraft!=null&&minecraft.player!=null){
-            var p=projection.project(minecraft.player.getX(),minecraft.player.getY(),minecraft.player.getZ());
-            int px=(int)Math.round(width/2.0+p.x()),pz=(int)Math.round(height/2.0+p.y());
-            if(labelLayout.reserve(px,pz,6,6)){
-                graphics.fill(px-4,pz-4,px+5,pz+5,0xff111111);
-                graphics.fill(px-2,pz-2,px+3,pz+3,0xffffcc55);
+            var player=minecraft.player;
+            var position=player.getPosition(partialTick);
+            var p=projection.project(position.x,position.y,position.z);
+            double px=width/2.0+p.x(),py=height/2.0+p.y();
+            if(px>=0&&px<width&&py>=0&&py<height&&
+                labelLayout.reserve((int)Math.round(px),(int)Math.round(py),PlayerHeading.RESERVE,PlayerHeading.RESERVE)){
+                session.icons.player(px,py,PlayerHeading.direction(camera,player.getViewYRot(partialTick)));
             }
         }
         drawMarkers(graphics);
