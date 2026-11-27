@@ -304,12 +304,38 @@ final class V4MapSession implements AutoCloseable {
     }
     long meshUploads(){return meshes.builds();}
     long meshBytes(){return meshes.bytes();}
+    boolean contoursEnabled;
+    private V4ContourLayer contours;
+    void drawContours(GuiGraphics graphics,net.minecraft.client.gui.Font font,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height){
+        if(!contoursEnabled||camera.elevationDegrees()!=90)return;
+        if(contours==null)contours=new V4ContourLayer();
+        Set<Key> exact=new HashSet<>();
+        for(var part:drawnParts)if(part.target.equals(part.patch.source()))exact.add(part.target);
+        List<ContourOverlayCache.Input> inputs=new ArrayList<>();
+        for(Key k:visible){
+            if(!exact.contains(k))continue;
+            var center=pages.get(k);
+            if(center==null||center.empty())continue;
+            inputs.add(new ContourOverlayCache.Input(center,
+                pages.get(new Key(k.lod(),k.x()+1,k.z())),
+                pages.get(new Key(k.lod(),k.x(),k.z()+1)),
+                pages.get(new Key(k.lod(),k.x()+1,k.z()+1))));
+        }
+        contours.draw(graphics,font,inputs,camera,projection,width,height);
+    }
+    String contourStatus(){
+        if(!contoursEnabled)return "Contours off";
+        if(elevation!=90)return "Contours: flat view only";
+        if(contours==null)return "Contours loading";
+        return "Contours "+contours.segments()+" | VBO "+contours.uploads()+(contours.limited()?" | budget limited":"");
+    }
     int drawCalls(){return drawCalls;}
     int exactPages(){return exactPages;}
     int fallbackPages(){return fallbackPages;}
     int quads(){return quads;}
     long uploads(){return uploads;}
     @Override public void close(){
+        if(contours!=null){contours.close();contours=null;}
         meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();
         if(textureId!=null)Minecraft.getInstance().getTextureManager().release(textureId);
         texture=null;textureId=null;slots.clear();free.clear();

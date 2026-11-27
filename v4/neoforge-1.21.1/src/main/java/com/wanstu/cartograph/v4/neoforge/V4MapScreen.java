@@ -41,6 +41,7 @@ final class V4MapScreen extends Screen {
         graphics.fill(0,0,width,height,0xff242b30);
         updatePlan();session.prepare(plan.keys());
         session.draw(graphics,plan.keys(),camera,projection,width,height);
+        session.drawContours(graphics,font,plan.keys(),camera,projection,width,height);
         if(minecraft!=null&&minecraft.player!=null){
             var p=projection.project(minecraft.player.getX(),minecraft.player.getY(),minecraft.player.getZ());
             int px=(int)Math.round(width/2.0+p.x()),pz=(int)Math.round(height/2.0+p.y());
@@ -49,15 +50,16 @@ final class V4MapScreen extends Screen {
                 graphics.fill(px-2,pz-2,px+3,pz+3,0xffffcc55);
             }
         }
-        graphics.fill(0,0,width,64,0xde151a20);
+        graphics.fill(0,0,width,74,0xde151a20);
         graphics.drawString(font,"Cartograph V4 | "+session.style.name()+" | LOD "+plan.lod(),8,6,0xffffffff);
         graphics.drawString(font,"Drag / scroll | 1-5 styles | R center | Esc close",8,17,0xffc1cad0);
         graphics.drawString(font,"T tilt "+(int)camera.elevationDegrees()+" | Q/E rotate "+(int)camera.yawDegrees()+" | N north-up",8,28,0xffc1cad0);
         graphics.drawString(font,"X "+(int)camera.x()+" Z "+(int)camera.z()+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size()+" | quads "+session.quads()+" | tex "+session.uploads()+" mesh "+session.meshUploads(),8,39,0xff9fadb8);
         String hit=picked==null?"Right click: pick observed terrain":"Pick "+(int)Math.floor(picked.world().x())+" "+(int)Math.floor(picked.world().y())+" "+(int)Math.floor(picked.world().z())+" | LOD "+picked.lod()+(picked.side()?" side":" top");
         graphics.drawString(font,hit,8,50,0xffc1cad0);
+        graphics.drawString(font,"C: "+session.contourStatus(),8,61,0xffc1cad0);
     }
-    @Override public boolean mouseClicked(double mx,double my,int button){if(button==0)return true;if(button==1&&my>=64){picked=session.pick(camera,mx-width/2.0,my-height/2.0);return true;}return super.mouseClicked(mx,my,button);}
+    @Override public boolean mouseClicked(double mx,double my,int button){if(button==0)return true;if(button==1&&my>=74){picked=session.pick(camera,mx-width/2.0,my-height/2.0);return true;}return super.mouseClicked(mx,my,button);}
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy){
         if(button!=0)return super.mouseDragged(mx,my,button,dx,dy);
         var p=camera.atHeight(-dx,-dy,camera.y());
@@ -71,6 +73,7 @@ final class V4MapScreen extends Screen {
         setCamera(camera.zoomAt(next,anchor));return true;
     }
     @Override public boolean keyPressed(int key,int scan,int modifiers){
+        if(key==GLFW.GLFW_KEY_C){session.contoursEnabled=!session.contoursEnabled;return true;}
         if(key==GLFW.GLFW_KEY_M){onClose();return true;}
         if(key>=GLFW.GLFW_KEY_1&&key<=GLFW.GLFW_KEY_5){session.style=MapRaster.Style.values()[key-GLFW.GLFW_KEY_1];return true;}
         if(key==GLFW.GLFW_KEY_R&&minecraft!=null&&minecraft.player!=null){
