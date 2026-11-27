@@ -117,13 +117,19 @@ public final class RegionPageStore {
 
     private final Path root;
     private final int maxCachedPages;
+    private final long cacheByteLimit;
+    private long estimatedCacheBytes;
     private final LinkedHashMap<Key,Page> cache=new LinkedHashMap<>(16,.75f,true);
     private long diskReads,diskWrites;
     private boolean recoveryRequired;
 
     /** root must be a new V4 world/dimension directory, never a legacy directory. */
     public RegionPageStore(Path root,int maxCachedPages) throws IOException {
-        if(maxCachedPages<1)throw new IllegalArgumentException("cache");
+        this(root,maxCachedPages,Long.MAX_VALUE);
+    }
+    public RegionPageStore(Path root,int maxCachedPages,long cacheByteLimit) throws IOException {
+        if(maxCachedPages<1||cacheByteLimit<1)throw new IllegalArgumentException("cache");
+        this.cacheByteLimit=cacheByteLimit;
         this.root=root;this.maxCachedPages=maxCachedPages;
         Files.createDirectories(root);
         recover();
@@ -131,19 +137,37 @@ public final class RegionPageStore {
     public synchronized long diskReads(){return diskReads;}
     public synchronized long diskWrites(){return diskWrites;}
     public synchronized int cachedPages(){return cache.size();}
-    public synchronized void clearCache(){cache.clear();}
+    public synchronized long estimatedCacheBytes(){return estimatedCacheBytes;}
+    public synchronized void clearCache(){cache.clear();estimatedCacheBytes=0;}
     private Path path(Key key){
         return root.resolve("lod-"+key.lod()).resolve("r."+key.x()+"."+key.z()+".cv4p");
     }
     private void remember(Page p){
-        cache.put(p.key,p);
-        while(cache.size()>maxCachedPages)cache.remove(cache.keySet().iterator().next());
+        Page previous=cache.remove(p.key);
+        if(previous!=null)estimatedCacheBytes-=estimatedWeight(previous);
+        long weight=estimatedWeight(p);
+        if(weight>cacheByteLimit)return;
+        while(!cache.isEmpty()&&(cache.size()>=maxCachedPages||estimatedCacheBytes>cacheByteLimit-weight)){
+            var it=cache.values().iterator();Page old=it.next();it.remove();
+            estimatedCacheBytes-=estimatedWeight(old);
+        }
+        cache.put(p.key,p);estimatedCacheBytes+=weight;
+    }
+
+    // Conservative accounting model, not measured JVM retained size.
+    private static long estimatedWeight(Page p){
+        long weight=256;
+        for(Entry e:p.entries.values()){
+            weight+=384;
+            if(e.feature!=null)weight+=128+2L*(e.feature.materialKey().length()+e.feature.biomeKey().length());
+        }
+        return weight;
     }
     public synchronized Page read(Key key)throws IOException{
         if(recoveryRequired)throw new IOException("Recover pending transaction first");
         Page p=cache.get(key);if(p!=null)return p;
         Path file=path(key);
-        if(Files.notExists(file))return new Page(key,0,Map.of());
+        if(Files.notExists(file)){p=new Page(key,0,Map.of());remember(p);return p;}
         if(Files.size(file)>MAX_RAW+1024)throw new IOException("Oversized page");
         diskReads++;
         p=decode(Files.readAllBytes(file),key);remember(p);return p;
