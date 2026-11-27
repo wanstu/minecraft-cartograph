@@ -1,7 +1,7 @@
 # Cartograph V4 development adapter
 
 Separate development-only NeoForge 1.21.1 module, not the V3.1 release.
-No client rendering or map UI. Java 21, NeoForge 21.1.265. From repository root:
+Native integrated-server 2D map reference (M to open). Java 21, NeoForge 21.1.265. From repository root:
 
     bash v3.1/neoforge-1.21.1/gradlew -p v4/neoforge-1.21.1 compileJava jar
 
@@ -18,6 +18,16 @@ V4 and vanilla save material, biome and height. First run committed 25 active ch
 second logged 50 active, 51 commits at tick 200. Both saved and stopped normally.
 
 Current limitations: conservative recapture on load/save, no automatic archive scanner
-or saved-dirty consumption, no production renderer or TPS/FPS validation. FrozenSaveCapture
+or saved-dirty consumption, no final production renderer or TPS/FPS validation. FrozenSaveCapture
 requires an initialized registry and a frozen save/copy; never call on the tick thread
 or against an actively changing source. Unknown material states fail closed. No deployment.
+## Native map smoke
+
+Use an isolated copy of a test save in run/saves, launch runClient, and enter that
+world. M opens the map, left drag pans, wheel zooms around cursor, 1-5 change
+reference style, R returns to the player, Esc/M closes. The session retains
+asynchronous CPU page and texture atlas caches across reopen. DADM actual
+client screenshots verified satellite/hand modern, drag, wheel, center and
+reopen; no extra texture uploads after the hand style populated its seven tiles.
+This development UI is not ready for deployment; no remote transport, 2.5D,
+full visual style or complete gameplay-performance acceptance.

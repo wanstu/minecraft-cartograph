@@ -18,6 +18,17 @@ public final class WorldIoServiceTest {
                 var original=io.read("minecraft:overworld",key).get(15,TimeUnit.SECONDS);check(original.data().size()==256,"world read");
                 check(io.read("minecraft:the_nether",key).get(15,TimeUnit.SECONDS).data().size()==0,"dimension separation");
                 var reopened=io.read("minecraft:overworld",key).get(15,TimeUnit.SECONDS);check(reopened.data().size()==256&&reopened.generation()!=original.generation(),"dimension eviction and reopen has distinct upload token");
+                var feed=io.presentationChanges("minecraft:overworld");
+                long before=feed.sequence();
+                var raster=io.raster("minecraft:overworld",key).get(15,TimeUnit.SECONDS);
+                check(raster.coverage(16)==255,"async raster from real geography");
+                io.write("minecraft:overworld",-1,0,columns).get(15,TimeUnit.SECONDS);
+                check(feed.sequence()==before,"no-op snapshot does not invalidate");
+                Entry[] changed=columns.clone();changed[0]=Entry.leaf(leaf.feature(),75,75,0,1,2,3);
+                io.write("minecraft:overworld",-1,0,changed).get(15,TimeUnit.SECONDS);
+                check(feed.since(before).keys().contains(key)&&feed.since(before).keys().size()==11,"durable local invalidation");
+                var updated=io.raster("minecraft:overworld",key).get(15,TimeUnit.SECONDS);
+                check(updated.generation()!=raster.generation()&&updated.surface(16)==75,"updated async raster");
                 var queue=new DirtyHandoffQueue(4);
                 var receipt=queue.submit(new InactiveDirty(new Position(-1,0),1));
                 check(io.handoff("minecraft:overworld",queue).get(15,TimeUnit.SECONDS)==1&&receipt.isDone(),"dirty handoff");

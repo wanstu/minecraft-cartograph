@@ -35,6 +35,10 @@ public final class CartographV4Dev {
         NeoForge.EVENT_BUS.addListener(CartographV4Dev::tick);
         NeoForge.EVENT_BUS.addListener(CartographV4Dev::stopped);
     }
+    /** Local client access only; returned service queues all geography work off-thread. */
+    static WorldIoService localPresentation(MinecraftServer server){
+        Runtime current=runtime;return current!=null&&current.server==server?current.io:null;
+    }
     private static void starting(ServerAboutToStartEvent e){runtime=new Runtime(e.getServer());}
     private static void onServer(ServerLevel level,java.util.function.Consumer<Runtime> task){
         MinecraftServer server=level.getServer();

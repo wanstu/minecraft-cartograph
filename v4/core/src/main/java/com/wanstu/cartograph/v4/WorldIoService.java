@@ -18,6 +18,7 @@ public final class WorldIoService {
     private final Map<String,Dimension> dimensions=new LinkedHashMap<>(16,.75f,true);
     private final ThreadPoolExecutor io;
     private final Map<String,LiveArchiveGate> gates=new ConcurrentHashMap<>();
+    private final Map<String,PresentationChanges> presentations=new ConcurrentHashMap<>();
     public record ArchiveProgress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending){}
     private volatile Throwable failure;
     private volatile Thread ownerThread;
@@ -42,7 +43,7 @@ public final class WorldIoService {
             var it=dimensions.values().iterator();it.next().close();it.remove();
         }
         Path path=root.resolve(directory(key));
-        d=new Dimension(new WorldGeography(path,4,32,8L*1024*1024,8L*1024*1024),new SavedDirtyIndex(path));
+        d=new Dimension(new WorldGeography(path,4,32,8L*1024*1024,8L*1024*1024,presentationChanges(key)),new SavedDirtyIndex(path));
         dimensions.put(key,d);return d;
     }
     private <T> CompletableFuture<T> submit(Callable<T> operation){
@@ -68,6 +69,13 @@ public final class WorldIoService {
             gate(key).committed(x,z);
             return GeographicWorker.WriteResult.COMMITTED;
         });
+    }
+    public PresentationChanges presentationChanges(String dimension){
+        directory(dimension);return presentations.computeIfAbsent(dimension,k->new PresentationChanges());
+    }
+    public CompletableFuture<MapRaster> raster(String dimension,Key key){
+        directory(dimension);Objects.requireNonNull(key);
+        return submit(()->MapRaster.build(open(dimension).world.read(key)));
     }
     public CompletableFuture<WorldGeography.RenderPage> read(String dimension,Key key){
         directory(dimension);Objects.requireNonNull(key);

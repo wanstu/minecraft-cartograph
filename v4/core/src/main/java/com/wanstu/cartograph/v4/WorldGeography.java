@@ -18,6 +18,7 @@ public final class WorldGeography {
                           long invalidatedPages,int publishedShards){}
     private record Cached(RenderPage page,long weight){}
     private final Path root;
+    private final PresentationChanges changes;
     private final int shardLimit,pageLimit;
     private final long pageBudget,perShardBudget;
     private final Set<RegionShard.Id> published=new HashSet<>();
@@ -28,6 +29,10 @@ public final class WorldGeography {
     private IOException failure;
     private final Thread owner=Thread.currentThread();
     public WorldGeography(Path root,int shardLimit,int pageLimit,long pageBudget,long shardBudget)throws IOException{
+        this(root,shardLimit,pageLimit,pageBudget,shardBudget,new PresentationChanges());
+    }
+    WorldGeography(Path root,int shardLimit,int pageLimit,long pageBudget,long shardBudget,PresentationChanges changes)throws IOException{
+        this.changes=Objects.requireNonNull(changes);
         if(shardLimit<1||pageLimit<1||pageBudget<1||shardBudget<shardLimit)throw new IllegalArgumentException("Cache budget");
         this.root=root;this.shardLimit=shardLimit;this.pageLimit=pageLimit;
         this.pageBudget=pageBudget;perShardBudget=shardBudget/shardLimit;
@@ -117,6 +122,7 @@ public final class WorldGeography {
         if(published.contains(id))throw new IOException("Shard already published");
         var result=FreshRegionBuilder.buildPacked(root,id,source);
         published.add(id);
+        if(result.chunks()>0)changes.reset();
         // Invalidate only resident pages intersecting the new shard.
         var it=pages.entrySet().iterator();
         while(it.hasNext()){
@@ -137,13 +143,16 @@ public final class WorldGeography {
         try{writes=shard.updateChunks(chunks);}
         catch(IOException e){failure=e;clearPresentationCache();throw e;}
         if(writes==0)return 0;
+        Set<Key> changed=new HashSet<>();
         for(var chunk:chunks)for(int lod=0;lod<=10;lod++){
             int cellX=Math.floorDiv(Math.multiplyExact(chunk.x(),16),1<<lod);
             int cellZ=Math.floorDiv(Math.multiplyExact(chunk.z(),16),1<<lod);
             Key key=Key.of(new GeographicPyramid.Cell(lod,cellX,cellZ));
+            changed.add(key);
             Cached removed=pages.remove(key);
             if(removed!=null){bytes-=removed.weight;invalidations++;}
         }
+        changes.changed(changed);
         return writes;
     }
     public void clearPresentationCache(){owner();pages.clear();bytes=0;}
