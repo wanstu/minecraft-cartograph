@@ -1,6 +1,7 @@
 package com.wanstu.cartograph.v4;
 
 import java.util.*;
+import java.util.concurrent.*;
 import static com.wanstu.cartograph.v4.CapturePump.*;
 
 /**
@@ -34,6 +35,8 @@ public final class ActiveChunkScheduler implements Source {
     private final Map<Position,State> active=new HashMap<>();
     private final NavigableSet<State> dirtyQueue=new TreeSet<>(ORDER),reviewQueue=new TreeSet<>(ORDER);
     private final LinkedHashMap<Position,Long> inactive=new LinkedHashMap<>();
+    private record Handoff(long revision,CompletableFuture<SavedDirtyIndex.Work> receipt){}
+    private final Map<Position,Handoff> handoffs=new HashMap<>();
     private final Thread owner=Thread.currentThread();
     private final LoadedCapture factory;
     private final long reviewInterval,retryInterval;
@@ -61,6 +64,7 @@ public final class ActiveChunkScheduler implements Source {
         if(existing!=null){if(needsCapture)changed(x,z);return;}
         State s=new State(p,next());
         s.dirty=inactive.remove(p)!=null||needsCapture;
+        handoffs.remove(p);
         active.put(p,s);
         // Spread clean-load reviews across the interval, not all on one tick.
         long jitter=Math.floorMod((long)p.hashCode(),reviewInterval);
@@ -81,6 +85,16 @@ public final class ActiveChunkScheduler implements Source {
         // An unfinished periodic review may have found a bypassed modification.
         if(s.dirty||s.ticket!=null)inactive.put(p,next());
     }
+    /**
+     * Shutdown phase, after lifecycle event intake and capture starts have stopped.
+     * Preserve dirty and in-flight active work for the saved-world path. The caller
+     * must drain durable handoff receipts before disposing this scheduler.
+     */
+    public void prepareShutdown(){
+        owner();
+        for(State s:active.values())if(s.dirty||s.ticket!=null)inactive.put(s.pos,next());
+        active.clear();dirtyQueue.clear();reviewQueue.clear();reserved=0;
+    }
     /** Bounded handoff. The receiver must retain work until the matching saved revision is processed. */
     public int drainInactive(int max,SavedHandoff handoff){
         owner();Objects.requireNonNull(handoff);if(max<0)throw new IllegalArgumentException("Limit");
@@ -89,9 +103,35 @@ public final class ActiveChunkScheduler implements Source {
         while(it.hasNext()&&accepted<max){
             var e=it.next();
             if(!handoff.offer(new InactiveDirty(e.getKey(),e.getValue())))break;
-            it.remove();accepted++;
+            handoffs.remove(e.getKey());it.remove();accepted++;
         }
         return accepted;
+    }
+    /** Bounded asynchronous handoff. Do not remove a pending revision merely on queue acceptance.
+     *  Rotate examined entries for fairness; a stale receipt cannot clear a newer revision.
+     */
+    public int drainInactiveAsync(int max,DirtyHandoffQueue queue){
+        owner();Objects.requireNonNull(queue);if(max<0)throw new IllegalArgumentException("Limit");
+        int examined=Math.min(max,inactive.size()),durable=0;
+        for(int i=0;i<examined;i++){
+            var it=inactive.entrySet().iterator();var e=it.next();
+            Position p=e.getKey();long rev=e.getValue();it.remove();
+            Handoff h=handoffs.get(p);
+            if(h!=null&&h.receipt.isDone()){
+                handoffs.remove(p);
+                try{
+                    var work=h.receipt.join();
+                    if(h.revision==rev&&work.position().equals(p)){durable++;continue;}
+                }catch(CompletionException|CancellationException failure){/* retry below */}
+                h=null;
+            }
+            if(h==null){
+                var receipt=queue.submit(new InactiveDirty(p,rev));
+                if(!receipt.isCompletedExceptionally())handoffs.put(p,new Handoff(rev,receipt));
+            }
+            inactive.put(p,rev);
+        }
+        return durable;
     }
     private State due(NavigableSet<State> queue){
         return queue.isEmpty()||queue.first().due>now?null:queue.first();
