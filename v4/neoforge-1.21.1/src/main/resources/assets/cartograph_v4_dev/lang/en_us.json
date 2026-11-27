@@ -112,5 +112,15 @@
   "cartograph_v4.editor.saving": "Saving…",
   "cartograph_v4.editor.approximate": "Approximate position; verify XYZ.",
   "cartograph_v4.editor.inclusive": "Inclusive X/Z block bounds.",
-  "cartograph_v4.editor.scroll": "Scroll for more fields"
+  "cartograph_v4.editor.scroll": "Scroll for more fields",
+  "cartograph_v4.hud.settings": "Display settings (O)",
+  "cartograph_v4.display.title": "Display settings",
+  "cartograph_v4.display.ui": "UI scale",
+  "cartograph_v4.display.labels": "Label size",
+  "cartograph_v4.display.markers": "Marker size",
+  "cartograph_v4.display.follow": "Scale markers with map",
+  "cartograph_v4.display.reset": "Reset display settings",
+  "cartograph_v4.display.on": "On",
+  "cartograph_v4.display.off": "Off",
+  "cartograph_v4.display.fit": "Fits window: %s"
 }

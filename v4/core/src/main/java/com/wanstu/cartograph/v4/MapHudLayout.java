@@ -4,7 +4,7 @@ import java.util.*;
 
 /** One immutable layout for drawing, hit tests and overlay exclusion in GUI pixels. */
 public final class MapHudLayout {
-    public enum Action { LAYERS, VIEW, MARKERS, REGIONS, DIAGNOSTICS, ZOOM_IN, ZOOM_OUT, CENTER, NORTH, CLOSE }
+    public enum Action { LAYERS, VIEW, MARKERS, REGIONS, SETTINGS, DIAGNOSTICS, ZOOM_IN, ZOOM_OUT, CENTER, NORTH, CLOSE }
     public record Rect(int x,int y,int w,int h){
         public boolean contains(double px,double py){return px>=x&&py>=y&&px<x+w&&py<y+h;}
         public boolean intersects(Rect other){return x<other.x+other.w&&x+w>other.x&&y<other.y+other.h&&y+h>other.y;}
@@ -13,15 +13,19 @@ public final class MapHudLayout {
     private final Rect header,status,debug;
     private final List<Control> controls;
     private final int width,height;
+    private final double scale;
     public MapHudLayout(int width,int height,boolean diagnostics){
+        this(width,height,diagnostics,1);
+    }
+    private MapHudLayout(int width,int height,boolean diagnostics,double scale){
         if(width<1||height<1)throw new IllegalArgumentException("Viewport");
-        this.width=width;this.height=height;
+        this.width=width;this.height=height;this.scale=scale;
         header=new Rect(0,0,width,Math.min(32,height));
         status=new Rect(0,Math.max(0,height-18),width,Math.min(height,18));
         List<Control> buttons=new ArrayList<>();
-        int size=Math.min(24,Math.min(Math.max(0,(width-12)/3),Math.max(0,(height-68)/5)));
+        int size=Math.min(24,Math.min(Math.max(0,(width-12)/3),Math.max(0,(height-72)/6)));
         if(size>=10){
-            Action[] left={Action.LAYERS,Action.VIEW,Action.MARKERS,Action.REGIONS,Action.DIAGNOSTICS};
+            Action[] left={Action.LAYERS,Action.VIEW,Action.MARKERS,Action.REGIONS,Action.SETTINGS,Action.DIAGNOSTICS};
             Action[] right={Action.ZOOM_IN,Action.ZOOM_OUT,Action.CENTER,Action.NORTH};
             for(int i=0;i<left.length;i++)buttons.add(new Control(left[i],new Rect(6,38+i*(size+3),size,size)));
             for(int i=0;i<right.length;i++)buttons.add(new Control(right[i],new Rect(width-6-size,height-24-(4-i)*size-(3-i)*3,size,size)));
@@ -31,6 +35,7 @@ public final class MapHudLayout {
         int dw=Math.min(300,Math.max(0,width-80)),dh=Math.min(84,Math.max(0,height-64));
         debug=diagnostics&&dw>=70&&dh>=20?new Rect((width-dw)/2,36,dw,dh):new Rect(0,0,0,0);
     }
+    public static MapHudLayout scaled(MapDisplaySettings.Ui ui,boolean diagnostics){return new MapHudLayout(ui.width(),ui.height(),diagnostics,ui.scale());}
     public Rect header(){return header;}
     public Rect status(){return status;}
     public Rect debug(){return debug;}
@@ -38,8 +43,10 @@ public final class MapHudLayout {
     public Action actionAt(double x,double y){for(var c:controls)if(c.bounds.contains(x,y))return c.action;return null;}
     public boolean blocks(double x,double y){return header.contains(x,y)||status.contains(x,y)||debug.contains(x,y)||actionAt(x,y)!=null;}
     public boolean permitsLabel(int x,int y,int halfWidth,int halfHeight){
-        if(x-halfWidth<0||y-halfHeight<0||x+halfWidth>=width||y+halfHeight>=height)return false;
-        var r=new Rect(x-halfWidth,y-halfHeight,2*halfWidth+1,2*halfHeight+1);
+        int left=(int)Math.floor((x-halfWidth)/scale),top=(int)Math.floor((y-halfHeight)/scale);
+        int right=(int)Math.ceil((x+halfWidth+1)/scale),bottom=(int)Math.ceil((y+halfHeight+1)/scale);
+        if(left<0||top<0||right>width||bottom>height)return false;
+        var r=new Rect(left,top,right-left,bottom-top);
         if(header.intersects(r)||status.intersects(r)||(debug.w>0&&debug.intersects(r)))return false;
         for(var c:controls)if(c.bounds.intersects(r))return false;
         return true;

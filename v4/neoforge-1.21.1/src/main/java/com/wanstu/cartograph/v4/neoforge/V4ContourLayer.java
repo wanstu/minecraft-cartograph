@@ -96,7 +96,7 @@ final class V4ContourLayer implements AutoCloseable {
         finally{VertexBuffer.unbind();}
     }
     void drawLabels(GuiGraphics graphics,Font font,MapCamera camera,MapProjection p,int width,int height,
-                    MapLabelLayout layout,Object terrain,java.util.function.Predicate<ContourLabelVisibility.Anchor> occlusionCheck){
+                    MapLabelLayout layout,double scale,Object terrain,java.util.function.Predicate<ContourLabelVisibility.Anchor> occlusionCheck){
         if(buffer==null)return;
         boolean raised=camera.elevationDegrees()!=90;
         if(raised)visibility.begin(camera,terrain);
@@ -105,16 +105,18 @@ final class V4ContourLayer implements AutoCloseable {
             if(occupied.size()>=MAX_LABELS)break;
             int x=(int)Math.round(width/2.0+p.screenX(label.x(),label.z()));
             int y=(int)Math.round(height/2.0+p.screenY(label.x(),label.y(),label.z()));
-            String value=Integer.toString(label.height());int w=font.width(value);
-            if(!layout.fits(x,y,w/2+4,7))continue;
+            String value=Integer.toString(label.height());int w=(int)Math.ceil(font.width(value)*scale),halfH=(int)Math.ceil(font.lineHeight*scale/2)+2;
+            if(!layout.fits(x,y,w/2+4,halfH))continue;
             boolean overlap=false;
             for(int[] prev:occupied)if(Math.abs(prev[0]-x)<(prev[2]+w)/2+24&&Math.abs(prev[1]-y)<24){overlap=true;break;}
             if(overlap)continue;
             if(raised&&!visibility.visible(label,occlusionCheck))continue;
-            if(!layout.reserve(x,y,w/2+4,7))continue;
+            if(!layout.reserve(x,y,w/2+4,halfH))continue;
             occupied.add(new int[]{x,y,w});
-            graphics.fill(x-w/2-2,y-6,x+(w+1)/2+2,y+5,0xb52a2621);
-            graphics.drawString(font,value,x-w/2,y-4,0xffffebc7,false);
+            graphics.fill(x-w/2-2,y-halfH,x+(w+1)/2+2,y+halfH+1,0xb52a2621);
+            graphics.pose().pushPose();
+            try{graphics.pose().translate(x,y,0);graphics.pose().scale((float)scale,(float)scale,1);graphics.drawString(font,value,-font.width(value)/2,-font.lineHeight/2,0xffffebc7,false);}
+            finally{graphics.pose().popPose();}
         }
     }
     int segments(){return segments;}

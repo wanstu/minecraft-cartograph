@@ -8,7 +8,7 @@ public final class MapIcons {
     public enum Icon {
         LAYERS,VIEW,PIN,REGION,INFO,PLUS,MINUS,CENTER,NORTH,CLOSE,
         HOME,FLAG,MINE,PORT,FARM,LANDMARK,WATER,UNDERGROUND,PORTAL,NETHER,END,OTHER,
-        EDIT,COPY,PLAYER_BORDER,PLAYER_FILL
+        EDIT,COPY,SETTINGS,PLAYER_BORDER,PLAYER_FILL
     }
     private static final String[] PATHS={
         "2,6 8,2 14,6 8,10 2,6;2,9 8,13 14,9;2,12 8,15 14,12",
@@ -34,12 +34,13 @@ public final class MapIcons {
         "4,14 12,14;8,14 8,4;3,8 8,5 13,8 8,11 3,8;5,3 8,1 11,3 8,5 5,3",
         "8,2 14,8 8,14 2,8 8,2;8,5 8,9;8,11 8,11",
         "3,10 11,2 14,5 6,13 2,14 3,10;9,4 12,7",
-        "5,2 13,2 13,11 10,11;3,5 10,5 10,14 3,14 3,5"
+        "5,2 13,2 13,11 10,11;3,5 10,5 10,14 3,14 3,5",
+        "2,4 14,4;5,2 5,6;2,8 14,8;11,6 11,10;2,12 14,12;7,10 7,14"
     };
     public static Icon toolbar(MapHudLayout.Action action){
         return switch(action){
             case LAYERS->Icon.LAYERS;case VIEW->Icon.VIEW;case MARKERS->Icon.PIN;case REGIONS->Icon.REGION;
-            case DIAGNOSTICS->Icon.INFO;case ZOOM_IN->Icon.PLUS;case ZOOM_OUT->Icon.MINUS;
+            case SETTINGS->Icon.SETTINGS;case DIAGNOSTICS->Icon.INFO;case ZOOM_IN->Icon.PLUS;case ZOOM_OUT->Icon.MINUS;
             case CENTER->Icon.CENTER;case NORTH->Icon.NORTH;case CLOSE->Icon.CLOSE;
         };
     }

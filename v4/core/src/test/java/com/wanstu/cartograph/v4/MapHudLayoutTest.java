@@ -28,7 +28,7 @@ public final class MapHudLayoutTest {
         check(!hud.blocks(320,180)&&hud.permitsLabel(320,180,30,8),"unblocked central map");
         check(!hud.permitsLabel(320,34,30,5),"label bounds intersect header");
         check(!hud.permitsLabel(0,180,10,5),"label offscreen");
-        check(hud.controls().size()==10,"normal size all controls");
+        check(hud.controls().size()==11,"normal size all controls");
         var gesture=new Gesture();
         gesture.press(false,0);check(!gesture.canPan(0),"toolbar-start drag blocked even outside");
         gesture.release(0);gesture.press(true,0);check(gesture.canPan(0)&&!gesture.canPan(1),"map-only left drag");

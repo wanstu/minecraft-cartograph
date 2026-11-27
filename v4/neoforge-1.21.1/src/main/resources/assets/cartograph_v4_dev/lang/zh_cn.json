@@ -112,5 +112,15 @@
   "cartograph_v4.editor.saving": "正在保存…",
   "cartograph_v4.editor.approximate": "近似位置，请核对 XYZ 坐标。",
   "cartograph_v4.editor.inclusive": "X/Z 范围包含边界方块。",
-  "cartograph_v4.editor.scroll": "滚动查看更多字段"
+  "cartograph_v4.editor.scroll": "滚动查看更多字段",
+  "cartograph_v4.hud.settings": "显示设置 (O)",
+  "cartograph_v4.display.title": "显示设置",
+  "cartograph_v4.display.ui": "界面缩放",
+  "cartograph_v4.display.labels": "文字字号",
+  "cartograph_v4.display.markers": "标点大小",
+  "cartograph_v4.display.follow": "标点随地图缩放",
+  "cartograph_v4.display.reset": "恢复默认显示设置",
+  "cartograph_v4.display.on": "开启",
+  "cartograph_v4.display.off": "关闭",
+  "cartograph_v4.display.fit": "适配窗口：%s"
 }
