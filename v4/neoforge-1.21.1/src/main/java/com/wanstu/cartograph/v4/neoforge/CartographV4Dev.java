@@ -98,7 +98,21 @@ public final class CartographV4Dev {
             regions=DimensionType.getStorageFolder(level.dimension(),level.getServer().getWorldPath(LevelResource.ROOT)).resolve("region");
             minY=level.getMinBuildHeight();height=level.getHeight();
             scheduler=new ActiveChunkScheduler(t->MinecraftSurfaceFacts.begin(level,t),12000,20,8);
-            pump=new CapturePump(scheduler,(x,z,columns)->io.write(key,x,z,columns),2);
+            pump=new CapturePump(scheduler,(x,z,columns)->{
+                LevelChunk loaded=level.getChunkSource().getChunkNow(x,z);
+                List<StructureIndex.Start> starts=null;
+                if(loaded!=null){
+                    var registry=level.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.STRUCTURE);
+                    starts=new ArrayList<>();
+                    for(var entry:loaded.getAllStarts().entrySet()){
+                        var start=entry.getValue();var id=registry.getKey(entry.getKey());
+                        if(start==null||!start.isValid()||id==null)continue;
+                        if(start.getChunkPos().x!=x||start.getChunkPos().z!=z)continue;
+                        starts.add(new StructureIndex.Start(id.toString(),x,z));
+                    }
+                }
+                return io.write(key,x,z,columns,starts);
+            },2);
         }
         void archive(WorldIoService io,long tick){
             if(archive!=null){

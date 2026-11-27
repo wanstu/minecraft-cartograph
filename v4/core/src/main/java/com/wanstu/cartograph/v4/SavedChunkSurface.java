@@ -11,12 +11,13 @@ public final class SavedChunkSurface {
         public NotFullyGeneratedException(String status){super("Chunk not fully generated: "+status);}
     }
     public record Column(String material,String biome,int surfaceY,int reliefY,int oceanFloorY){}
-    public record Snapshot(int x,int z,int dataVersion,Column[] columns){
-        public Snapshot{columns=columns.clone();}
+    public record Snapshot(int x,int z,int dataVersion,Column[] columns,List<StructureIndex.Start> starts){
+        public Snapshot(int x,int z,int dataVersion,Column[] columns){this(x,z,dataVersion,columns,List.of());}
+        public Snapshot{columns=columns.clone();starts=List.copyOf(starts);}
         @Override public Column[] columns(){return columns.clone();}
     }
     private static final int LIMIT=32*1024*1024, MAX_DEPTH=64, MAX_NODES=1_000_000;
-    private static final Set<String> ROOT=Set.of("DataVersion","xPos","zPos","Status","Heightmaps","sections");
+    private static final Set<String> ROOT=Set.of("DataVersion","xPos","zPos","Status","Heightmaps","sections","structures");
     private static final Set<String> HEIGHTS=Set.of("WORLD_SURFACE","OCEAN_FLOOR","MOTION_BLOCKING_NO_LEAVES");
     private static final Set<String> SECTION=Set.of("Y","block_states","biomes");
     private static final Set<String> PALETTE=Set.of("palette","data");
@@ -104,8 +105,25 @@ public final class SavedChunkSurface {
                 columns[i]=new Column(state,biome,y,r==0?GeographicPyramid.UNKNOWN_HEIGHT:minY+r-1,
                     f==0?GeographicPyramid.UNKNOWN_HEIGHT:minY+f-1);
             }
-            return new Snapshot(expectedX,expectedZ,version,columns);
+            return new Snapshot(expectedX,expectedZ,version,columns,starts(root,expectedX,expectedZ));
         }catch(IllegalArgumentException|ArithmeticException e){throw new IOException("Invalid chunk NBT",e);}
+    }
+    private static List<StructureIndex.Start> starts(Map<String,Object> root,int x,int z)throws IOException{
+        var structures=optionalCompound(root.get("structures"));
+        if(structures==null)return List.of();
+        var starts=optionalCompound(structures.get("starts"));
+        if(starts==null)return List.of();
+        if(starts.size()>128)throw new IOException("Structure start count");
+        List<StructureIndex.Start> out=new ArrayList<>();
+        for(var entry:starts.entrySet()){
+            var start=compound(entry.getValue());
+            if(!(start.get("id") instanceof String id))throw new IOException("Structure start id");
+            if(id.equals("INVALID")||id.equals("minecraft:empty"))continue;
+            if(number(start,"ChunkX")!=x||number(start,"ChunkZ")!=z)throw new IOException("Structure start coordinates");
+            try{out.add(new StructureIndex.Start(entry.getKey(),x,z));}
+            catch(IllegalArgumentException ex){throw new IOException("Structure key",ex);}
+        }
+        return List.copyOf(out);
     }
     private static int bits(int n){return 32-Integer.numberOfLeadingZeros(n-1);}
     private static int number(Map<String,Object> m,String k)throws IOException{
@@ -155,9 +173,20 @@ public final class SavedChunkSurface {
                 Object value;
                 if(depth==0&&key.equals("Heightmaps")&&type==10)value=compound(depth+1,HEIGHTS);
                 else if(depth==0&&key.equals("sections")&&type==9)value=sections(depth+1);
+                else if(depth==0&&key.equals("structures")&&type==10)value=compound(depth+1,Set.of("starts"));
+                else if(depth==1&&key.equals("starts")&&type==10)value=structureStarts(depth+1);
                 else if(keep==SECTION&&(key.equals("block_states")||key.equals("biomes"))&&type==10)value=compound(depth+1,PALETTE);
                 else value=value(type,depth+1);
                 if(m.put(key,value)!=null)throw new IOException("Duplicate NBT key");
+            }
+        }
+        private Map<String,Object> structureStarts(int depth)throws IOException{
+            visit(depth);Map<String,Object> out=new HashMap<>();
+            while(true){
+                int type=in.readUnsignedByte();if(type==0)return out;
+                String key=in.readUTF();
+                if(type!=10||out.size()>=128||out.put(key,compound(depth+1,Set.of("id","ChunkX","ChunkZ")))!=null)
+                    throw new IOException("Structure start compound");
             }
         }
         private List<?> sections(int depth)throws IOException{

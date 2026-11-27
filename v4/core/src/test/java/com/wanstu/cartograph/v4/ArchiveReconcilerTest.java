@@ -84,6 +84,28 @@ public final class ArchiveReconcilerTest{
                 var p=drain(archive,world,dirty,gate);
                 check(p.decoded()==1&&p.committed()==1&&world.matchesChunk(-2,3,map(SavedChunkSurface.decode(modified,-2,3,-16,16))),"same header changed bytes");
             }
+            // A separate index sees persisted starts even when terrain does not change.
+            var structures=new StructureIndex(target.resolve("structures"));
+            byte[] withStart=SavedChunkSurfaceTest.withStarts(modified,-2,3);
+            write(file,withStart);
+            try(var archive=new ArchiveReconciler(regions,target.resolve("structure-fixture-source"),-16,16,
+                    source->FreshRegionBuilder.Columns.fromEntries(map(source)),structures,()->{})){
+                var p=drain(archive,world,dirty,gate);
+                check(p.committed()==0&&structures.matches(-2,3,List.of(new StructureIndex.Start("minecraft:village_plains",-2,3))),"saved structure only update");
+            }
+            structures.replace(-2,3,List.of(new StructureIndex.Start("test:live",-2,3)));gate.committed(-2,3);
+            write(file,modified);
+            try(var archive=new ArchiveReconciler(regions,target.resolve("structure-fixture-source"),-16,16,
+                    source->FreshRegionBuilder.Columns.fromEntries(map(source)),structures,()->{})){
+                drain(archive,world,dirty,gate);
+                check(structures.matches(-2,3,List.of(new StructureIndex.Start("test:live",-2,3))),"stale saved starts do not replace live");
+            }
+            gate=new LiveArchiveGate();
+            try(var archive=new ArchiveReconciler(regions,target.resolve("structure-fixture-source"),-16,16,
+                    source->FreshRegionBuilder.Columns.fromEntries(map(source)),structures,()->{})){
+                drain(archive,world,dirty,gate);
+                check(structures.matches(-2,3,List.of()),"saved authoritative removal next session");
+            }
             // Source index is derived: corrupted metadata cannot cause a false skip or damage geography.
             Path fingerprint=target.resolve("source/r.-1.0.cv4src");
             byte[] corrupted=Files.readAllBytes(fingerprint);corrupted[20]^=1;Files.write(fingerprint,corrupted);

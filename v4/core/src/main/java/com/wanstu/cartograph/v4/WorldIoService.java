@@ -9,8 +9,8 @@ import static com.wanstu.cartograph.v4.RegionPageStore.*;
 /** One bounded IO owner shared across dimensions. No synchronous disk work on caller threads. */
 public final class WorldIoService {
     private static final class Dimension{
-        final WorldGeography world;final SavedDirtyIndex dirty;ArchiveReconciler archive;
-        Dimension(WorldGeography world,SavedDirtyIndex dirty){this.world=world;this.dirty=dirty;}
+        final WorldGeography world;final SavedDirtyIndex dirty;final StructureIndex structures;ArchiveReconciler archive;
+        Dimension(WorldGeography world,SavedDirtyIndex dirty,StructureIndex structures){this.world=world;this.dirty=dirty;this.structures=structures;}
         void close()throws IOException{if(archive!=null)archive.close();}
     }
     private final Path root;
@@ -19,6 +19,7 @@ public final class WorldIoService {
     private final ThreadPoolExecutor io;
     private final Map<String,LiveArchiveGate> gates=new ConcurrentHashMap<>();
     private final Map<String,PresentationChanges> presentations=new ConcurrentHashMap<>();
+    private final Map<String,java.util.concurrent.atomic.AtomicLong> structureRevisions=new ConcurrentHashMap<>();
     public record ArchiveProgress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending){}
     private volatile Throwable failure;
     private volatile Thread ownerThread;
@@ -43,7 +44,7 @@ public final class WorldIoService {
             var it=dimensions.values().iterator();it.next().close();it.remove();
         }
         Path path=root.resolve(directory(key));
-        d=new Dimension(new WorldGeography(path,4,32,8L*1024*1024,8L*1024*1024,presentationChanges(key)),new SavedDirtyIndex(path));
+        d=new Dimension(new WorldGeography(path,4,32,8L*1024*1024,8L*1024*1024,presentationChanges(key)),new SavedDirtyIndex(path),new StructureIndex(path.resolve("structures")));
         dimensions.put(key,d);return d;
     }
     private <T> CompletableFuture<T> submit(Callable<T> operation){
@@ -60,13 +61,19 @@ public final class WorldIoService {
     }
     public LiveArchiveGate gate(String dimension){directory(dimension);return gates.computeIfAbsent(dimension,k->new LiveArchiveGate());}
     public CompletableFuture<GeographicWorker.WriteResult> write(String dimension,int x,int z,Entry[] columns){
+        return write(dimension,x,z,columns,null);
+    }
+    public CompletableFuture<GeographicWorker.WriteResult> write(String dimension,int x,int z,Entry[] columns,List<StructureIndex.Start> starts){
         String key=Objects.requireNonNull(dimension);directory(key);
+        List<StructureIndex.Start> facts=starts==null?null:List.copyOf(starts);
         var snapshot=new DiskGeographicPyramid.ChunkSnapshot(x,z,columns);
         return submit(()->{
             var world=open(key).world;var id=RegionShard.Id.ofChunk(x,z);
             world.ensureShard(id);
             world.updateChunks(id,List.of(snapshot));
             gate(key).committed(x,z);
+            if(facts!=null)try{if(open(key).structures.replace(x,z,facts))structureCounter(key).incrementAndGet();}
+            catch(IOException ex){throw new java.io.UncheckedIOException(ex);}
             return GeographicWorker.WriteResult.COMMITTED;
         });
     }
@@ -90,13 +97,21 @@ public final class WorldIoService {
         directory(dimension);Objects.requireNonNull(regions);Objects.requireNonNull(mapper);
         return submit(()->{
             var d=open(dimension);
-            if(d.archive==null)d.archive=new ArchiveReconciler(regions,root.resolve(directory(dimension)).resolve("source"),minY,height,mapper);
+            if(d.archive==null)d.archive=new ArchiveReconciler(regions,root.resolve(directory(dimension)).resolve("source-structures"),minY,height,mapper,d.structures,()->structureCounter(dimension).incrementAndGet());
             var p=d.archive.step(d.world,d.dirty,gate(dimension),max);
             return new ArchiveProgress(p.decoded(),p.unchanged(),p.committed(),p.deferred(),p.sourceErrors(),p.discovered(),p.pending());
         });
     }
     public CompletableFuture<Integer> pendingDirty(String dimension){
         directory(dimension);return submit(()->open(dimension).dirty.size());
+    }
+    private java.util.concurrent.atomic.AtomicLong structureCounter(String dimension){
+        directory(dimension);return structureRevisions.computeIfAbsent(dimension,k->new java.util.concurrent.atomic.AtomicLong());
+    }
+    public long structureRevision(String dimension){return structureCounter(dimension).get();}
+    public CompletableFuture<StructureIndex.Result> structures(String dimension,StructureIndex.Bounds bounds){
+        directory(dimension);Objects.requireNonNull(bounds);
+        return submit(()->{try{return open(dimension).structures.query(bounds);}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
     }
     private MarkerStore markerStore(String dimension){return new MarkerStore(root.resolve(directory(dimension)).resolve("markers.cv4"));}
     public CompletableFuture<MarkerStore.Snapshot> markers(String dimension){

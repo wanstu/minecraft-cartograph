@@ -18,6 +18,7 @@ final class V4MapScreen extends Screen {
     private MapRayPicker.Hit picked;
     private record DrawnMarker(Marker marker,int x,int y){}
     private final List<DrawnMarker> drawnMarkers=new ArrayList<>();
+    private String structureStatus="";
     private static final double[] ANGLES={90,60,45,30};
     V4MapScreen(V4MapSession session,double x,double z){
         super(Component.literal("Cartograph V4 Dev"));this.session=session;
@@ -54,7 +55,8 @@ final class V4MapScreen extends Screen {
             }
         }
         drawMarkers(graphics);
-        graphics.fill(0,0,width,85,0xde151a20);
+        drawStructures(graphics);
+        graphics.fill(0,0,width,96,0xde151a20);
         graphics.drawString(font,"Cartograph V4 | "+session.style.name()+" | LOD "+plan.lod(),8,6,0xffffffff);
         graphics.drawString(font,"Drag / scroll | 1-5 styles | R center | Esc close",8,17,0xffc1cad0);
         graphics.drawString(font,"T tilt "+(int)camera.elevationDegrees()+" | Q/E rotate "+(int)camera.yawDegrees()+" | N north-up",8,28,0xffc1cad0);
@@ -64,6 +66,7 @@ final class V4MapScreen extends Screen {
         graphics.drawString(font,"C: "+session.contourStatus(),8,61,0xffc1cad0);
         String m=session.markers.busy()?"Markers loading/saving":session.markers.error!=null?"Marker error: "+session.markers.error:"B: manage markers | V: "+(session.markers.visible?"hide":"show");
         graphics.drawString(font,font.plainSubstrByWidth(m,Math.max(1,width-16)),8,72,0xffc1cad0);
+        graphics.drawString(font,font.plainSubstrByWidth("S: "+structureStatus,Math.max(1,width-16)),8,83,0xffc1cad0);
     }
     void centerOn(Marker m){setCamera(new MapCamera(m.x(),m.y(),m.z(),camera.pixelsPerBlock(),camera.yawDegrees(),camera.elevationDegrees()));}
     private void drawMarkers(GuiGraphics g){
@@ -73,7 +76,7 @@ final class V4MapScreen extends Screen {
         for(Marker m:snapshot.active()){
             var p=projection.project(m.x()+.5,m.y()+1,m.z()+.5);
             int x=(int)Math.round(width/2.0+p.x()),y=(int)Math.round(height/2.0+p.y());
-            if(x<8||x>=width-8||y<91||y>=height-12)continue;
+            if(x<8||x>=width-8||y<102||y>=height-12)continue;
             boolean overlap=false;
             for(var prev:drawnMarkers)if(Math.abs(prev.x-x)<12&&Math.abs(prev.y-y)<12){overlap=true;break;}
             if(overlap)continue;
@@ -90,8 +93,32 @@ final class V4MapScreen extends Screen {
             }
         }
     }
+    private void drawStructures(GuiGraphics g){
+        if(!session.structuresVisible){structureStatus="Structures off";return;}
+        // Start-chunk centers are horizontal locations only. Do not invent an elevation in relief view.
+        if(camera.elevationDegrees()!=90){structureStatus="Structures: flat view only";return;}
+        var bounds=StructureView.bounds(projection.bounds(width,height,camera.y(),camera.y()));
+        var result=session.structureView.tick(bounds,session.io.structureRevision(session.dimension));
+        structureStatus=result.limited()?"Structure view limited; zoom in":session.structureView.error()!=null?session.structureView.error():session.structureView.busy()?"Structures loading":"Structures "+result.starts().size();
+        List<int[]> used=new ArrayList<>();
+        for(var marker:drawnMarkers)used.add(new int[]{marker.x,marker.y});
+        int displayed=0;
+        for(var start:result.starts()){
+            int x=(int)Math.round(width/2.0+projection.screenX(start.x(),start.z()));
+            int y=(int)Math.round(height/2.0+projection.screenY(start.x(),camera.y(),start.z()));
+            if(x<8||x>=width-8||y<102||y>=height-12)continue;
+            boolean overlap=false;for(int[] at:used)if(Math.abs(at[0]-x)<16&&Math.abs(at[1]-y)<16){overlap=true;break;}
+            if(overlap)continue;
+            if(displayed>=96)break;
+            used.add(new int[]{x,y});displayed++;
+            g.fill(x-4,y-4,x+5,y+5,0xff20262d);
+            g.renderOutline(x-3,y-3,7,7,0xff8ed8ef);
+            g.drawCenteredString(font,"S",x,y-4,0xff8ed8ef);
+            if(displayed<=32)g.drawCenteredString(font,font.plainSubstrByWidth(start.type(),100),x,y+7,0xffb7e1ee);
+        }
+    }
     @Override public boolean mouseClicked(double mx,double my,int button){
-        if(my<85)return true;
+        if(my<96)return true;
         if(button==0)return true;
         if(button!=1)return super.mouseClicked(mx,my,button);
         if(session.markers.snapshot==null||session.markers.busy())return true;
@@ -118,6 +145,7 @@ final class V4MapScreen extends Screen {
         setCamera(camera.zoomAt(next,anchor));return true;
     }
     @Override public boolean keyPressed(int key,int scan,int modifiers){
+        if(key==GLFW.GLFW_KEY_S){session.structuresVisible=!session.structuresVisible;return true;}
         if(key==GLFW.GLFW_KEY_B){minecraft.setScreen(new V4MarkerManager(this,session));return true;}
         if(key==GLFW.GLFW_KEY_V){session.markers.visible=!session.markers.visible;return true;}
         if(key==GLFW.GLFW_KEY_C){session.contoursEnabled=!session.contoursEnabled;return true;}

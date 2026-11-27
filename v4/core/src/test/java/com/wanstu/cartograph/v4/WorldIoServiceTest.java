@@ -29,6 +29,15 @@ public final class WorldIoServiceTest {
                 check(feed.since(before).keys().contains(key)&&feed.since(before).keys().size()==11,"durable local invalidation");
                 var updated=io.raster("minecraft:overworld",key).get(15,TimeUnit.SECONDS);
                 check(updated.generation()!=raster.generation()&&updated.surface(16)==75,"updated async raster");
+                var start=new StructureIndex.Start("minecraft:village_plains",-1,0);
+                var area=new StructureIndex.Bounds(-2,-2,2,2);
+                long rev=io.structureRevision("minecraft:overworld"),geo=feed.sequence();
+                io.write("minecraft:overworld",-1,0,changed,List.of(start)).get(15,TimeUnit.SECONDS);
+                check(io.structureRevision("minecraft:overworld")==rev+1&&feed.sequence()==geo,"structure only change");
+                check(io.structures("minecraft:overworld",area).get(15,TimeUnit.SECONDS).starts().equals(List.of(start)),"observed live structure");
+                io.write("minecraft:overworld",-1,0,changed,List.of(start)).get(15,TimeUnit.SECONDS);
+                check(io.structureRevision("minecraft:overworld")==rev+1,"structure no-op");
+                check(io.structures("minecraft:the_nether",area).get(15,TimeUnit.SECONDS).starts().isEmpty(),"structure dimension isolation");
                 var marker=MarkerStoreTest.marker(1);
                 var markerChange=MarkerStoreTest.change(MarkerStore.Action.UPSERT,marker);
                 var markers=io.changeMarker("minecraft:overworld",0,markerChange).get(15,TimeUnit.SECONDS);
@@ -46,6 +55,7 @@ public final class WorldIoServiceTest {
             io=new WorldIoService(root,1,16);
             try{
                 check(io.pendingDirty("minecraft:overworld").get(15,TimeUnit.SECONDS)==1,"durable dirty restart");
+                check(io.structures("minecraft:overworld",new StructureIndex.Bounds(-2,-2,2,2)).get(15,TimeUnit.SECONDS).starts().equals(List.of(new StructureIndex.Start("minecraft:village_plains",-1,0))),"structure restart");
                 check(io.pendingDirty("minecraft:the_nether").get(15,TimeUnit.SECONDS)==0,"dirty dimension separation");
                 check(io.markers("minecraft:overworld").get(15,TimeUnit.SECONDS).active().equals(List.of(MarkerStoreTest.marker(1))),"markers restart");
                 Path markerFile=root.resolve(HexFormat.of().formatHex("minecraft:overworld".getBytes(java.nio.charset.StandardCharsets.UTF_8))).resolve("markers.cv4");

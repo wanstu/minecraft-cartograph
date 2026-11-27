@@ -10,17 +10,22 @@ import static com.wanstu.cartograph.v4.ActiveChunkScheduler.Position;
 final class ArchiveReconciler implements AutoCloseable {
     record Progress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending){}
     private record Candidate(Path file,int rx,int rz,int x,int z,SavedDirtyIndex.Work work){}
-    private record Ready(Candidate candidate,byte[] hash,Entry[] columns,boolean alreadyMatches){}
+    private record Ready(Candidate candidate,byte[] hash,Entry[] columns,boolean alreadyMatches,List<StructureIndex.Start> starts){}
     private final Path regions;
     private final int minY,height;
     private final OfflineRegionBackfill.Mapper mapper;
     private final SourceFingerprints fingerprints;
+    private final StructureIndex structures;
+    private final Runnable structureChanged;
     private SavedArchiveCursor cursor;
     private boolean discovered;
     private int sinceFlush;
     private long decoded,unchanged,committed,deferred,errors;
     ArchiveReconciler(Path regions,Path index,int minY,int height,OfflineRegionBackfill.Mapper mapper)throws IOException{
-        this.regions=regions;this.minY=minY;this.height=height;this.mapper=Objects.requireNonNull(mapper);
+        this(regions,index,minY,height,mapper,null,()->{});
+    }
+    ArchiveReconciler(Path regions,Path index,int minY,int height,OfflineRegionBackfill.Mapper mapper,StructureIndex structures,Runnable structureChanged)throws IOException{
+        this.regions=regions;this.minY=minY;this.height=height;this.mapper=Objects.requireNonNull(mapper);this.structures=structures;this.structureChanged=structureChanged;
         fingerprints=new SourceFingerprints(index);
     }
     Progress progress(SavedDirtyIndex dirty){return new Progress(decoded,unchanged,committed,deferred,errors,discovered,dirty.size());}
@@ -70,12 +75,12 @@ final class ArchiveReconciler implements AutoCloseable {
                     if(fingerprints.matches(c.x,c.z,revision,hash)&&gate.valid(c.x,c.z)){
                         unchanged++;if(c.work!=null)ack.add(c.work);continue;
                     }
-                    Entry[] columns;
+                    Entry[] columns;List<StructureIndex.Start> starts;
                     try{
                         var source=SavedChunkSurface.decode(encoded.decode().nbt(),c.x,c.z,minY,height);
                         var mapped=mapper.map(source);
                         if(mapped==null)throw new IOException("Unmapped saved chunk");
-                        columns=mapped.toEntries();decoded++;
+                        columns=mapped.toEntries();starts=source.starts();decoded++;
                     }catch(SavedChunkSurface.NotFullyGeneratedException e){
                         deferred++;if(c.work!=null)retry.add(c.work);continue;
                     }catch(IOException|RuntimeException e){
@@ -85,11 +90,14 @@ final class ArchiveReconciler implements AutoCloseable {
                     boolean equal=world.matchesChunk(c.x,c.z,columns);
                     // A recently committed live capture is authoritative during this
                     // server session. Never replace it with a conflicting disk snapshot.
-                    if(gate.protectedLive(c.x,c.z)&&!equal){
+                    boolean sameStarts=true;
+                    if(structures!=null&&gate.protectedLive(c.x,c.z))try{sameStarts=structures.matches(c.x,c.z,starts);}
+                    catch(IOException ex){errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    if(gate.protectedLive(c.x,c.z)&&(!equal||!sameStarts)){
                         deferred++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;
                     }
                     batches.computeIfAbsent(RegionShard.Id.ofChunk(c.x,c.z),k->new ArrayList<>())
-                        .add(new Ready(c,hash,columns,equal));
+                        .add(new Ready(c,hash,columns,equal,starts));
                     retained=true;
                 }finally{if(!retained)gate.end(c.x,c.z);}
             }
@@ -109,6 +117,8 @@ final class ArchiveReconciler implements AutoCloseable {
                     Candidate c=r.candidate;
                     if(r.alreadyMatches)unchanged++;else committed++;
                     if(!gate.valid(c.x,c.z)){if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    if(structures!=null)try{if(structures.replace(c.x,c.z,r.starts))structureChanged.run();}
+                    catch(IOException e){errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
                     fingerprints.record(c.x,c.z,world.chunkPageRevision(c.x,c.z),r.hash);sinceFlush++;
                     if(c.work!=null)ack.add(c.work);
                 }
