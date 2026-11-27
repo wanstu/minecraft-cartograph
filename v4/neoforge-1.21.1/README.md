@@ -56,3 +56,8 @@ is capped at 262144 quads. Core tests passed, but native build and client QA
 are pending because DADM source sync was blocked and EADM lacks the offline
 NeoForge 21.1.265 dependency. Do not deploy this commit without actual native
 compile and client verification; 8360b57 is the previous verified reference.
+The retained batch now uses bounded region-local groups instead of rebuilding
+a whole visible batch after local changes. Actual Java API compilation passed
+against locally cached Minecraft 1.21.1 / NeoForge 21.1.211 artifacts; target
+21.1.265 Gradle packaging and runtime QA are still required. The contour
+calculation core is independently tested, not yet displayed in the map UI.

@@ -99,13 +99,19 @@ final class V4MapSession implements AutoCloseable {
         void face(Part part,double x0,double y0,double z0,double x1,double y1,double z1,
                   double u0,double v0,double u1,double v1,int light);
     }
-    private VertexBuffer terrain;
+    private record Group(int lod,int x,int z,boolean raised,List<Part> parts){}
+    private record Geometry(VertexBuffer buffer,int quads) implements AutoCloseable{
+        public void close(){if(buffer!=null)buffer.close();}
+    }
+    private final RetainedGroups<Group,Geometry> meshes=new RetainedGroups<>(32L*1024*1024,128);
+    private List<Group> wantedGroups=List.of();
+    private Set<Group> protectedGroups=Set.of();
+    private List<Part> drawnParts=List.of();
     private List<Part> retained=List.of();
     private List<Key> lastDrawKeys;
-    private long lastRevision=-1,lastUploads=-1,meshUploads;
+    private long lastRevision=-1,lastUploads=-1;
     private boolean lastRaised;
     private MapRaster.Style lastStyle;
-    private double originX,originZ;
     private MapCamera lastRenderedCamera;
     private static final int MAX_QUADS=262144;
 
@@ -148,47 +154,64 @@ final class V4MapSession implements AutoCloseable {
                 upper-=p.raster.relief().topCount()+p.raster.relief().wallCount();it.remove();
             }
         }
+        // Drop stale invisible groups too, so their raster/neighbor references cannot accumulate.
+        meshes.retainValid(g->g.parts.stream().allMatch(p->Objects.equals(slots.get(key(p.raster)),p.slot)&&pages.get(p.raster.key())==p.raster&&p.adjacent.stream().allMatch(n->n==null||pages.get(n.key())==n)));
         if(!modeChanged&&retained.equals(next))return;
         retained=List.copyOf(next);exactPages=exact;
         fallbackPages=(int)next.stream().filter(p->!p.patch.source().equals(p.target)).map(Part::target).distinct().count();
-        rebuild(raised);
+        Map<String,List<Part>> grouped=new LinkedHashMap<>();
+        for(Part p:retained){Key k=p.target;int edge=raised?2:8;
+            String id=k.lod()+":"+Math.floorDiv(k.x(),edge)+":"+Math.floorDiv(k.z(),edge);
+            grouped.computeIfAbsent(id,ignored->new ArrayList<>()).add(p);}
+        List<Group> groups=new ArrayList<>();
+        for(var parts:grouped.values()){Key k=parts.getFirst().target;int edge=raised?2:8;
+            groups.add(new Group(k.lod(),Math.floorDiv(k.x(),edge),Math.floorDiv(k.z(),edge),raised,List.copyOf(parts)));}
+        Map<Key,Integer> rank=new HashMap<>();for(int i=0;i<visible.size();i++)rank.put(visible.get(i),i);
+        groups.sort(Comparator.comparingInt(g->g.parts.stream().mapToInt(p->rank.get(p.target)).min().orElse(Integer.MAX_VALUE)));
+        wantedGroups=List.copyOf(groups);protectedGroups=Set.copyOf(groups);
     }
-    private void rebuild(boolean raised){
-        if(terrain!=null){terrain.close();terrain=null;}
-        quads=0;
-        if(retained.isEmpty())return;
-        var k=retained.getFirst().target;
-        originX=k.x()*(32.0*(1<<k.lod()));originZ=k.z()*(32.0*(1<<k.lod()));
+    private static long estimate(Group group){
+        long faces=0;
+        for(Part p:group.parts)faces+=group.raised?p.raster.relief().topCount()+p.raster.relief().wallCount()+128:1;
+        return faces*96;
+    }
+    private static double originX(Group group){return group.x*32.0*(1<<group.lod)*(group.raised?2:8);}
+    private static double originZ(Group group){return group.z*32.0*(1<<group.lod)*(group.raised?2:8);}
+    private RetainedGroups.Item<Geometry> build(Group group){
+        double ox=originX(group),oz=originZ(group);
+        int[] count={0};
         var buffer=Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,DefaultVertexFormat.POSITION_TEX_COLOR);
-        emit(raised,null,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->{
+        emit(group.parts,group.raised,null,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->{
             float u=(part.slot%32*EDGE)/(float)SIZE,v=(part.slot/32*EDGE)/(float)SIZE;
             float a=u+(float)(u0/SIZE),b=v+(float)(v0/SIZE),c=u+(float)(u1/SIZE),d=v+(float)(v1/SIZE);
             if(y0==y1){
-                vertex(buffer,x0,y0,z0,a,b,light);
-                vertex(buffer,x0,y0,z1,a,d,light);
-                vertex(buffer,x1,y0,z1,c,d,light);
-                vertex(buffer,x1,y0,z0,c,b,light);
+                vertex(buffer,x0-ox,y0,z0-oz,a,b,light);
+                vertex(buffer,x0-ox,y0,z1-oz,a,d,light);
+                vertex(buffer,x1-ox,y0,z1-oz,c,d,light);
+                vertex(buffer,x1-ox,y0,z0-oz,c,b,light);
             }else{
-                vertex(buffer,x0,y0,z0,a,b,light);
-                vertex(buffer,x0,y1,z0,a,b,light);
-                vertex(buffer,x1,y1,z1,a,b,light);
-                vertex(buffer,x1,y0,z1,a,b,light);
+                vertex(buffer,x0-ox,y0,z0-oz,a,b,light);
+                vertex(buffer,x0-ox,y1,z0-oz,a,b,light);
+                vertex(buffer,x1-ox,y1,z1-oz,a,b,light);
+                vertex(buffer,x1-ox,y0,z1-oz,a,b,light);
             }
-            quads++;
+            count[0]++;
         });
         var built=buffer.build();
-        if(built==null)return;
-        terrain=new VertexBuffer(VertexBuffer.Usage.STATIC);
+        if(built==null)return new RetainedGroups.Item<>(new Geometry(null,0),0);
+        var terrain=new VertexBuffer(VertexBuffer.Usage.STATIC);
         terrain.bind();
-        try{terrain.upload(built);meshUploads++;}
+        try{terrain.upload(built);}
+        catch(RuntimeException|Error ex){terrain.close();throw ex;}
         finally{VertexBuffer.unbind();}
+        return new RetainedGroups.Item<>(new Geometry(terrain,count[0]),96L*count[0]);
     }
-    private void vertex(BufferBuilder b,double x,double y,double z,float u,float v,int light){
-        b.addVertex((float)(x-originX),(float)y,(float)(z-originZ)).setUv(u,v).setColor(light,light,light,255);
+    private static void vertex(BufferBuilder b,double x,double y,double z,float u,float v,int light){
+        b.addVertex((float)x,(float)y,(float)z).setUv(u,v).setColor(light,light,light,255);
     }
     /** One face traversal, shared between retained geometry construction and precise CPU picking. */
-    private void emit(boolean raised,MapRayPicker picker,Faces sink){
-        for(Part part:retained){
+    private void emit(List<Part> parts,boolean raised,MapRayPicker picker,Faces sink){
+        for(Part part:parts){
             var patch=part.patch;var raster=part.raster;
             double cell=1<<patch.source().lod();
             double bx=patch.source().x()*32.0*cell,bz=patch.source().z()*32.0*cell;
@@ -236,45 +259,58 @@ final class V4MapSession implements AutoCloseable {
     MapRayPicker.Hit pick(MapCamera camera,double sx,double sy){
         if(!camera.equals(lastRenderedCamera)||lastRaised!=(camera.elevationDegrees()!=90))return null;
         var picker=new MapRayPicker(camera,sx,sy);
-        emit(lastRaised,picker,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->picker.face(part.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1));
+        emit(drawnParts,lastRaised,picker,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->picker.face(part.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1));
         return picker.result();
     }
     /** Static world-relative vertices. Each camera movement changes just the affine transform. */
     void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height){
-        drawCalls=0;lastRenderedCamera=null;
+        drawCalls=quads=0;lastRenderedCamera=null;drawnParts=List.of();
         if(texture==null)return;
         boolean raised=camera.elevationDegrees()!=90;
         graphics.flush();refresh(visible,raised);
-        if(terrain==null)return;
+        long start=System.nanoTime();int budget=2;
+        for(Group group:wantedGroups){
+            if(meshes.get(group)!=null)continue;
+            if(budget==0||System.nanoTime()-start>=1_000_000)break;
+            if(meshes.ensure(group,estimate(group),protectedGroups,this::build))budget--;
+        }
         double depthScale=Math.min(1,70.0/(Math.hypot(width,height)/camera.pixelsPerBlock()*2+8192));
-        double[] m=MapTransform.coefficients(camera,originX,0,originZ,width,height,depthScale,raised);
-        var affine=new org.joml.Matrix4f().set(
-            (float)m[0],(float)m[4],(float)m[8],0,
-            (float)m[1],(float)m[5],(float)m[9],0,
-            (float)m[2],(float)m[6],(float)m[10],0,
-            (float)m[3],(float)m[7],(float)m[11],1);
-        var matrix=new org.joml.Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose()).mul(affine);
         RenderSystem.setShaderTexture(0,textureId);
         RenderSystem.setShaderColor(1,1,1,1);
         RenderSystem.enableBlend();RenderSystem.defaultBlendFunc();
         if(raised){RenderSystem.depthMask(true);RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableDepthTest();RenderSystem.disableCull();}
-        terrain.bind();
-        try{terrain.drawWithShader(matrix,RenderSystem.getProjectionMatrix(),GameRenderer.getPositionTexColorShader());drawCalls=1;lastRenderedCamera=camera;}
-        finally{
+        var rendered=new ArrayList<Part>();
+        try{
+            for(Group group:wantedGroups){
+                Geometry mesh=meshes.get(group);
+                if(mesh==null||mesh.buffer==null)continue;
+                double[] m=MapTransform.coefficients(camera,originX(group),0,originZ(group),width,height,depthScale,raised);
+                var affine=new org.joml.Matrix4f().set(
+                    (float)m[0],(float)m[4],(float)m[8],0,
+                    (float)m[1],(float)m[5],(float)m[9],0,
+                    (float)m[2],(float)m[6],(float)m[10],0,
+                    (float)m[3],(float)m[7],(float)m[11],1);
+                var matrix=new org.joml.Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose()).mul(affine);
+                mesh.buffer.bind();
+                mesh.buffer.drawWithShader(matrix,RenderSystem.getProjectionMatrix(),GameRenderer.getPositionTexColorShader());
+                drawCalls++;quads+=mesh.quads;rendered.addAll(group.parts);
+            }
+            drawnParts=List.copyOf(rendered);lastRenderedCamera=camera;
+        }finally{
             VertexBuffer.unbind();
             if(raised){RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableCull();RenderSystem.enableDepthTest();}
             RenderSystem.disableBlend();
         }
     }
-    long meshUploads(){return meshUploads;}
-
+    long meshUploads(){return meshes.builds();}
+    long meshBytes(){return meshes.bytes();}
     int drawCalls(){return drawCalls;}
     int exactPages(){return exactPages;}
     int fallbackPages(){return fallbackPages;}
     int quads(){return quads;}
     long uploads(){return uploads;}
     @Override public void close(){
-        if(terrain!=null){terrain.close();terrain=null;}retained=List.of();
+        meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();
         if(textureId!=null)Minecraft.getInstance().getTextureManager().release(textureId);
         texture=null;textureId=null;slots.clear();free.clear();
     }

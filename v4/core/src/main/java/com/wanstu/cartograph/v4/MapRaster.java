@@ -26,11 +26,12 @@ public final class MapRaster {
     private final int[][] pixels;
     private final float[] surface,ground;
     private final byte[] coverage;
+    private final BitSet completeGround;
     private final boolean empty;
     private final ReliefMesh relief;
     private final float minSurface,maxSurface;
-    private MapRaster(Key key,long generation,int[][] pixels,float[] surface,float[] ground,byte[] coverage){
-        this.key=key;this.generation=generation;this.pixels=pixels;this.surface=surface;this.ground=ground;this.coverage=coverage;boolean any=false;for(byte b:coverage)if(b!=0){any=true;break;}empty=!any;relief=ReliefMesh.build(surface,coverage);
+    private MapRaster(Key key,long generation,int[][] pixels,float[] surface,float[] ground,byte[] coverage,BitSet completeGround){
+        this.key=key;this.generation=generation;this.pixels=pixels;this.surface=surface;this.ground=ground;this.coverage=coverage;this.completeGround=completeGround;boolean any=false;for(byte b:coverage)if(b!=0){any=true;break;}empty=!any;relief=ReliefMesh.build(surface,coverage);
         float min=Float.POSITIVE_INFINITY,max=Float.NEGATIVE_INFINITY;
         for(int i=0;i<surface.length;i++)if(coverage[i]!=0&&Float.isFinite(surface[i])){min=Math.min(min,surface[i]);max=Math.max(max,surface[i]);}
         minSurface=min;maxSurface=max;
@@ -41,6 +42,7 @@ public final class MapRaster {
     public float surface(int slot){return surface[slot];}
     public float ground(int slot){return ground[slot];}
     public int coverage(int slot){return Byte.toUnsignedInt(coverage[slot]);}
+    public boolean completeGround(int slot){return completeGround.get(slot);}
     public boolean empty(){return empty;}
     public ReliefMesh relief(){return relief;}
     public float minSurface(){return minSurface;}
@@ -56,7 +58,7 @@ public final class MapRaster {
     }
     static MapRaster build(WorldGeography.RenderPage page){
         var source=page.data();int[][] pixels=new int[Style.values().length][N];
-        float[] surface=new float[N],ground=new float[N];byte[] coverage=new byte[N];
+        float[] surface=new float[N],ground=new float[N];byte[] coverage=new byte[N];BitSet completeGround=new BitSet(N);
         Arrays.fill(surface,Float.NaN);Arrays.fill(ground,Float.NaN);
         long area=1L<<(2*source.key().lod());
         for(int i=0;i<N;i++){
@@ -64,6 +66,7 @@ public final class MapRaster {
             var a=e.stats();long known=a.known();
             int alpha=(int)Math.max(1,(known*255+area/2)/area);
             coverage[i]=(byte)alpha;
+            if(a.groundCount()==area)completeGround.set(i);
             if(a.surfaceCount()>0)surface[i]=(float)((double)a.surfaceSum()/a.surfaceCount());
             if(a.groundCount()>0)ground[i]=(float)((double)a.groundSum()/a.groundCount());
             int sat=rgb(SRGB[(int)(a.redSum()/known)],SRGB[(int)(a.greenSum()/known)],SRGB[(int)(a.blueSum()/known)]);
@@ -80,6 +83,6 @@ public final class MapRaster {
                 pixels[style+2][i]=alpha<<24|darken(rgb((int)(r/known),(int)(g/known),(int)(b/known)),waterShade);
             }
         }
-        return new MapRaster(source.key(),page.generation(),pixels,surface,ground,coverage);
+        return new MapRaster(source.key(),page.generation(),pixels,surface,ground,coverage,completeGround);
     }
 }
