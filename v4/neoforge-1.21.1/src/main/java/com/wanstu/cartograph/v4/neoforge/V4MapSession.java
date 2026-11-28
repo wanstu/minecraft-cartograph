@@ -37,6 +37,13 @@ final class V4MapSession implements AutoCloseable {
     private List<Key> requested=List.of(),uploadOrder=List.of();
     private long uploads;
     private int drawCalls,exactPages,fallbackPages,quads;
+    // Last uploaded observations, independent of the asynchronous CPU invalidation queue.
+    // Bounded by atlas residency, never used across styles or dimensions.
+    private final Map<Key,MapRaster> published=new HashMap<>();
+    private List<Group> presentedGroups=List.of();
+    private MapRaster.Style presentedStyle;
+    private boolean presentedRaised;
+    private long heldGroups;
     V4MapSession(WorldIoService io,String dimension,MapPreferences preferences,MapCamera camera){
         this.camera=camera;this.style=preferences.style();preferences.apply(layers,display);
         this.io=io;this.dimension=dimension;markers=new V4MarkerState(io,dimension);regions=new V4RegionState(io,dimension);structureView=new StructureView((b,mask)->io.structures(dimension,b,mask));
@@ -54,11 +61,16 @@ final class V4MapSession implements AutoCloseable {
     }
     private MapAtlasSlots.Page key(MapRaster raster){return new MapAtlasSlots.Page(raster.key(),raster.generation());}
     private int abgr(int argb){return (argb&0xff00ff00)|((argb&0xff)<<16)|((argb>>>16)&0xff);}
+    private MapRaster readyRaster(Key k){
+        var fresh=pages.get(k);
+        if(fresh!=null&&fresh.empty())return null;
+        var r=published.get(k);
+        return r!=null&&slots.ready(key(r),style)?r:null;
+    }
     private MapTileCoverage.State state(Key k){
         var r=pages.get(k);
-        if(r==null)return MapTileCoverage.State.MISSING;
-        if(r.empty())return MapTileCoverage.State.EMPTY;
-        return slots.ready(key(r),style)?MapTileCoverage.State.READY:MapTileCoverage.State.MISSING;
+        if(r!=null&&r.empty())return MapTileCoverage.State.EMPTY;
+        return readyRaster(k)!=null?MapTileCoverage.State.READY:MapTileCoverage.State.MISSING;
     }
     /** Parent preview first; visible exact tiles next. Neighbor ring is CPU prefetch only. */
     void prepare(List<Key> visible){
@@ -71,34 +83,48 @@ final class V4MapSession implements AutoCloseable {
             uploadOrder=requested.stream().filter(urgent::contains).toList();
         }
         pages.tick(requested);
+        published.entrySet().removeIf(e->slots.slot(key(e.getValue()))==null);
+        boolean raised=camera!=null&&camera.elevationDegrees()!=90;
+        boolean samePresentation=presentedStyle==style&&presentedRaised==raised;
         Set<MapAtlasSlots.Page> protectedKeys=new HashSet<>(),previewKeys=new LinkedHashSet<>();
         for(Key k:visible){
-            var r=pages.get(k);
-            if(r!=null&&!r.empty()){var tk=key(r);protectedKeys.add(tk);slots.slot(tk);}
+            var r=readyRaster(k);
+            if(r!=null){var tk=key(r);protectedKeys.add(tk);slots.slot(tk);}
             // Retain existing parent previews unless exact coverage is already uploaded.
             if(state(k)==MapTileCoverage.State.MISSING){
                 for(var patch:MapTileCoverage.resolve(k,this::state)){
-                    var source=pages.get(patch.source());
+                    var source=readyRaster(patch.source());
                     if(source!=null){var tk=key(source);previewKeys.add(tk);slots.slot(tk);}
                 }
             }
         }
         // Leave free eviction candidates even when many finer previews occupy the atlas.
         for(var tk:previewKeys){if(protectedKeys.size()>=448)break;protectedKeys.add(tk);}
+        // Retain the previous complete geometry while a replacement is staged.
+        // Old off-screen pages remain ordinary LRU candidates when capacity is tight.
+        if(samePresentation)for(var group:presentedGroups)for(var part:group.parts){
+            if(protectedKeys.size()>=448)break;
+            var k=key(part.raster);if(slots.ready(k,style))protectedKeys.add(k);
+        }
         int budget=workBudget.textureUploads();
         long started=System.nanoTime();
         for(Key k:uploadOrder){
             if(budget==0||(budget<workBudget.textureUploads()&&System.nanoTime()-started>workBudget.sliceNanos()))break;
             var raster=pages.get(k);if(raster==null||raster.empty())continue;
-            var key=key(raster);if(slots.ready(key,style))continue;
-            Integer slot=slots.reserve(key,protectedKeys);
-            if(slot==null)break;
+            var key=key(raster);
+            if(slots.ready(key,style)){published.put(k,raster);continue;}
+            var old=published.get(k);
+            // Flat quads keep their UV/address; replacing pixels is atomic on the
+            // render thread. Relief needs old pixels until its new VBO is drawable.
+            if(!raised&&old!=null)protectedKeys.remove(key(old));
+            Integer slot=raised?slots.reserveStaged(key,protectedKeys):slots.reserve(key,protectedKeys);
+            if(slot==null)continue;
             var texture=ensureAtlas().texture();
             int ox=slot%32*EDGE,oy=slot/32*EDGE;
             var image=texture.getPixels();
             for(int i=0;i<1024;i++)image.setPixelRGBA(ox+i%EDGE,oy+i/EDGE,abgr(raster.argb(style,i)));
             texture.bind();image.upload(0,ox,oy,ox,oy,EDGE,EDGE,false,false);
-            slots.uploaded(key,slot,style);budget--;uploads++;
+            slots.uploaded(key,slot,style);published.put(k,raster);protectedKeys.add(key);budget--;uploads++;
         }
     }
     private record Part(Key target,MapTileCoverage.Patch patch,MapRaster raster,int slot){}
@@ -139,7 +165,7 @@ final class V4MapSession implements AutoCloseable {
             boolean isExact=patches.size()==1&&patches.getFirst().source().equals(k);
             if(isExact)exact++;else if(!patches.isEmpty())fallback++;
             for(var patch:patches){
-                var raster=pages.get(patch.source());if(raster==null)continue;
+                var raster=readyRaster(patch.source());if(raster==null)continue;
                 Integer slot=slots.slot(key(raster));if(slot==null)continue;
                 next.add(new Part(k,patch,raster,slot));
                 upper+=raised?raster.relief().topCount()+raster.relief().wallCount():1;
@@ -171,6 +197,27 @@ final class V4MapSession implements AutoCloseable {
         Map<Key,Integer> rank=new HashMap<>();for(int i=0;i<visible.size();i++)rank.put(visible.get(i),i);
         groups.sort(Comparator.comparingInt(g->g.parts.stream().mapToInt(p->rank.get(p.target)).min().orElse(Integer.MAX_VALUE)));
         wantedGroups=List.copyOf(groups);protectedGroups=Set.copyOf(groups.stream().map(Group::geometry).toList());
+    }
+    private record GroupAddress(int lod,int x,int z,boolean raised){}
+    private static GroupAddress address(Group g){return new GroupAddress(g.lod,g.x,g.z,g.raised);}
+    /** Validate every old dependency. Flat in-place pixel updates can reuse the old
+     * geometry with the new matching raster, but never an evicted/reassigned slot. */
+    private Group stillDrawable(Group g){
+        var parts=new ArrayList<Part>(g.parts.size());
+        for(var p:g.parts){
+            var current=pages.get(p.patch.source());
+            if(current!=null&&current.empty())return null;
+            var raster=p.raster;
+            if(!g.raised){
+                raster=readyRaster(p.patch.source());
+                if(raster==null)return null;
+            }
+            var k=key(raster);
+            if(!slots.ready(k,style)||!Objects.equals(slots.slot(k),p.slot))return null;
+            parts.add(new Part(p.target,p.patch,raster,p.slot));
+        }
+        if(meshes.get(g.geometry)==null)return null;
+        return new Group(g.lod,g.x,g.z,g.raised,List.copyOf(parts),g.geometry);
     }
     private static long estimate(Group group){
         long faces=0;
@@ -333,23 +380,55 @@ final class V4MapSession implements AutoCloseable {
     void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height,MapHudLayout hud){
         drawCalls=quads=0;lastRenderedCamera=null;drawnParts=List.of();
         Plane plane=planes.get(style);
-        if(plane==null){clearAnchors();clearSeams();return;}
+        if(plane==null){presentedGroups=List.of();clearAnchors();clearSeams();return;}
         boolean raised=camera.elevationDegrees()!=90;
+        if(presentedStyle!=style||presentedRaised!=raised)presentedGroups=List.of();
+        presentedStyle=style;presentedRaised=raised;
         graphics.flush();refresh(visible,raised);
+        var previous=new LinkedHashMap<GroupAddress,Group>();
+        for(Group old:presentedGroups){
+            var valid=stillDrawable(old);if(valid!=null)previous.put(address(valid),valid);
+        }
+        var protectedMeshes=new HashSet<>(protectedGroups);
+        for(var old:previous.values())protectedMeshes.add(old.geometry);
         long start=System.nanoTime();int budget=workBudget.meshUploads();
+        boolean limited=false;
         for(Group group:wantedGroups){
             if(meshes.get(group.geometry)!=null)continue;
             if(budget==0||(budget<workBudget.meshUploads()&&System.nanoTime()-start>=workBudget.sliceNanos()))break;
-            if(meshes.ensure(group.geometry,estimate(group),protectedGroups,ignored->build(group)))budget--;
+            if(meshes.ensure(group.geometry,estimate(group),protectedMeshes,ignored->build(group)))budget--;
+            else {limited=true;break;}
         }
+        // A same-address replacement becomes visible only once its buffer is ready.
+        // When changing LOD keep the previous coherent plan until the new plan is ready;
+        // do not draw overlapping old/new LOD surfaces (z fighting).
+        boolean transition=!previous.isEmpty()&&!wantedGroups.isEmpty()&&
+            previous.values().iterator().next().lod!=wantedGroups.getFirst().lod;
+        boolean ready=wantedGroups.stream().allMatch(g->meshes.get(g.geometry)!=null);
+        List<Group> renderGroups=new ArrayList<>();
+        boolean waitingForCoverage=wantedGroups.isEmpty()&&!previous.isEmpty()&&visible.stream().anyMatch(k->state(k)!=MapTileCoverage.State.EMPTY);
+        if(waitingForCoverage||transition&&!ready&&!limited){
+            renderGroups.addAll(previous.values());heldGroups+=renderGroups.size();
+        }else{
+            for(Group group:wantedGroups){
+                if(meshes.get(group.geometry)!=null)renderGroups.add(group);
+                else{
+                    var old=previous.get(address(group));
+                    if(old!=null){renderGroups.add(old);heldGroups++;}
+                }
+            }
+        }
+        // If a pathological transition exceeds the existing bounded GPU budget,
+        // release the old plan so the next frame can make forward progress.
         double depthScale=Math.min(1,70.0/(Math.hypot(width,height)/camera.pixelsPerBlock()*2+8192));
         RenderSystem.setShaderTexture(0,plane.id());
         RenderSystem.setShaderColor(1,1,1,1);
         RenderSystem.enableBlend();RenderSystem.defaultBlendFunc();
         if(raised){RenderSystem.depthMask(true);RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableDepthTest();RenderSystem.disableCull();}
         var rendered=new ArrayList<Part>();
+        var drawnGroups=new ArrayList<Group>();
         try{
-            for(Group group:wantedGroups){
+            for(Group group:renderGroups){
                 Geometry mesh=meshes.get(group.geometry);
                 if(mesh==null||mesh.buffer==null)continue;
                 double[] m=MapTransform.coefficients(camera,originX(group),0,originZ(group),width,height,depthScale,raised);
@@ -361,9 +440,12 @@ final class V4MapSession implements AutoCloseable {
                 var matrix=new org.joml.Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose()).mul(affine);
                 mesh.buffer.bind();
                 mesh.buffer.drawWithShader(matrix,RenderSystem.getProjectionMatrix(),GameRenderer.getPositionTexColorShader());
-                drawCalls++;quads+=mesh.quads;rendered.addAll(group.parts);
+                drawCalls++;quads+=mesh.quads;rendered.addAll(group.parts);drawnGroups.add(group);
             }
+            presentedGroups=List.copyOf(drawnGroups);
             drawnParts=List.copyOf(rendered);lastRenderedCamera=camera;
+            exactPages=(int)drawnParts.stream().filter(p->p.target.equals(p.patch.source())).map(Part::target).distinct().count();
+            fallbackPages=(int)drawnParts.stream().filter(p->!p.target.equals(p.patch.source())).map(Part::target).distinct().count();
             if(raised&&layers.structuresActive()){
                 if(!anchorDependencies.equals(drawnParts)){
                     var index=new HashMap<Key,List<Part>>();
@@ -396,6 +478,7 @@ final class V4MapSession implements AutoCloseable {
         }
         return null;
     }
+    long heldGroups(){return heldGroups;}
     long meshUploads(){return meshes.builds();}
     long meshBytes(){return meshes.bytes();}
     private V4ContourLayer contours;
@@ -428,20 +511,18 @@ final class V4MapSession implements AutoCloseable {
     void drawContours(GuiGraphics graphics,net.minecraft.client.gui.Font font,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height,double depthScale){
         if(!layers.visible(MapLayers.Layer.CONTOURS))return;
         if(contours==null)contours=new V4ContourLayer();
-        Set<Key> exact=new HashSet<>();
-        for(var part:drawnParts)if(part.target.equals(part.patch.source()))exact.add(part.target);
+        Map<Key,MapRaster> exact=new LinkedHashMap<>();
+        for(var part:drawnParts)if(part.target.equals(part.patch.source()))exact.put(part.target,part.raster);
         List<ContourOverlayCache.Input> inputs=new ArrayList<>();
-        for(Key k:visible){
-            if(!exact.contains(k))continue;
-            var center=pages.get(k);
-            if(center==null||center.empty())continue;
-            inputs.add(new ContourOverlayCache.Input(center,
+        for(var entry:exact.entrySet()){
+            Key k=entry.getKey();
+            inputs.add(new ContourOverlayCache.Input(entry.getValue(),
                 contourNeighbor(exact,k,1,0),contourNeighbor(exact,k,0,1),contourNeighbor(exact,k,1,1)));
         }
         contours.draw(graphics,font,inputs,camera,projection,width,height,depthScale);
     }
-    private MapRaster contourNeighbor(Set<Key> exact,Key k,int dx,int dz){
-        Key neighbor=new Key(k.lod(),k.x()+dx,k.z()+dz);return exact.contains(neighbor)?pages.get(neighbor):null;
+    private MapRaster contourNeighbor(Map<Key,MapRaster> exact,Key k,int dx,int dz){
+        Key neighbor=new Key(k.lod(),k.x()+dx,k.z()+dz);return exact.get(neighbor);
     }
     String contourStatus(){
         if(!layers.visible(MapLayers.Layer.CONTOURS))return "Contours off";
@@ -461,6 +542,6 @@ final class V4MapSession implements AutoCloseable {
         shoreDependencies=List.of();shorePages=List.of();landformPages=List.of();
         meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();clearAnchors();
         for(var plane:planes.values())Minecraft.getInstance().getTextureManager().release(plane.id());
-        planes.clear();
+        planes.clear();published.clear();presentedGroups=List.of();
     }
 }

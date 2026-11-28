@@ -49,6 +49,20 @@ public final class MapAtlasSlotsTest {
         check(!flat.equals(new MapGeometryKey(0,0,0,false,List.of(new MapGeometryKey.Face(a.key(),patch,stable+1,1)))),"slot change requires rebuild");
         var clipped=new MapTileCoverage.Patch(a.key(),0,0,.5,0,0,.5);
         check(!flat.equals(new MapGeometryKey(0,0,0,false,List.of(new MapGeometryKey.Face(a.key(),clipped,stable,1)))),"patch clipping requires rebuild");
+        // Raised geometry must retain the previous texture until the new mesh exists.
+        var staging=new MapAtlasSlots(3);
+        int oldSlot=staging.reserve(a,Set.of());staging.uploaded(a,oldSlot,SATELLITE_MODERN);
+        int stagedSlot=staging.reserveStaged(c,Set.of(a));
+        check(stagedSlot!=oldSlot&&staging.ready(a,SATELLITE_MODERN)&&!staging.ready(c,SATELLITE_MODERN),"old remains drawable during stage");
+        staging.uploaded(c,stagedSlot,SATELLITE_MODERN);
+        check(staging.ready(a,SATELLITE_MODERN)&&staging.ready(c,SATELLITE_MODERN)&&!staging.ready(c,HAND_MODERN),"two revisions only in valid style");
+        var d=page(0,3);check(staging.reserveStaged(d,Set.of(a,c))!=null,"third staged revision");
+        check(staging.reserveStaged(page(0,4),Set.of(a,c,d))==null,"staging bounded by existing capacity");
+        int replacement=staging.reserve(page(0,4),Set.of(c));
+        check(staging.slot(c)==stagedSlot&&staging.ready(c,SATELLITE_MODERN)&&!staging.ready(page(0,4),SATELLITE_MODERN),"eviction cannot overwrite protected texture");
+        staging.uploaded(page(0,4),replacement,SATELLITE_MODERN);
+        staging.clearStyle(SATELLITE_MODERN);
+        check(!staging.ready(a,SATELLITE_MODERN)&&!staging.ready(c,SATELLITE_MODERN),"style eviction invalidates both revisions");
         var random=new Random(1701);var keys=new ArrayList<MapAtlasSlots.Page>();
         for(int i=0;i<31;i++)keys.add(page(i-16,i+1));
         var slots=new MapAtlasSlots(16);

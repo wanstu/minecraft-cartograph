@@ -20,22 +20,26 @@ public final class MapAtlasSlots {
     }
     /** Reserve an address, but do not publish any style until upload succeeds. */
     public Integer reserve(Page page,Set<Page> protectedPages){
+        return reserve(page,protectedPages,false);
+    }
+    /** Stage a new relief revision without overwriting a still-drawn texture. */
+    public Integer reserveStaged(Page page,Set<Page> protectedPages){return reserve(page,protectedPages,true);}
+    private Integer reserve(Page page,Set<Page> protectedPages,boolean stage){
         var existing=entries.get(page);if(existing!=null)return existing.slot;
         Page old=spatial.get(page.key());
         Integer slot=null;
         if(old!=null){
             // In-place generation replacement only if the previous generation is not
             // protected by the current draw plan. All plane bits start invalid.
-            if(protectedPages.contains(old))return null;
-            slot=entries.remove(old).slot;
-            spatial.remove(old.key());
+            if(protectedPages.contains(old)){if(!stage)return null;}
+            else{slot=entries.remove(old).slot;spatial.remove(old.key(),old);}
         }
         if(slot==null)slot=free.pollFirst();
         if(slot==null){
             var it=entries.entrySet().iterator();
             while(it.hasNext()){
                 var e=it.next();
-                if(!protectedPages.contains(e.getKey())){slot=e.getValue().slot;spatial.remove(e.getKey().key());it.remove();break;}
+                if(!protectedPages.contains(e.getKey())){slot=e.getValue().slot;spatial.remove(e.getKey().key(),e.getKey());it.remove();break;}
             }
         }
         if(slot!=null){entries.put(page,new Resident(slot,0));spatial.put(page.key(),page);}
