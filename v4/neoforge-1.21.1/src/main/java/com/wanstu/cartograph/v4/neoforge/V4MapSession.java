@@ -106,13 +106,13 @@ final class V4MapSession implements AutoCloseable {
         void face(Part part,double x0,double y0,double z0,double x1,double y1,double z1,
                   double u0,double v0,double u1,double v1,int light);
     }
-    private record Group(int lod,int x,int z,boolean raised,List<Part> parts){}
+    private record Group(int lod,int x,int z,boolean raised,List<Part> parts,MapGeometryKey geometry){}
     private record Geometry(VertexBuffer buffer,int quads) implements AutoCloseable{
         public void close(){if(buffer!=null)buffer.close();}
     }
-    private final RetainedGroups<Group,Geometry> meshes=new RetainedGroups<>(32L*1024*1024,128);
+    private final RetainedGroups<MapGeometryKey,Geometry> meshes=new RetainedGroups<>(32L*1024*1024,128);
     private List<Group> wantedGroups=List.of();
-    private Set<Group> protectedGroups=Set.of();
+    private Set<MapGeometryKey> protectedGroups=Set.of();
     private List<Part> drawnParts=List.of();
     private Map<Key,List<Part>> anchorParts=Map.of();
     private List<Part> anchorDependencies=List.of();
@@ -154,8 +154,8 @@ final class V4MapSession implements AutoCloseable {
                 upper-=p.raster.relief().topCount()+p.raster.relief().wallCount();it.remove();
             }
         }
-        // Drop stale invisible groups too, so their raster/neighbor references cannot accumulate.
-        meshes.retainValid(g->g.parts.stream().allMatch(p->Objects.equals(slots.slot(key(p.raster)),p.slot)&&pages.get(p.raster.key())==p.raster));
+        // Cached geometry keys contain no raster references. Old immutable vertex buffers
+        // are bounded by the existing LRU; only exact current drawable keys can be drawn.
         if(!modeChanged&&retained.equals(next))return;
         retained=List.copyOf(next);exactPages=exact;
         fallbackPages=(int)next.stream().filter(p->!p.patch.source().equals(p.target)).map(Part::target).distinct().count();
@@ -165,10 +165,12 @@ final class V4MapSession implements AutoCloseable {
             grouped.computeIfAbsent(id,ignored->new ArrayList<>()).add(p);}
         List<Group> groups=new ArrayList<>();
         for(var parts:grouped.values()){Key k=parts.getFirst().target;int edge=raised?2:8;
-            groups.add(new Group(k.lod(),Math.floorDiv(k.x(),edge),Math.floorDiv(k.z(),edge),raised,List.copyOf(parts)));}
+            int gx=Math.floorDiv(k.x(),edge),gz=Math.floorDiv(k.z(),edge);
+            var geometry=new MapGeometryKey(k.lod(),gx,gz,raised,parts.stream().map(p->new MapGeometryKey.Face(p.target,p.patch,p.slot,p.raster.generation())).toList());
+            groups.add(new Group(k.lod(),gx,gz,raised,List.copyOf(parts),geometry));}
         Map<Key,Integer> rank=new HashMap<>();for(int i=0;i<visible.size();i++)rank.put(visible.get(i),i);
         groups.sort(Comparator.comparingInt(g->g.parts.stream().mapToInt(p->rank.get(p.target)).min().orElse(Integer.MAX_VALUE)));
-        wantedGroups=List.copyOf(groups);protectedGroups=Set.copyOf(groups);
+        wantedGroups=List.copyOf(groups);protectedGroups=Set.copyOf(groups.stream().map(Group::geometry).toList());
     }
     private static long estimate(Group group){
         long faces=0;
@@ -336,9 +338,9 @@ final class V4MapSession implements AutoCloseable {
         graphics.flush();refresh(visible,raised);
         long start=System.nanoTime();int budget=workBudget.meshUploads();
         for(Group group:wantedGroups){
-            if(meshes.get(group)!=null)continue;
+            if(meshes.get(group.geometry)!=null)continue;
             if(budget==0||(budget<workBudget.meshUploads()&&System.nanoTime()-start>=workBudget.sliceNanos()))break;
-            if(meshes.ensure(group,estimate(group),protectedGroups,this::build))budget--;
+            if(meshes.ensure(group.geometry,estimate(group),protectedGroups,ignored->build(group)))budget--;
         }
         double depthScale=Math.min(1,70.0/(Math.hypot(width,height)/camera.pixelsPerBlock()*2+8192));
         RenderSystem.setShaderTexture(0,plane.id());
@@ -348,7 +350,7 @@ final class V4MapSession implements AutoCloseable {
         var rendered=new ArrayList<Part>();
         try{
             for(Group group:wantedGroups){
-                Geometry mesh=meshes.get(group);
+                Geometry mesh=meshes.get(group.geometry);
                 if(mesh==null||mesh.buffer==null)continue;
                 double[] m=MapTransform.coefficients(camera,originX(group),0,originZ(group),width,height,depthScale,raised);
                 var affine=new org.joml.Matrix4f().set(

@@ -22,6 +22,33 @@ public final class MapAtlasSlotsTest {
         check(atlas.reserve(c,Set.of(a,b))==null,"protected pages never evicted");
         check(atlas.reserve(c,Set.of(b))==slot&&!atlas.ready(c,SATELLITE_MODERN)&&atlas.slot(a)==null,"new generation clears all old style bits");
         try{atlas.uploaded(a,slot,HAND_MODERN);throw new AssertionError("stale upload accepted");}catch(IllegalStateException expected){}
+        // Repeated updates must reuse spatial slots even when free slots remain.
+        var changing=new MapAtlasSlots(8);
+        int stable=changing.reserve(a,Set.of());changing.uploaded(a,stable,SATELLITE_MODERN);
+        var patch=new MapTileCoverage.Patch(a.key(),0,0,1,0,0,1);
+        var flat=new MapGeometryKey(0,0,0,false,List.of(new MapGeometryKey.Face(a.key(),patch,stable,1)));
+        var relief=new MapGeometryKey(0,0,0,true,List.of(new MapGeometryKey.Face(a.key(),patch,stable,1)));
+        var last=a;
+        try(var buffers=new RetainedGroups<MapGeometryKey,AutoCloseable>(1024,4)){
+            check(buffers.ensure(flat,96,Set.of(flat),k->new RetainedGroups.Item<>(()->{},96)),"first flat upload");
+        for(int gen=2;gen<=1000;gen++){
+            var updated=page(0,gen);
+            check(changing.reserve(updated,Set.of(last))==null,"protected old revision");
+            check(changing.reserve(updated,Set.of())==stable&&changing.size()==1,"same slot with free space");
+            check(changing.slot(last)==null&&!changing.ready(updated,SATELLITE_MODERN),"previous revision cannot draw");
+            changing.uploaded(updated,stable,SATELLITE_MODERN);
+            var face=new MapGeometryKey.Face(updated.key(),patch,stable,gen);
+            var flatNext=new MapGeometryKey(0,0,0,false,List.of(face));
+            check(flat.equals(flatNext),"flat VBO independent of pixel revision");
+            check(buffers.ensure(flatNext,96,Set.of(flatNext),k->{throw new AssertionError("unnecessary flat upload");}),"flat buffer reused");
+            check(!relief.equals(new MapGeometryKey(0,0,0,true,List.of(face))),"raised VBO revision-sensitive");
+            last=updated;
+        }
+            check(buffers.builds()==1&&buffers.size()==1,"one geometry build across 1000 revisions");
+        }
+        check(!flat.equals(new MapGeometryKey(0,0,0,false,List.of(new MapGeometryKey.Face(a.key(),patch,stable+1,1)))),"slot change requires rebuild");
+        var clipped=new MapTileCoverage.Patch(a.key(),0,0,.5,0,0,.5);
+        check(!flat.equals(new MapGeometryKey(0,0,0,false,List.of(new MapGeometryKey.Face(a.key(),clipped,stable,1)))),"patch clipping requires rebuild");
         var random=new Random(1701);var keys=new ArrayList<MapAtlasSlots.Page>();
         for(int i=0;i<31;i++)keys.add(page(i-16,i+1));
         var slots=new MapAtlasSlots(16);
