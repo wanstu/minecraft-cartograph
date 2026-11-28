@@ -74,6 +74,34 @@ public final class WorldIoServiceTest {
                 }catch(ExecutionException expected){check(expected.getCause() instanceof java.io.UncheckedIOException,"marker corruption failure");}
                 check(!io.failed()&&io.raster("minecraft:overworld",Key.of(new GeographicPyramid.Cell(0,-16,0))).get(15,TimeUnit.SECONDS).surface(16)==75,"marker failure does not poison geography");
             }finally{check(io.close(15,TimeUnit.SECONDS),"close");}
+            // Deterministically reproduce the idle-worker interrupt left by
+            // graceful executor shutdown, with the real fingerprint force path.
+            Path flushRoot=root.resolve("shutdown-fingerprints");
+            var fingerprints=new SourceFingerprints(flushRoot);
+            byte[] hash=new byte[32];hash[0]=42;
+            fingerprints.record(-1,0,7,hash);
+            Thread.currentThread().interrupt();
+            try{
+                WorldIoService.finishGracefulIo(()->{
+                    check(!Thread.currentThread().isInterrupted(),"idle interrupt cleared before durable force");
+                    try{fingerprints.flush();}catch(java.io.IOException ex){throw new java.io.UncheckedIOException(ex);}
+                });
+                check(Thread.currentThread().isInterrupted(),"original interrupt restored after cleanup");
+            }finally{Thread.interrupted();}
+            check(new SourceFingerprints(flushRoot).matches(-1,0,7,hash),"shutdown fingerprint durable");
+            Path invalid=root.resolve("not-a-directory");
+            Files.write(invalid,new byte[]{1});
+            var brokenIo=new WorldIoService(invalid,1,16);
+            Throwable first;
+            try{
+                try{brokenIo.pendingDirty("minecraft:overworld").get(15,TimeUnit.SECONDS);throw new AssertionError("invalid root accepted");}
+                catch(ExecutionException expected){check(expected.getCause() instanceof java.io.IOException,"first IO error");}
+                first=brokenIo.failureCause();
+                check(first!=null&&brokenIo.failed(),"fatal cause exposed");
+                try{brokenIo.pendingDirty("minecraft:the_nether").get(15,TimeUnit.SECONDS);throw new AssertionError("failed owner accepted work");}
+                catch(ExecutionException expected){check(expected.getCause().getCause()==first,"later operation preserves first cause");}
+            }finally{check(!brokenIo.close(15,TimeUnit.SECONDS),"fatal close reports failure");}
+            check(brokenIo.failureCause()==first,"first failure retained after shutdown");
             System.out.println("PASS: shared world IO, dimension isolation/eviction, live snapshot durable, read, dirty handoff and restart, marker durable receipts and corruption isolation");
         }finally{ScaleTest.delete(root);}
     }

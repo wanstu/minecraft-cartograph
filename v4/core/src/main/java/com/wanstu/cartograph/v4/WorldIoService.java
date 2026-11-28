@@ -21,7 +21,10 @@ public final class WorldIoService {
     private final Map<String,PresentationChanges> presentations=new ConcurrentHashMap<>();
     private final Map<String,java.util.concurrent.atomic.AtomicLong> structureRevisions=new ConcurrentHashMap<>();
     public record ArchiveProgress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending,int waitingActive,String lastSourceError){}
-    private volatile Throwable failure;
+    private final java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+    private void recordFailure(Throwable error){failure.compareAndSet(null,error);}
+    /** First fatal geography error, preserved through subsequent cleanup. */
+    public Throwable failureCause(){return failure.get();}
     private volatile Thread ownerThread;
     public WorldIoService(Path root,int dimensionLimit,int queueLimit){
         this.root=Objects.requireNonNull(root);
@@ -29,10 +32,21 @@ public final class WorldIoService {
         this.dimensionLimit=dimensionLimit;
         io=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(queueLimit),r->{
             Thread t=new Thread(()->{try{r.run();}finally{
-                for(Dimension d:dimensions.values())try{d.close();}catch(IOException e){failure=e;}
-                dimensions.clear();
+                finishGracefulIo(()->{
+                    for(Dimension d:dimensions.values())try{d.close();}catch(IOException e){recordFailure(e);}
+                    dimensions.clear();
+                });
             }},"cartograph-v4-world-io");t.setDaemon(true);t.setPriority(Thread.NORM_PRIORITY-1);ownerThread=t;return t;
         });
+    }
+    /** Executor.shutdown may interrupt an idle worker. After its run loop exits,
+     * that signal must not abort the final interruptible file-channel force.
+     * This owner only uses graceful shutdown, never shutdownNow.
+     */
+    static void finishGracefulIo(Runnable cleanup){
+        boolean interrupted=Thread.interrupted();
+        try{cleanup.run();}
+        finally{if(interrupted)Thread.currentThread().interrupt();}
     }
     private static String directory(String dimension){
         if(!dimension.matches("[a-z0-9_.-]+:[a-z0-9_./-]+"))throw new IllegalArgumentException("Dimension key");
@@ -51,9 +65,9 @@ public final class WorldIoService {
         var result=new CompletableFuture<T>();
         try{
             io.execute(()->{
-                if(failure!=null){result.completeExceptionally(new IOException("World IO failed",failure));return;}
+                if(failureCause()!=null){result.completeExceptionally(new IOException("World IO failed",failureCause()));return;}
                 try{result.complete(operation.call());}
-                catch(IOException e){failure=e;result.completeExceptionally(e);}
+                catch(IOException e){recordFailure(e);result.completeExceptionally(e);}
                 catch(Exception e){result.completeExceptionally(e);}
             });
         }catch(RejectedExecutionException e){result.completeExceptionally(e);}
@@ -146,7 +160,7 @@ public final class WorldIoService {
         });
     }
     public int queued(){return io.getQueue().size();}
-    public boolean failed(){return failure!=null;}
+    public boolean failed(){return failureCause()!=null;}
     /** Call only at world stop, not normal ticks. Existing queued IO is drained. */
     public boolean close(long timeout,TimeUnit unit)throws InterruptedException{
         long end=System.nanoTime()+unit.toNanos(timeout);io.shutdown();
@@ -156,6 +170,6 @@ public final class WorldIoService {
             long left=end-System.nanoTime();if(left<=0)return false;
             TimeUnit.NANOSECONDS.timedJoin(t,left);
         }
-        return (t==null||!t.isAlive())&&failure==null;
+        return (t==null||!t.isAlive())&&!failed();
     }
 }

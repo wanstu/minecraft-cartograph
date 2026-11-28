@@ -177,6 +177,7 @@ public final class CartographV4Dev {
         int cursor,archiveCursor,maintenanceCursor;
         CompletableFuture<RegionPageStore.Compaction> maintenance;
         long tick,tickStarted;
+        boolean ioFailureLogged;
         final CaptureWorkBudget work=new CaptureWorkBudget();
         Runtime(MinecraftServer server){
             this.server=server;
@@ -185,6 +186,7 @@ public final class CartographV4Dev {
         Dimension dimension(ServerLevel level){return dimensions.computeIfAbsent(level,l->new Dimension(l,io));}
         void tick(){
             tick++;
+            if(io.failed()&&!ioFailureLogged){ioFailureLogged=true;LOG.error("V4 geographic IO failed; writes suspended",io.failureCause());}
             if(tickStarted!=0){work.sample(Math.max(0,System.nanoTime()-tickStarted),io.queued());tickStarted=0;}
             if(tick%200==0)LOG.info("V4 collection pressure {} | columns {} | archive batch {} | queued {}",work.level(),work.columns(),work.archiveBatch(),io.queued());
             if(tick%200==0)for(Dimension d:dimensions.values())LOG.info("V4 capture {}: {} / {}",d.key,d.scheduler.metrics(),d.pump.metrics());
@@ -234,7 +236,10 @@ public final class CartographV4Dev {
                     d.dirty.closeInput();
                 }
             }catch(Exception e){LOG.error("V4 shutdown dirty handoff failed",e);}
-            try{if(!io.close(15,TimeUnit.SECONDS))LOG.warn("V4 IO drain timed out");}
+            try{if(!io.close(15,TimeUnit.SECONDS)){
+                if(io.failed())LOG.error("V4 geographic IO shutdown failed",io.failureCause());
+                else LOG.warn("V4 IO drain timed out");
+            }}
             catch(InterruptedException e){Thread.currentThread().interrupt();}
             dimensions.clear();
         }
