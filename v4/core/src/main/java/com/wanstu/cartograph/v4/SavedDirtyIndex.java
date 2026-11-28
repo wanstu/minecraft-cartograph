@@ -17,6 +17,8 @@ public final class SavedDirtyIndex {
     public record Work(Position position,long token){}
     private final Path file;
     private final Map<Position,Long> pending=new LinkedHashMap<>();
+    // Runtime-only parking. The durable log still retains all unacknowledged work.
+    private final Map<Position,Long> parked=new HashMap<>();
     private final Thread owner=Thread.currentThread();
     private long sequence,flushes;
     private boolean failed;
@@ -27,9 +29,10 @@ public final class SavedDirtyIndex {
     }
     private void owner(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Dirty index IO owner");}
     private void ready()throws IOException{owner();if(failed)throw new IOException("Reopen dirty index after failed transaction");}
-    public int size(){owner();return pending.size();}
+    public int size(){owner();return pending.size()+parked.size();}
+    int waitingActive(){owner();return parked.size();}
     public long flushes(){owner();return flushes;}
-    public boolean current(Work work){owner();return Objects.equals(pending.get(work.position),work.token);}
+    public boolean current(Work work){owner();return Objects.equals(pending.get(work.position),work.token)||Objects.equals(parked.get(work.position),work.token);}
     public List<Work> peek(int max){
         owner();if(max<0||max>MAX_BATCH)throw new IllegalArgumentException("Batch");
         List<Work> result=new ArrayList<>();
@@ -38,8 +41,12 @@ public final class SavedDirtyIndex {
     }
     /** Retry fairness only; persisted tokens remain unchanged. */
     void rotate(Work w){
-        owner();if(current(w)){pending.remove(w.position);pending.put(w.position,w.token);}
+        owner();if(Objects.equals(pending.get(w.position),w.token)){pending.remove(w.position);pending.put(w.position,w.token);}
     }
+    void park(Work w){
+        owner();if(Objects.equals(pending.get(w.position),w.token)){pending.remove(w.position);parked.put(w.position,w.token);}
+    }
+    void wake(Position p){owner();Long token=parked.remove(p);if(token!=null)pending.put(p,token);}
     /** Acknowledgement is returned only after the batch is forced to disk. */
     public List<Work> mark(List<Position> positions)throws IOException{
         ready();Objects.requireNonNull(positions);
@@ -48,7 +55,7 @@ public final class SavedDirtyIndex {
         long token=sequence;
         for(Position p:positions){Objects.requireNonNull(p);token=Math.incrementExact(token);result.add(new Work(p,token));}
         append(result,false);
-        for(Work w:result){pending.remove(w.position);pending.put(w.position,w.token);}
+        for(Work w:result){parked.remove(w.position);pending.remove(w.position);pending.put(w.position,w.token);}
         sequence=token;return List.copyOf(result);
     }
     /** Only after matching geographic data is committed durably. Old receipts are harmless. */
@@ -66,7 +73,7 @@ public final class SavedDirtyIndex {
             if(current(work)&&seen.add(work.position))matched.add(work);
         }
         append(matched,true);
-        for(Work work:matched)pending.remove(work.position);
+        for(Work work:matched){pending.remove(work.position);parked.remove(work.position);}
         return matched.size();
     }
     private static int crc(byte[] body){CRC32C crc=new CRC32C();crc.update(body);return (int)crc.getValue();}

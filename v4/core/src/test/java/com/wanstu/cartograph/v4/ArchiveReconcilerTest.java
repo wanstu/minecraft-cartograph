@@ -60,8 +60,19 @@ public final class ArchiveReconcilerTest{
                 gate.committed(-2,3);dirty.mark(List.of(new Position(-2,3)));
                 archive.step(world,dirty,gate,16);
                 check(world.matchesChunk(-2,3,live)&&dirty.size()==1,"stale save cannot overwrite live");
+                gate.loaded(-2,3);var parked=archive.step(world,dirty,gate,16);
+                check(dirty.size()==1&&parked.waitingActive()==1&&dirty.peek(16).isEmpty()&&world.matchesChunk(-2,3,live),"active exclusion and park");
+                long deferred=parked.deferred();
+                for(int i=0;i<100;i++)check(archive.step(world,dirty,gate,16).deferred()==deferred,"no repeated active retries");
+                check(new SavedDirtyIndex(target).peek(16).size()==1,"park remains durable across restart");
+                dirty.mark(List.of(new Position(-2,3)));
+                check(archive.step(world,dirty,gate,16).waitingActive()==1,"new token parked");
+                gate.unloaded(-2,3);
+                var awakened=archive.step(world,dirty,gate,16);
+                check(awakened.waitingActive()==0&&dirty.size()==1&&world.matchesChunk(-2,3,live),"unload wakes but cannot overwrite newer live");
                 gate.loaded(-2,3);archive.step(world,dirty,gate,16);
-                check(dirty.size()==1&&world.matchesChunk(-2,3,live),"active exclusion");
+                gate.unloaded(-2,3);gate.loaded(-2,3);
+                check(archive.step(world,dirty,gate,16).waitingActive()==1,"reload before wake reparks");
                 gate.unloaded(-2,3);
                 // A reload/unload during a read invalidates that reservation.
                 check(gate.begin(-2,3),"reserve");gate.loaded(-2,3);gate.unloaded(-2,3);

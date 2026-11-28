@@ -7,6 +7,8 @@ public final class LiveArchiveGate {
     private final Set<ActiveChunkScheduler.Position> active=new HashSet<>();
     private final Map<Region,BitSet> liveCommitted=new HashMap<>();
     private final Map<ActiveChunkScheduler.Position,Boolean> reading=new HashMap<>();
+    private final Set<ActiveChunkScheduler.Position> parked=new HashSet<>();
+    private final Set<ActiveChunkScheduler.Position> wakeups=new LinkedHashSet<>();
     public synchronized void loaded(int x,int z){
         var p=new ActiveChunkScheduler.Position(x,z);
         active.add(p);if(reading.containsKey(p))reading.put(p,Boolean.FALSE);
@@ -14,6 +16,16 @@ public final class LiveArchiveGate {
     public synchronized void unloaded(int x,int z){
         var p=new ActiveChunkScheduler.Position(x,z);
         active.remove(p);if(reading.containsKey(p))reading.put(p,Boolean.FALSE);
+        if(parked.remove(p))wakeups.add(p);
+    }
+    /** Register the wait atomically with the active check, so unload cannot be lost. */
+    synchronized boolean parkIfActive(ActiveChunkScheduler.Position p){
+        if(!active.contains(p))return false;
+        parked.add(p);return true;
+    }
+    synchronized List<ActiveChunkScheduler.Position> drainWakeups(int max){
+        List<ActiveChunkScheduler.Position> result=new ArrayList<>();
+        var it=wakeups.iterator();while(it.hasNext()&&result.size()<max){result.add(it.next());it.remove();}return result;
     }
     synchronized boolean begin(int x,int z){
         var p=new ActiveChunkScheduler.Position(x,z);

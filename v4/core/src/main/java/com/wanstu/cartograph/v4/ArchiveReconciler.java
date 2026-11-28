@@ -8,7 +8,7 @@ import static com.wanstu.cartograph.v4.ActiveChunkScheduler.Position;
 
 /** Bounded saved-world reconciliation, run exclusively by the world IO owner. */
 final class ArchiveReconciler implements AutoCloseable {
-    record Progress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending){}
+    record Progress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending,int waitingActive){}
     private record Candidate(Path file,int rx,int rz,int x,int z,SavedDirtyIndex.Work work){}
     private record Ready(Candidate candidate,byte[] hash,Entry[] columns,boolean alreadyMatches,List<StructureIndex.Start> starts){}
     private final Path regions;
@@ -28,13 +28,14 @@ final class ArchiveReconciler implements AutoCloseable {
         this.regions=regions;this.minY=minY;this.height=height;this.mapper=Objects.requireNonNull(mapper);this.structures=structures;this.structureChanged=structureChanged;
         fingerprints=new SourceFingerprints(index);
     }
-    Progress progress(SavedDirtyIndex dirty){return new Progress(decoded,unchanged,committed,deferred,errors,discovered,dirty.size());}
+    Progress progress(SavedDirtyIndex dirty){return new Progress(decoded,unchanged,committed,deferred,errors,discovered,dirty.size(),dirty.waitingActive());}
     private Candidate dirty(SavedDirtyIndex.Work w){
         int x=w.position().x(),z=w.position().z(),rx=Math.floorDiv(x,32),rz=Math.floorDiv(z,32);
         return new Candidate(regions.resolve("r."+rx+"."+rz+".mca"),rx,rz,x,z,w);
     }
     Progress step(WorldGeography world,SavedDirtyIndex dirty,LiveArchiveGate gate,int max)throws IOException{
         if(max<1||max>32)throw new IllegalArgumentException("Archive budget");
+        for(var p:gate.drainWakeups(max))dirty.wake(p);
         List<Candidate> candidates=new ArrayList<>();
         // Reserve capacity for initial discovery even with a permanently deferred dirty item.
         for(var w:dirty.peek(discovered?max:Math.max(1,max/4)))candidates.add(dirty(w));
@@ -61,7 +62,12 @@ final class ArchiveReconciler implements AutoCloseable {
         try{
             for(Candidate c:candidates){
                 if(!seen.add(new Position(c.x,c.z)))continue;
-                if(!gate.begin(c.x,c.z)){deferred++;if(c.work!=null)retry.add(c.work);continue;}
+                if(c.work!=null&&gate.parkIfActive(c.work.position())){dirty.park(c.work);deferred++;continue;}
+                if(!gate.begin(c.x,c.z)){
+                    deferred++;
+                    if(c.work!=null){if(gate.parkIfActive(c.work.position()))dirty.park(c.work);else retry.add(c.work);}
+                    continue;
+                }
                 boolean retained=false;
                 try{
                     AnvilRegionReader.Encoded encoded;
