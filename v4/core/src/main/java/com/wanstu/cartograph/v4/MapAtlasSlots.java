@@ -7,12 +7,16 @@ import static com.wanstu.cartograph.v4.RegionPageStore.Key;
 public final class MapAtlasSlots {
     public record Page(Key key,long generation){}
     private record Resident(int slot,int mask){}
-    private final LinkedHashMap<Page,Resident> entries=new LinkedHashMap<>(16,.75f,true);
+    private final LinkedHashMap<Page,Resident> entries=new LinkedHashMap<>();
     private final ArrayDeque<Integer> free=new ArrayDeque<>();
     private final Map<Key,Page> spatial=new HashMap<>();
     public MapAtlasSlots(int count){
         if(count<1)throw new IllegalArgumentException("Atlas capacity");
         for(int i=0;i<count;i++)free.add(i);
+    }
+    /** Read-only inspection must not turn offscreen entries into recent ones. */
+    public void touch(Page page){
+        var r=entries.get(page);if(r!=null)entries.putLast(page,r);
     }
     public Integer slot(Page page){var r=entries.get(page);return r==null?null:r.slot;}
     public boolean ready(Page page,MapRaster.Style style){
@@ -25,7 +29,7 @@ public final class MapAtlasSlots {
     /** Stage a new relief revision without overwriting a still-drawn texture. */
     public Integer reserveStaged(Page page,Set<Page> protectedPages){return reserve(page,protectedPages,true);}
     private Integer reserve(Page page,Set<Page> protectedPages,boolean stage){
-        var existing=entries.get(page);if(existing!=null)return existing.slot;
+        var existing=entries.get(page);if(existing!=null){touch(page);return existing.slot;}
         Page old=spatial.get(page.key());
         Integer slot=null;
         if(old!=null){
@@ -48,7 +52,7 @@ public final class MapAtlasSlots {
     public void uploaded(Page page,int slot,MapRaster.Style style){
         var r=entries.get(page);
         if(r==null||r.slot!=slot)throw new IllegalStateException("Stale atlas upload");
-        entries.put(page,new Resident(slot,r.mask|1<<style.ordinal()));
+        entries.putLast(page,new Resident(slot,r.mask|1<<style.ordinal()));
     }
     /** Discard a whole plane's validity before releasing its backing texture. */
     public void clearStyle(MapRaster.Style style){

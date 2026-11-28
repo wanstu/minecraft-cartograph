@@ -16,7 +16,7 @@ public final class MapPresentationClient {
     private final PresentationChanges changes;
     private final Function<Key,CompletableFuture<MapRaster>> source;
     private final int capacity,concurrency;
-    private final LinkedHashMap<Key,MapRaster> cache=new LinkedHashMap<>(16,.75f,true);
+    private final LinkedHashMap<Key,MapRaster> cache=new LinkedHashMap<>();
     private final Map<Key,Pending> pending=new HashMap<>();
     private final Map<Key,Long> retry=new HashMap<>();
     private long seen,requests,accepted,discarded,failures,frame,revision;
@@ -35,13 +35,14 @@ public final class MapPresentationClient {
             if(cache.remove(key)!=null)revision++;retry.remove(key);Pending p=pending.get(key);if(p!=null)p.obsolete=true;
         }
     }
+    private void touch(Key key){var r=cache.get(key);if(r!=null)cache.putLast(key,r);}
     /** Only plan requests. Previously resident pages remain available across pans and styles. */
     public void tick(List<Key> wanted){
         owner();if(wanted.size()>capacity)throw new IllegalArgumentException("View exceeds residency");
         frame++;synchronizeChanges();
         var desired=new HashSet<>(wanted);
         retry.keySet().removeIf(k->!desired.contains(k));
-        for(Key key:wanted)cache.get(key);
+        for(Key key:wanted)touch(key);
         var it=pending.entrySet().iterator();
         while(it.hasNext()){
             var item=it.next();Pending p=item.getValue();Key key=item.getKey();
@@ -56,7 +57,7 @@ public final class MapPresentationClient {
             }catch(CompletionException|IllegalStateException e){failures++;retry.put(key,frame+30);}
         }
         // Protect visible resident pages from eviction by late arrivals.
-        for(Key key:wanted)cache.get(key);
+        for(Key key:wanted)touch(key);
         for(Key key:wanted){
             if(pending.size()>=concurrency)break;
             if(cache.containsKey(key)||pending.containsKey(key)||retry.getOrDefault(key,0L)>frame)continue;

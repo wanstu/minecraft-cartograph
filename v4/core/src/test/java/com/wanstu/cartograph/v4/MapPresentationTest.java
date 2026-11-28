@@ -38,6 +38,11 @@ public final class MapPresentationTest {
         long before=feed.sequence();for(int i=0;i<9000;i++)feed.changed(List.of(c));
         check(feed.since(before).reset(),"bounded journal overflow resets");
         client.tick(List.of(a));check(client.get(a)==null,"reset evicts stale cache");
+        var small=new MapPresentationClient(new PresentationChanges(),k->CompletableFuture.completedFuture(raster(k,k.x()+10)),2,1);
+        small.tick(List.of(a));small.tick(List.of(a));small.tick(List.of(b));small.tick(List.of(b));
+        for(int i=0;i<1000;i++){check(small.get(a)!=null,"inspection");}
+        small.tick(List.of(b,c));small.tick(List.of(b,c));
+        check(small.get(a)==null&&small.get(b)!=null&&small.get(c)!=null,"inspection never promotes offscreen CPU page");
         var water=new FeatureDictionary.Feature("minecraft:water[level=0]","minecraft:ocean",FeatureDictionary.Terrain.WATER);
         var shallow=Entry.leaf(water,62,61,1,20000,30000,65535);
         var deep=Entry.leaf(water,62,42,20,20000,30000,65535);

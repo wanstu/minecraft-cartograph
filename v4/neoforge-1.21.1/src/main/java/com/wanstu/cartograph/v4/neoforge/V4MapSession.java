@@ -107,12 +107,12 @@ final class V4MapSession implements AutoCloseable {
         var branches=coverageBranches();
         for(Key k:visible){
             var r=readyRaster(k);
-            if(r!=null){var tk=key(r);protectedKeys.add(tk);slots.slot(tk);}
+            if(r!=null){var tk=key(r);protectedKeys.add(tk);slots.touch(tk);}
             // Retain existing parent previews unless exact coverage is already uploaded.
             if(state(k)==MapTileCoverage.State.MISSING){
                 for(var patch:MapTileCoverage.resolve(k,this::state,branches)){
                     var source=readyRaster(patch.source());
-                    if(source!=null){var tk=key(source);previewKeys.add(tk);slots.slot(tk);}
+                    if(source!=null){var tk=key(source);previewKeys.add(tk);slots.touch(tk);}
                 }
             }
         }
@@ -128,7 +128,11 @@ final class V4MapSession implements AutoCloseable {
         long started=System.nanoTime();
         for(Key k:uploadOrder){
             if(budget==0||(budget<workBudget.textureUploads()&&System.nanoTime()-started>workBudget.sliceNanos()))break;
-            var raster=pages.get(k);if(raster==null||raster.empty())continue;
+            var raster=pages.get(k);
+            // Every observed raster contains all five palettes. Recolor the last
+            // resident observation immediately if CPU refresh is still pending.
+            if(raster==null)raster=published.get(k);
+            if(raster==null||raster.empty()||pages.get(k)==null&&slots.slot(key(raster))==null)continue;
             var key=key(raster);
             if(slots.ready(key,style)){published.put(k,raster);continue;}
             var old=published.get(k);
@@ -460,6 +464,7 @@ final class V4MapSession implements AutoCloseable {
                 mesh.buffer.bind();
                 mesh.buffer.drawWithShader(matrix,RenderSystem.getProjectionMatrix(),GameRenderer.getPositionTexColorShader());
                 drawCalls++;quads+=mesh.quads;rendered.addAll(group.parts);drawnGroups.add(group);
+                for(var part:group.parts)slots.touch(key(part.raster));
             }
             presentedGroups=List.copyOf(drawnGroups);
             drawnParts=List.copyOf(rendered);lastRenderedCamera=camera;

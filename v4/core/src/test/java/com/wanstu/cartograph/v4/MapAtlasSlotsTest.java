@@ -69,6 +69,24 @@ public final class MapAtlasSlotsTest {
         var reclaimed=new HashSet<Integer>();
         for(int i=0;i<3;i++)reclaimed.add(staging.reserve(page(i+1,5),Set.of()));
         check(reclaimed.size()==3&&!reclaimed.contains(null),"discard reclaims all slots exactly once");
+        // Scanning the atlas for fallback/readiness must not destroy the LRU order.
+        var pan=new MapAtlasSlots(512);
+        var window=new ArrayDeque<MapAtlasSlots.Page>();
+        for(int i=0;i<2048;i++){
+            var p=page(i,1);
+            if(i>=512){
+                // Non-touching inspection of every resident, including the oldest.
+                for(int j=i-1;j>=i-512;j--){var q=page(j,1);check(pan.ready(q,SATELLITE_MODERN)&&pan.slot(q)!=null,"resident prior window");}
+            }
+            var protectedPages=Set.copyOf(window);
+            int id=pan.reserve(p,protectedPages);
+            for(var style:MapRaster.Style.values())pan.uploaded(p,id,style);
+            if(i>=512)check(pan.slot(page(i-512,1))==null,"evict oldest not inspected page");
+            window.addLast(p);if(window.size()>64)window.removeFirst();
+            for(var q:window){pan.touch(q);for(var style:MapRaster.Style.values())check(pan.ready(q,style),"visible window remains resident across palettes");}
+            check(pan.size()==Math.min(512,i+1),"bounded atlas");
+        }
+        System.out.println("PASS: 2048-page pan, 512 slots, five palettes, inspection does not change eviction order");
         var random=new Random(1701);var keys=new ArrayList<MapAtlasSlots.Page>();
         for(int i=0;i<31;i++)keys.add(page(i-16,i+1));
         var slots=new MapAtlasSlots(16);
