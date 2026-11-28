@@ -99,6 +99,8 @@ final class MinecraftSurfaceFacts {
         return new CapturePump.Capture(){
             final BlockPos.MutableBlockPos pos=new BlockPos.MutableBlockPos();
             final IdentityHashMap<BlockState,String> keys=new IdentityHashMap<>();
+            final Map<ResourceLocation,String> biomes=new HashMap<>();
+            final CaptureFactCache facts=new CaptureFactCache();
             public boolean valid(){return level.getChunkSource().getChunkNow(ticket.chunkX(),ticket.chunkZ())==chunk;}
             public RegionPageStore.Entry column(int i){
                 int x=i&15,z=i>>>4,min=level.getMinBuildHeight();
@@ -108,13 +110,13 @@ final class MinecraftSurfaceFacts {
                 int floor=chunk.getHeight(Heightmap.Types.OCEAN_FLOOR,x,z);
                 pos.set(ticket.chunkX()*16+x,y,ticket.chunkZ()*16+z);
                 BlockState state=chunk.getBlockState(pos);
-                var biome=level.getBiome(pos).unwrapKey().orElseThrow().location().toString();
+                String biome=biomes.computeIfAbsent(level.getBiome(pos).unwrapKey().orElseThrow().location(),ResourceLocation::toString);
                 String material=keys.computeIfAbsent(state,MinecraftSurfaceFacts::material);
                 MapColor color=state.getMapColor(EmptyBlockGetter.INSTANCE,pos);
                 int depth=color==MapColor.WATER&&floor>=min?Math.max(0,y-floor):0;
                 var terrain=terrain(color);
                 int rgb=color.col;
-                return RegionPageStore.Entry.leaf(new FeatureDictionary.Feature(material,biome,terrain),y,
+                return facts.entry(material,biome,terrain,y,
                     relief<min?GeographicPyramid.UNKNOWN_HEIGHT:relief,depth,
                     LINEAR[(rgb>>>16)&255],LINEAR[(rgb>>>8)&255],LINEAR[rgb&255]);
             }

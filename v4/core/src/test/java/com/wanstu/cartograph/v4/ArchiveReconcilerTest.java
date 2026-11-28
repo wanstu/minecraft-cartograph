@@ -94,6 +94,15 @@ public final class ArchiveReconcilerTest{
                 check(p.committed()==0&&structures.matches(-2,3,List.of(new StructureIndex.Start("minecraft:village_plains",-2,3,-25,64,true))),"saved structure only update");
             }
             structures.replace(-2,3,List.of(new StructureIndex.Start("test:live",-2,3)));gate.committed(-2,3);
+            // The saved bytes AND terrain page revision are unchanged, but live starts
+            // have changed. A terrain-only fingerprint hit must not acknowledge the handoff.
+            dirty.mark(List.of(new Position(-2,3)));
+            try(var archive=new ArchiveReconciler(regions,target.resolve("structure-fixture-source"),-16,16,
+                    source->FreshRegionBuilder.Columns.fromEntries(map(source)),structures,()->{})){
+                drain(archive,world,dirty,gate);
+                check(dirty.size()==1&&structures.matches(-2,3,List.of(new StructureIndex.Start("test:live",-2,3))),
+                    "unchanged saved fingerprint cannot clear structure-only live conflict");
+            }
             write(file,modified);
             try(var archive=new ArchiveReconciler(regions,target.resolve("structure-fixture-source"),-16,16,
                     source->FreshRegionBuilder.Columns.fromEntries(map(source)),structures,()->{})){

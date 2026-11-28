@@ -72,7 +72,10 @@ final class ArchiveReconciler implements AutoCloseable {
                     }catch(IOException e){errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
                     byte[] hash=encoded.fingerprint();
                     long revision=world.chunkPageRevision(c.x,c.z);
-                    if(fingerprints.matches(c.x,c.z,revision,hash)&&gate.valid(c.x,c.z)){
+                    // A terrain revision alone cannot prove the saved structure starts
+                    // still agree after a structure-only live commit. Verify the exact
+                    // saved facts whenever this session owns the live chunk.
+                    if(!gate.protectedLive(c.x,c.z)&&fingerprints.matches(c.x,c.z,revision,hash)&&gate.valid(c.x,c.z)){
                         unchanged++;if(c.work!=null)ack.add(c.work);continue;
                     }
                     Entry[] columns;List<StructureIndex.Start> starts;
