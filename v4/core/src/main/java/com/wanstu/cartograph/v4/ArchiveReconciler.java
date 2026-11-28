@@ -19,6 +19,7 @@ final class ArchiveReconciler implements AutoCloseable {
     private final Runnable structureChanged;
     private SavedArchiveCursor cursor;
     private boolean discovered;
+    private boolean singleDirtyTurn=true;
     private static final int MAX_FAILED_REGIONS=256;
     private final Set<Path> failedRegions=new LinkedHashSet<>();
     private boolean rescan=true;
@@ -47,7 +48,14 @@ final class ArchiveReconciler implements AutoCloseable {
         for(var p:gate.drainWakeups(max))dirty.wake(p);
         List<Candidate> candidates=new ArrayList<>();
         // Reserve capacity for initial discovery even with a permanently deferred dirty item.
-        for(var w:dirty.peek(discovered?max:Math.max(1,max/4)))candidates.add(dirty(w));
+        int dirtyBudget=discovered?max:Math.max(1,max/4);
+        // Under high server pressure max can be one. Alternate rather than
+        // letting a permanently conflicting dirty handoff starve discovery.
+        if(!discovered&&max==1){
+            dirtyBudget=singleDirtyTurn?1:0;
+            singleDirtyTurn=!singleDirtyTurn;
+        }
+        for(var w:dirty.peek(dirtyBudget))candidates.add(dirty(w));
         if(!discovered&&candidates.size()<max){
             try{
                 if(cursor==null){

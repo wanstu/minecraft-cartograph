@@ -173,6 +173,22 @@ public final class ArchiveReconcilerTest{
                 p=drain(archive,blockedWorld,blockedDirty,new LiveArchiveGate());
                 check(p.committed()==1&&blockedWorld.matchesChunk(-2,3,expected),"directory recovery");
             }
+            // A permanently unavailable dirty chunk must not monopolize a
+            // one-candidate archive budget while the server is under pressure.
+            Path fairTarget=root.resolve("fair-geo");
+            var fairWorld=new WorldGeography(fairTarget,2,8,4*1024*1024,4*1024*1024);
+            var fairDirty=new SavedDirtyIndex(fairTarget);
+            fairDirty.mark(List.of(new Position(3200,3200)));
+            var fairGate=new LiveArchiveGate();
+            try(var archive=open(blocked,fairTarget)){
+                ArchiveReconciler.Progress p=null;
+                for(int i=0;i<12;i++){
+                    p=archive.step(fairWorld,fairDirty,fairGate,1);
+                    if(p.discovered())break;
+                }
+                check(p!=null&&p.discovered()&&p.committed()==1&&fairDirty.size()==1
+                    &&fairWorld.matchesChunk(-2,3,expected),"one-candidate discovery fairness");
+            }
             // A same-session clean unload avoids immediate duplicate capture.
             var scheduler=new ActiveChunkScheduler(t->null,12000,20,8);
             scheduler.loadedObserved(8,8);var ticket=scheduler.poll();scheduler.finish(ticket,CapturePump.Outcome.COMMITTED);
