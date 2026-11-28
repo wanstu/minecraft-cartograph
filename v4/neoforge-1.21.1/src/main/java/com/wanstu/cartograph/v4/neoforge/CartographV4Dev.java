@@ -108,7 +108,7 @@ public final class CartographV4Dev {
         final LiveArchiveGate gate;final Path regions;final int minY,height;
         CompletableFuture<WorldIoService.ArchiveProgress> archive;
         WorldIoService.ArchiveProgress progress;
-        long nextArchive;
+        final ArchiveBackoff archiveBackoff=new ArchiveBackoff();
         final ServerLevel level;
         int focusCursor;
         void prioritizePlayers(){
@@ -152,22 +152,23 @@ public final class CartographV4Dev {
                 try{
                     var next=archive.join();
                     boolean madeProgress=progress==null||next.committed()>progress.committed()||next.unchanged()>progress.unchanged();
-                    if(next.discovered())nextArchive=tick+(next.pending()>0&&madeProgress?2:100);
-                    else if(progress!=null&&next.sourceErrors()>progress.sourceErrors()&&!madeProgress)nextArchive=tick+20;
+                    archiveBackoff.completed(tick,next.discovered(),next.pending()>next.waitingActive(),madeProgress,progress!=null&&next.sourceErrors()>progress.sourceErrors());
                     progress=next;
-                }catch(CompletionException e){nextArchive=tick+200;}
+                }catch(CompletionException e){archiveBackoff.failed(tick);}
                 archive=null;
             }
-            if(tick<nextArchive||io.failed()||io.queued()>8)return;
-            nextArchive=tick+2;
+            if(io.failed()||io.queued()>8||!archiveBackoff.due(tick,gate.hasWakeups()))return;
+            archiveBackoff.submitted(tick);
             archive=io.archiveStep(key,regions,minY,height,MinecraftSurfaceFacts::fromSaved,max);
         }
         void transfer(WorldIoService io){
             scheduler.drainInactiveAsync(16,dirty);
-            if(dirty.size()>0&&(handoff==null||handoff.isDone())){
-                if(handoff!=null&&handoff.isCompletedExceptionally()&&io.failed())return;
-                handoff=io.handoff(key,dirty);
+            if(handoff!=null&&handoff.isDone()){
+                try{if(handoff.join()>0)archiveBackoff.wake();}
+                catch(CompletionException ignored){/* scheduler retains failed receipts */}
+                handoff=null;
             }
+            if(dirty.size()>0&&handoff==null&&!io.failed())handoff=io.handoff(key,dirty);
         }
     }
     private static final class Runtime{

@@ -8,7 +8,7 @@ import static com.wanstu.cartograph.v4.ActiveChunkScheduler.Position;
 
 /** Bounded saved-world reconciliation, run exclusively by the world IO owner. */
 final class ArchiveReconciler implements AutoCloseable {
-    record Progress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending,int waitingActive,String lastSourceError){}
+    record Progress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending,int waitingActive,String lastSourceError,long protectedConflicts,String lastConflict){}
     private record Candidate(Path file,int rx,int rz,int x,int z,SavedDirtyIndex.Work work){}
     private record Ready(Candidate candidate,byte[] hash,Entry[] columns,boolean alreadyMatches,List<StructureIndex.Start> starts){}
     private final Path regions;
@@ -25,7 +25,8 @@ final class ArchiveReconciler implements AutoCloseable {
     private boolean rescan=true;
     private int sinceFlush;
     private long decoded,unchanged,committed,deferred,errors;
-    private String lastSourceError="";
+    private String lastSourceError="",lastConflict="";
+    private long protectedConflicts;
     static String describe(String where,Throwable error){
         String message=(where+": "+error.getClass().getSimpleName()+": "+Objects.toString(error.getMessage(),"")).replace('\n',' ').replace('\r',' ');
         return message.substring(0,Math.min(240,message.length()));
@@ -38,7 +39,7 @@ final class ArchiveReconciler implements AutoCloseable {
         this.regions=regions;this.minY=minY;this.height=height;this.mapper=Objects.requireNonNull(mapper);this.structures=structures;this.structureChanged=structureChanged;
         fingerprints=new SourceFingerprints(index);
     }
-    Progress progress(SavedDirtyIndex dirty){return new Progress(decoded,unchanged,committed,deferred,errors,discovered,dirty.size(),dirty.waitingActive(),lastSourceError);}
+    Progress progress(SavedDirtyIndex dirty){return new Progress(decoded,unchanged,committed,deferred,errors,discovered,dirty.size(),dirty.waitingActive(),lastSourceError,protectedConflicts,lastConflict);}
     private Candidate dirty(SavedDirtyIndex.Work w){
         int x=w.position().x(),z=w.position().z(),rx=Math.floorDiv(x,32),rz=Math.floorDiv(z,32);
         return new Candidate(regions.resolve("r."+rx+"."+rz+".mca"),rx,rz,x,z,w);
@@ -136,6 +137,8 @@ final class ArchiveReconciler implements AutoCloseable {
                     if(structures!=null&&gate.protectedLive(c.x,c.z))try{sameStarts=structures.matches(c.x,c.z,starts);}
                     catch(IOException ex){sourceError("structure match "+c.x+","+c.z,ex);if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
                     if(gate.protectedLive(c.x,c.z)&&(!equal||!sameStarts)){
+                        protectedConflicts++;
+                        lastConflict=c.x+","+c.z+" "+(!equal?"terrain":"")+(!equal&&!sameStarts?"+":"")+(!sameStarts?"structures":"");
                         deferred++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;
                     }
                     batches.computeIfAbsent(RegionShard.Id.ofChunk(c.x,c.z),k->new ArrayList<>())

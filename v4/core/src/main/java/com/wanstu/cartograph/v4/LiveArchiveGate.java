@@ -23,6 +23,8 @@ public final class LiveArchiveGate {
         if(!active.contains(p))return false;
         parked.add(p);return true;
     }
+    /** A parked durable task became eligible; bypass only idle backoff, not global budgets. */
+    public synchronized boolean hasWakeups(){return !wakeups.isEmpty();}
     synchronized List<ActiveChunkScheduler.Position> drainWakeups(int max){
         List<ActiveChunkScheduler.Position> result=new ArrayList<>();
         var it=wakeups.iterator();while(it.hasNext()&&result.size()<max){result.add(it.next());it.remove();}return result;

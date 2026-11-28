@@ -58,8 +58,9 @@ public final class ArchiveReconcilerTest{
                 live[0]=Entry.leaf(new FeatureDictionary.Feature("minecraft:diamond_block","minecraft:plains",FeatureDictionary.Terrain.OTHER),-13,-14,0,1,2,3);
                 world.updateChunks(RegionShard.Id.ofChunk(-2,3),List.of(new DiskGeographicPyramid.ChunkSnapshot(-2,3,live)));
                 gate.committed(-2,3);dirty.mark(List.of(new Position(-2,3)));
-                archive.step(world,dirty,gate,16);
+                var conflict=archive.step(world,dirty,gate,16);
                 check(world.matchesChunk(-2,3,live)&&dirty.size()==1,"stale save cannot overwrite live");
+                check(conflict.protectedConflicts()==1&&conflict.sourceErrors()==0&&conflict.lastConflict().equals("-2,3 terrain"),"conflict distinct from source error");
                 gate.loaded(-2,3);var parked=archive.step(world,dirty,gate,16);
                 check(dirty.size()==1&&parked.waitingActive()==1&&dirty.peek(16).isEmpty()&&world.matchesChunk(-2,3,live),"active exclusion and park");
                 long deferred=parked.deferred();
@@ -68,7 +69,9 @@ public final class ArchiveReconcilerTest{
                 dirty.mark(List.of(new Position(-2,3)));
                 check(archive.step(world,dirty,gate,16).waitingActive()==1,"new token parked");
                 gate.unloaded(-2,3);
+                check(gate.hasWakeups(),"parked unload wakes idle scheduler");
                 var awakened=archive.step(world,dirty,gate,16);
+                check(!gate.hasWakeups(),"wake consumed");
                 check(awakened.waitingActive()==0&&dirty.size()==1&&world.matchesChunk(-2,3,live),"unload wakes but cannot overwrite newer live");
                 gate.loaded(-2,3);archive.step(world,dirty,gate,16);
                 gate.unloaded(-2,3);gate.loaded(-2,3);
