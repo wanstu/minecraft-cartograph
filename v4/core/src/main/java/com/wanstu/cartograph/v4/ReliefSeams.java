@@ -22,10 +22,14 @@ public final class ReliefSeams {
         final List<Edge> negative=new ArrayList<>(),positive=new ArrayList<>();
     }
     public static Result plan(List<Input> inputs,int limit){
-        if(inputs.size()>MAX_PATCHES||limit<0||limit>MAX_WALLS)throw new IllegalArgumentException("Seam budget");
+        if(limit<0||limit>MAX_WALLS)throw new IllegalArgumentException("Seam budget");
+        // Sparse multi-level previews can exceed the legacy patch count. Bound
+        // seam planning without throwing or dropping terrain top surfaces.
+        int count=Math.min(inputs.size(),MAX_PATCHES);
+        boolean limited=inputs.size()>count;
         // Sorted boundaries and intervals ensure deterministic ownership, no all-pairs scans.
         var boundaries=new TreeMap<Boundary,Sides>(Comparator.comparing(Boundary::vertical).thenComparingInt(Boundary::coordinate));
-        for(int i=0;i<inputs.size();i++)addEdges(boundaries,inputs.get(i),i);
+        for(int i=0;i<count;i++)addEdges(boundaries,inputs.get(i),i);
         List<Wall> walls=new ArrayList<>();
         for(var pair:boundaries.entrySet()){
             var sides=pair.getValue();
@@ -46,7 +50,7 @@ public final class ReliefSeams {
                 if(right.end<=left.end)b++;
             }
         }
-        return new Result(List.copyOf(walls),false);
+        return new Result(List.copyOf(walls),limited);
     }
     private static void addEdges(Map<Boundary,Sides> map,Input in,int index){
         var p=in.patch;var r=in.raster;int cell=1<<r.key().lod(),size=32*cell;

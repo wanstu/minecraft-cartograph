@@ -64,6 +64,19 @@ public final class ReliefSeamsTest {
         var gaps=ReliefSeams.plan(List.of(exact(coarse),input(target,finePatch,unknown)),32768).walls();
         check(gaps.size()==16&&gaps.stream().allMatch(w->w.z()%2==0),"unknown surface excluded");
         var capped=ReliefSeams.plan(pair,5);check(capped.limited()&&capped.walls().size()==5,"bounded output");
+        // Sparse previews may have more patches than the seam work budget.
+        // Retain actual terrain and return a bounded, valid partial seam plan.
+        List<ReliefSeams.Input> oversized=new ArrayList<>(pair);
+        var tiny=raster(new Key(0,0,0),(x,z)->64);
+        for(int i=2;i<ReliefSeams.MAX_PATCHES+20;i++){
+            var k=new Key(0,i,0);
+            // Reuse the same raster, clipped in disjoint cells within its bounds.
+            int x=i%32,z=i/32;
+            oversized.add(input(k,new MapTileCoverage.Patch(tiny.key(),0,0,1,x/32.0,z/32.0,1/32.0),tiny));
+        }
+        var bounded=ReliefSeams.plan(oversized,32768);
+        check(bounded.limited()&&bounded.walls().size()<=32768&&bounded.walls().stream().allMatch(w->w.owner()<ReliefSeams.MAX_PATCHES),"oversized preview bounded without throw");
+        check(bounded.walls().stream().filter(w->w.x()==0&&w.z()<0).count()==32,"retained known primary seam");
         Random random=new Random(551);
         for(int iteration=0;iteration<100;iteration++){
             int[] left=new int[32],right=new int[32];
