@@ -110,7 +110,11 @@ final class MinecraftSurfaceFacts {
                 int floor=chunk.getHeight(Heightmap.Types.OCEAN_FLOOR,x,z);
                 pos.set(ticket.chunkX()*16+x,y,ticket.chunkZ()*16+z);
                 BlockState state=chunk.getBlockState(pos);
-                String biome=biomes.computeIfAbsent(level.getBiome(pos).unwrapKey().orElseThrow().location(),ResourceLocation::toString);
+                // Raw quart biome from the observed chunk, exactly as stored in its NBT.
+                // Level.getBiome interpolates across neighboring quart cells and may
+                // disagree with a frozen save even when the terrain has not changed.
+                String biome=biomes.computeIfAbsent(chunk.getNoiseBiome(Math.floorDiv(pos.getX(),4),
+                    Math.floorDiv(y,4),Math.floorDiv(pos.getZ(),4)).unwrapKey().orElseThrow().location(),ResourceLocation::toString);
                 String material=keys.computeIfAbsent(state,MinecraftSurfaceFacts::material);
                 MapColor color=state.getMapColor(EmptyBlockGetter.INSTANCE,pos);
                 int depth=color==MapColor.WATER&&floor>=min?Math.max(0,y-floor):0;

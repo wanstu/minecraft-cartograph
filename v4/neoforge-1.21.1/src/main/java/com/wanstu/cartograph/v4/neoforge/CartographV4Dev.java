@@ -230,8 +230,10 @@ public final class CartographV4Dev {
                 for(Dimension d:dimensions.values()){
                     while(d.scheduler.metrics().inactivePending()>0&&System.nanoTime()<deadline&&!io.failed()){
                         d.transfer(io);
+                        // A turn can consume only completed receipts without
+                        // submitting a new batch. Continue until every pending
+                        // revision is examined, not just until the future is null.
                         if(d.handoff!=null)d.handoff.get(Math.max(1,deadline-System.nanoTime()),TimeUnit.NANOSECONDS);
-                        else break;
                     }
                     if(d.scheduler.metrics().inactivePending()>0)LOG.warn("V4 pending shutdown handoff for {}: {}",d.key,d.scheduler.metrics().inactivePending());
                     d.dirty.closeInput();
