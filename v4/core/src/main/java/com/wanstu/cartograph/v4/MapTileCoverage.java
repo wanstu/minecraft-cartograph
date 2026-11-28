@@ -13,8 +13,20 @@ public final class MapTileCoverage {
         if(key.lod()==10)return null;
         return new Key(key.lod()+1,Math.floorDiv(key.x(),2),Math.floorDiv(key.z(),2));
     }
+    /** Sparse index: only branches leading to actual resident observations. */
+    public static Set<Key> branches(Collection<Key> resident){
+        Set<Key> out=new HashSet<>();
+        for(Key k:resident)for(Key p=parent(k);p!=null;p=parent(p))
+            if(!out.add(p))break;
+        return Set.copyOf(out);
+    }
     /** Nearest available ancestor, clipped to target; unknown exact pages never use fallback. */
     public static List<Patch> resolve(Key target,Lookup lookup){
+        return resolve(target,lookup,Set.of());
+    }
+    /** Reuse arbitrarily finer resident observations on zoom-out, without scanning
+     * absent subtrees or overlapping a coarser preview. EMPTY always wins. */
+    public static List<Patch> resolve(Key target,Lookup lookup,Set<Key> branches){
         State exact=lookup.state(target);
         if(exact==State.EMPTY)return List.of();
         if(exact==State.READY)return List.of(new Patch(target,0,0,1,0,0,1));
@@ -29,23 +41,30 @@ public final class MapTileCoverage {
                 break;
             }
         }
-        // During zoom-out retain already uploaded immediate children in their respective quadrants.
-        // No overlap: the parent is clipped to only the missing quadrants.
-        if(target.lod()==0)return coarse==null?List.of():List.of(coarse);
-        List<Patch> out=new ArrayList<>(4);
-        boolean anyChild=false;
-        for(int dz=0;dz<2;dz++)for(int dx=0;dx<2;dx++){
-            Key child=new Key(target.lod()-1,Math.addExact(Math.multiplyExact(target.x(),2),dx),
-                Math.addExact(Math.multiplyExact(target.z(),2),dz));
-            State state=lookup.state(child);
-            double x=dx*.5,z=dz*.5;
-            if(state==State.READY){out.add(new Patch(child,x,z,.5,0,0,1));anyChild=true;}
-            else if(state==State.EMPTY)anyChild=true;
-            else if(coarse!=null)out.add(new Patch(coarse.source,x,z,.5,
-                coarse.u+x*coarse.uvSize,coarse.v+z*coarse.uvSize,coarse.uvSize*.5));
-        }
-        if(!anyChild&&coarse!=null)return List.of(coarse);
+        List<Patch> out=new ArrayList<>();
+        collect(target,lookup,branches,coarse,0,0,1,true,out);
         return List.copyOf(out);
+    }
+    /** Return whether the subtree has explicit coverage/empty evidence. Otherwise
+     * merge its unused quadrants back into one coarse patch. */
+    private static boolean collect(Key k,Lookup lookup,Set<Key> branches,Patch coarse,
+                                   double x,double z,double size,boolean root,List<Patch> out){
+        State state=root?State.MISSING:lookup.state(k);
+        if(state==State.EMPTY)return true;
+        if(state==State.READY){out.add(new Patch(k,x,z,size,0,0,1));return true;}
+        if(k.lod()>0&&(root||branches.contains(k))){
+            int start=out.size();boolean any=false;double half=size*.5;
+            for(int dz=0;dz<2;dz++)for(int dx=0;dx<2;dx++){
+                Key child=new Key(k.lod()-1,Math.addExact(Math.multiplyExact(k.x(),2),dx),
+                    Math.addExact(Math.multiplyExact(k.z(),2),dz));
+                any|=collect(child,lookup,branches,coarse,x+dx*half,z+dz*half,half,false,out);
+            }
+            if(any)return true;
+            out.subList(start,out.size()).clear();
+        }
+        if(coarse!=null)out.add(new Patch(coarse.source,x,z,size,
+            coarse.u+x*coarse.uvSize,coarse.v+z*coarse.uvSize,coarse.uvSize*size));
+        return false;
     }
     /** Visible pages first, with their immediate parent interleaved; then a one-page neighbor ring.
      * The ring is only a residency hint, not a terrain collection boundary.

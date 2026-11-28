@@ -65,6 +65,11 @@ public final class MapPresentationClient {
         }
     }
     public MapRaster get(Key key){owner();return cache.get(key);}
+    /** Include resident authoritative empty pages in sparse fallback branches. */
+    public void addEmptyKeys(Set<Key> keys){
+        owner();
+        for(var e:cache.entrySet())if(e.getValue().empty())keys.add(e.getKey());
+    }
     public long revision(){owner();return revision;}
     public Metrics metrics(){owner();return new Metrics(cache.size(),pending.size(),requests,accepted,discarded,failures);}
 }

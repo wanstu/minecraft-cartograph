@@ -63,6 +63,12 @@ public final class MapAtlasSlotsTest {
         staging.uploaded(page(0,4),replacement,SATELLITE_MODERN);
         staging.clearStyle(SATELLITE_MODERN);
         check(!staging.ready(a,SATELLITE_MODERN)&&!staging.ready(c,SATELLITE_MODERN),"style eviction invalidates both revisions");
+        staging.discard(a.key());
+        check(staging.size()==0&&staging.slot(a)==null&&staging.slot(c)==null&&staging.slot(d)==null,"known empty removes every staged generation");
+        try{staging.uploaded(c,stagedSlot,SATELLITE_MODERN);throw new AssertionError("empty stale upload");}catch(IllegalStateException expected){}
+        var reclaimed=new HashSet<Integer>();
+        for(int i=0;i<3;i++)reclaimed.add(staging.reserve(page(i+1,5),Set.of()));
+        check(reclaimed.size()==3&&!reclaimed.contains(null),"discard reclaims all slots exactly once");
         var random=new Random(1701);var keys=new ArrayList<MapAtlasSlots.Page>();
         for(int i=0;i<31;i++)keys.add(page(i-16,i+1));
         var slots=new MapAtlasSlots(16);

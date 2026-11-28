@@ -59,6 +59,33 @@ public final class MapTileCoverageTest{
                 check(count==(expected[j]?1:0),"nonoverlapping quadrant coverage");
             }
         }
+        // A five-level zoom jump must preserve previously rendered fine pages,
+        // including negative coordinates and explicit empty descendants.
+        Key big=new Key(5,-2,-1),fine=new Key(0,-63,-31),empty=new Key(0,-62,-31),ancestor=parent(big);
+        Map<Key,State> deep=new HashMap<>();deep.put(fine,State.READY);deep.put(empty,State.EMPTY);
+        var sparse=branches(deep.keySet());
+        var isolated=resolve(big,k->deep.getOrDefault(k,State.MISSING),sparse);
+        check(isolated.size()==1&&isolated.getFirst().source().equals(fine)&&isolated.getFirst().x()==1.0/32&&isolated.getFirst().z()==1.0/32&&isolated.getFirst().size()==1.0/32,"multi-level child survives zoom jump");
+        deep.put(ancestor,State.READY);
+        var mixed=resolve(big,k->deep.getOrDefault(k,State.MISSING),branches(deep.keySet()));
+        for(int z=0;z<32;z++)for(int x=0;x<32;x++){
+            double xx=(x+.5)/32,zz=(z+.5)/32;int hits=0;
+            for(var part:mixed){
+                if(xx>=part.x()&&xx<part.x()+part.size()&&zz>=part.z()&&zz<part.z()+part.size()){
+                    hits++;
+                    check(part.source().equals(x==1&&z==1?fine:ancestor),"finest actual source");
+                    double wx=(big.x()+part.x())*32*(1<<big.lod());
+                    double wz=(big.z()+part.z())*32*(1<<big.lod());
+                    check(wx==(part.source().x()+part.u())*32*(1<<part.source().lod())&&wz==(part.source().z()+part.v())*32*(1<<part.source().lod()),"deep UV alignment");
+                }
+            }
+            check(hits==(x==2&&z==1?0:1),"deep nonoverlap / known empty");
+        }
+        int[] lookups={0};
+        Key huge=new Key(10,0,0),leaf=new Key(0,101,101);
+        var hugeResult=resolve(huge,k->{lookups[0]++;return k.equals(leaf)?State.READY:State.MISSING;},branches(List.of(leaf)));
+        check(hugeResult.size()==1&&lookups[0]<=41,"sparse traversal not exponential");
+        System.out.println("PASS: multi-LOD sparse preview, 1024 nonoverlapping cell samples, explicit empty and bounded traversal");
         System.out.println("PASS: negative UV, nearest ancestor, child reuse, clipped nonoverlapping fallback, known-empty exclusion, bounded prefetch, 10000 randomized world-space UV checks, 243 mixed-child cases");
     }
 }

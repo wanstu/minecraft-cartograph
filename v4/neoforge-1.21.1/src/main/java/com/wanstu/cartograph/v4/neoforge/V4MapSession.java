@@ -72,6 +72,19 @@ final class V4MapSession implements AutoCloseable {
         if(r!=null&&r.empty())return MapTileCoverage.State.EMPTY;
         return readyRaster(k)!=null?MapTileCoverage.State.READY:MapTileCoverage.State.MISSING;
     }
+    private long branchRevision=-1,branchUploads=-1;
+    private MapRaster.Style branchStyle;
+    private Set<Key> branchCache=Set.of();
+    private Set<Key> coverageBranches(){
+        long revision=pages.revision();
+        if(branchRevision==revision&&branchUploads==uploads&&branchStyle==style)return branchCache;
+        Set<Key> known=new HashSet<>();
+        for(var e:published.entrySet())if(slots.ready(key(e.getValue()),style))known.add(e.getKey());
+        pages.addEmptyKeys(known);
+        branchCache=MapTileCoverage.branches(known);
+        branchRevision=revision;branchUploads=uploads;branchStyle=style;
+        return branchCache;
+    }
     /** Parent preview first; visible exact tiles next. Neighbor ring is CPU prefetch only. */
     void prepare(List<Key> visible){
         boolean prefetch=workBudget.prefetchNeighbors();
@@ -83,16 +96,21 @@ final class V4MapSession implements AutoCloseable {
             uploadOrder=requested.stream().filter(urgent::contains).toList();
         }
         pages.tick(requested);
-        published.entrySet().removeIf(e->slots.slot(key(e.getValue()))==null);
+        published.entrySet().removeIf(e->{
+            var fresh=pages.get(e.getKey());
+            if(fresh!=null&&fresh.empty()){slots.discard(e.getKey());return true;}
+            return slots.slot(key(e.getValue()))==null;
+        });
         boolean raised=camera!=null&&camera.elevationDegrees()!=90;
         boolean samePresentation=presentedStyle==style&&presentedRaised==raised;
         Set<MapAtlasSlots.Page> protectedKeys=new HashSet<>(),previewKeys=new LinkedHashSet<>();
+        var branches=coverageBranches();
         for(Key k:visible){
             var r=readyRaster(k);
             if(r!=null){var tk=key(r);protectedKeys.add(tk);slots.slot(tk);}
             // Retain existing parent previews unless exact coverage is already uploaded.
             if(state(k)==MapTileCoverage.State.MISSING){
-                for(var patch:MapTileCoverage.resolve(k,this::state)){
+                for(var patch:MapTileCoverage.resolve(k,this::state,branches)){
                     var source=readyRaster(patch.source());
                     if(source!=null){var tk=key(source);previewKeys.add(tk);slots.slot(tk);}
                 }
@@ -160,8 +178,9 @@ final class V4MapSession implements AutoCloseable {
         ordered.sort(Comparator.comparingInt(Key::lod).thenComparingInt(Key::x).thenComparingInt(Key::z));
         List<Part> next=new ArrayList<>();
         int exact=0,fallback=0,upper=0;
+        var branches=coverageBranches();
         for(Key k:ordered){
-            var patches=MapTileCoverage.resolve(k,this::state);
+            var patches=MapTileCoverage.resolve(k,this::state,branches);
             boolean isExact=patches.size()==1&&patches.getFirst().source().equals(k);
             if(isExact)exact++;else if(!patches.isEmpty())fallback++;
             for(var patch:patches){

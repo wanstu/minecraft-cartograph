@@ -55,5 +55,15 @@ public final class MapAtlasSlots {
         int bit=1<<style.ordinal();
         entries.replaceAll((k,r)->new Resident(r.slot,r.mask&~bit));
     }
+    /** A newly confirmed empty page supersedes every staged/visible revision. */
+    public void discard(Key key){
+        var it=entries.entrySet().iterator();
+        while(it.hasNext()){
+            var e=it.next();
+            if(!e.getKey().key().equals(key))continue;
+            free.addLast(e.getValue().slot);it.remove();
+        }
+        spatial.remove(key);
+    }
     public int size(){return entries.size();}
 }
