@@ -17,6 +17,8 @@ public final class CapturePump {
         Ticket poll();
         /** Null means not currently available. Source must arrange a later retry/saved-chunk path. */
         Capture begin(Ticket ticket);
+        /** Rejected submissions may retry only while the original reservation is current. */
+        default boolean current(Ticket ticket){return true;}
         /** RETRY is not completion; requeue without a tight retry loop. */
         void finish(Ticket ticket,Outcome outcome);
     }
@@ -59,7 +61,7 @@ public final class CapturePump {
     /** Hard work-count cap and cooperative time cap (one source operation may overrun). */
     public int tick(long budgetNanos,int maxColumns,int maxStarts){
         checkOwner();
-        if(budgetNanos<=0||maxColumns<=0||maxStarts<=0)throw new IllegalArgumentException("tick budget");
+        if(budgetNanos<=0||maxColumns<0||maxStarts<0)throw new IllegalArgumentException("tick budget");
         long started=System.nanoTime();
         int columns=0,starts=0;
         // Poll only bounded in-flight receipts; no blocking wait on the server thread.
@@ -70,6 +72,9 @@ public final class CapturePump {
             try{result=t.receipt.join()==GeographicWorker.WriteResult.COMMITTED?Outcome.COMMITTED:Outcome.RETRY;}
             catch(CompletionException e){
                 if(e.getCause() instanceof RejectedExecutionException){
+                    // Do not submit old columns after a mutation or an unload/reload.
+                    if(!source.current(t.ticket)){it.remove();finish(t.ticket,Outcome.RETRY);continue;}
+                    if(maxStarts==0)continue; // receipt-only mode does not add IO work
                     // Keep the captured columns, retry submission only once per tick.
                     try{t.receipt=Objects.requireNonNull(sink.submit(t.ticket.chunkX,t.ticket.chunkZ,t.columns));}
                     catch(RuntimeException failure){it.remove();finish(t.ticket,Outcome.RETRY);}

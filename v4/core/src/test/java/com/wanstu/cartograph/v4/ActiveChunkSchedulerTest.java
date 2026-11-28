@@ -76,6 +76,29 @@ public final class ActiveChunkSchedulerTest {
         receipts.get(1).complete(GeographicWorker.WriteResult.COMMITTED);
         pump.tick(1_000_000_000L,256,1);
         check(live.metrics().queuedReview()==1&&live.metrics().queuedDirty()==0,"durable clean");
+        // Rejected old snapshots must never be submitted after mutation or unload/reload.
+        for(boolean unload:new boolean[]{false,true}){
+            var scheduler2=new ActiveChunkScheduler(t->new Capture(){
+                public Entry column(int i){return leaf;}
+                public boolean valid(){return true;}
+            },1000,10,8);
+            scheduler2.loaded(3,4,true);
+            List<CompletableFuture<GeographicWorker.WriteResult>> submitted=new ArrayList<>();
+            var pump2=new CapturePump(scheduler2,(x,z,data)->{
+                var future=new CompletableFuture<GeographicWorker.WriteResult>();submitted.add(future);return future;
+            },1);
+            pump2.tick(1_000_000_000L,256,1);
+            if(unload){scheduler2.unloaded(3,4);scheduler2.loaded(3,4,false);}
+            else scheduler2.changed(3,4);
+            submitted.getFirst().completeExceptionally(new RejectedExecutionException("queue full"));
+            check(pump2.tick(1_000_000_000L,0,0)==0,"receipt-only tick");
+            check(submitted.size()==1&&pump2.metrics().outstanding()==0&&scheduler2.metrics().queuedDirty()==1,"obsolete rejected snapshot not retried");
+            scheduler2.advance(10);pump2.tick(1_000_000_000L,256,1);
+            check(submitted.size()==2,"fresh revision submitted");
+            submitted.getLast().complete(GeographicWorker.WriteResult.COMMITTED);
+            pump2.tick(1_000_000_000L,0,0);
+            check(scheduler2.metrics().queuedDirty()==0&&scheduler2.metrics().queuedReview()==1,"receipt-only durable ack");
+        }
         // Loaded chunk count does not create a per-tick scan or a queue entry per event.
         var large=new ActiveChunkScheduler(t->null,12000,20,8);
         for(int i=0;i<50000;i++)large.loaded(i,0,false);

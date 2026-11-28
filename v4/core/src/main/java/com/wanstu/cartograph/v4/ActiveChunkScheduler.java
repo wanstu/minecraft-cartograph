@@ -161,6 +161,9 @@ public final class ActiveChunkScheduler implements Source {
         State s=active.get(new Position(ticket.chunkX(),ticket.chunkZ()));
         return s!=null&&ticket.equals(s.ticket)?s:null;
     }
+    @Override public boolean current(Ticket ticket){
+        owner();State s=match(ticket);return s!=null&&s.revision==s.reservedRevision;
+    }
     @Override public Capture begin(Ticket ticket){
         owner();State s=match(ticket);
         if(s==null||s.revision!=s.reservedRevision)return null;

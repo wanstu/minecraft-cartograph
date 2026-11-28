@@ -32,6 +32,7 @@ public final class CapturePumpTest {
         check(writes.size()==1&&outcomes.isEmpty(),"not durable yet");
         check(pump.tick(1_000_000_000L,64,1)==0,"backpressure");
         writes.get(0).completeExceptionally(new RejectedExecutionException("queue full"));
+        check(pump.tick(1_000_000_000L,0,0)==0&&writes.size()==1,"receipt-only pressure defers retry");
         check(pump.tick(1_000_000_000L,64,1)==0,"retry without resampling");
         check(outcomes.isEmpty()&&writes.size()==2&&pump.metrics().sampledColumns()==256,"rejected snapshot retained");
         writes.get(1).complete(GeographicWorker.WriteResult.COMMITTED);

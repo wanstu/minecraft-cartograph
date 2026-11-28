@@ -32,6 +32,7 @@ public final class CartographV4Dev {
         NeoForge.EVENT_BUS.addListener(CartographV4Dev::loaded);
         NeoForge.EVENT_BUS.addListener(CartographV4Dev::unloaded);
         NeoForge.EVENT_BUS.addListener(CartographV4Dev::saved);
+        NeoForge.EVENT_BUS.addListener(CartographV4Dev::beforeTick);
         NeoForge.EVENT_BUS.addListener(CartographV4Dev::tick);
         NeoForge.EVENT_BUS.addListener(CartographV4Dev::stopped);
     }
@@ -71,9 +72,25 @@ public final class CartographV4Dev {
             int floor=chunk.getHeight(Heightmap.Types.OCEAN_FLOOR,x,z);
             int relief=chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z);
             int top=chunk.getHeight(Heightmap.Types.WORLD_SURFACE,x,z);
-            if(pos.getY()<Math.min(top,Math.min(floor,relief))-1)return;
+            int min=level.getMinBuildHeight(),y=pos.getY();
+            if(SurfaceChangeFilter.irrelevant(y,top,relief,floor,min,false))return;
+            // Only water uses the ocean-floor height in the captured facts. For a
+            // known dry top surface, changes far below both other heightmaps cannot
+            // change any mapped channel. Uncertain/modded map colors stay conservative.
+            if(SurfaceChangeFilter.belowSurface(y,top,relief,min)){
+                try{
+                    var surfacePos=new BlockPos(pos.getX(),top,pos.getZ());
+                    var state=chunk.getBlockState(surfacePos);
+                    var id=net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock());
+                    if(id.getNamespace().equals("minecraft")&&state.getMapColor(net.minecraft.world.level.EmptyBlockGetter.INSTANCE,surfacePos)
+                        !=net.minecraft.world.level.material.MapColor.WATER)return;
+                }catch(RuntimeException ignored){/* fall back to dirty capture */}
+            }
         }
         ChunkPos p=chunk.getPos();onServer(level,r->r.dimension(level).scheduler.changed(p.x,p.z));
+    }
+    private static void beforeTick(ServerTickEvent.Pre e){
+        Runtime current=runtime;if(current!=null&&current.server==e.getServer())current.tickStarted=System.nanoTime();
     }
     private static void tick(ServerTickEvent.Post e){
         Runtime current=runtime;if(current!=null&&current.server==e.getServer())current.tick();
@@ -120,7 +137,7 @@ public final class CartographV4Dev {
                 return io.write(key,x,z,columns,starts);
             },2);
         }
-        void archive(WorldIoService io,long tick){
+        void archive(WorldIoService io,long tick,int max){
             if(archive!=null){
                 if(!archive.isDone())return;
                 try{
@@ -134,7 +151,7 @@ public final class CartographV4Dev {
             }
             if(tick<nextArchive||io.failed()||io.queued()>8)return;
             nextArchive=tick+2;
-            archive=io.archiveStep(key,regions,minY,height,MinecraftSurfaceFacts::fromSaved,16);
+            archive=io.archiveStep(key,regions,minY,height,MinecraftSurfaceFacts::fromSaved,max);
         }
         void transfer(WorldIoService io){
             scheduler.drainInactiveAsync(16,dirty);
@@ -150,7 +167,8 @@ public final class CartographV4Dev {
         final Map<ServerLevel,Dimension> dimensions=new LinkedHashMap<>();
         int cursor,archiveCursor,maintenanceCursor;
         CompletableFuture<RegionPageStore.Compaction> maintenance;
-        long tick;
+        long tick,tickStarted;
+        final CaptureWorkBudget work=new CaptureWorkBudget();
         Runtime(MinecraftServer server){
             this.server=server;
             io=new WorldIoService(server.getWorldPath(LevelResource.ROOT).resolve("cartograph-v4-dev"),3,128);
@@ -158,20 +176,24 @@ public final class CartographV4Dev {
         Dimension dimension(ServerLevel level){return dimensions.computeIfAbsent(level,l->new Dimension(l,io));}
         void tick(){
             tick++;
+            if(tickStarted!=0){work.sample(Math.max(0,System.nanoTime()-tickStarted),io.queued());tickStarted=0;}
+            if(tick%200==0)LOG.info("V4 collection pressure {} | columns {} | archive batch {} | queued {}",work.level(),work.columns(),work.archiveBatch(),io.queued());
             if(tick%200==0)for(Dimension d:dimensions.values())LOG.info("V4 capture {}: {} / {}",d.key,d.scheduler.metrics(),d.pump.metrics());
             if(tick%200==0)for(Dimension d:dimensions.values())if(d.progress!=null)LOG.info("V4 archive {}: {}",d.key,d.progress);
             if(tick==1||tick%200==0)for(ServerLevel level:server.getAllLevels())dimension(level);
             List<Dimension> all=new ArrayList<>(dimensions.values());
             if(all.isEmpty())return;
             for(Dimension d:all)d.scheduler.advance(tick);
-            long start=System.nanoTime(),budget=750_000;
-            int columns=256,visited=0;
+            long start=System.nanoTime(),budget=work.nanos();
+            int columns=work.columns(),visited=0;
             while(visited<all.size()&&visited<4&&columns>0&&System.nanoTime()-start<budget){
                 Dimension d=all.get(Math.floorMod(cursor++,all.size()));visited++;
                 d.transfer(io);
                 long remaining=budget-(System.nanoTime()-start);
                 if(remaining<=0)break;
-                columns-=d.pump.tick(remaining,columns,1);
+                // Drain receipts even if sampling is temporarily blocked by IO pressure.
+                if(io.failed()||io.queued()>=32)d.pump.tick(remaining,0,0);
+                else columns-=d.pump.tick(remaining,columns,1);
             }
             if(maintenance!=null&&maintenance.isDone()){
                 try{
@@ -180,12 +202,12 @@ public final class CartographV4Dev {
                 }catch(CompletionException ex){LOG.warn("V4 geographic maintenance deferred",ex.getCause());}
                 maintenance=null;
             }
-            if(tick%1200==0&&maintenance==null&&!io.failed()&&io.queued()==0&&System.nanoTime()-start<budget){
+            if(tick%1200==0&&work.maintenanceAllowed()&&maintenance==null&&!io.failed()&&io.queued()==0&&System.nanoTime()-start<budget){
                 Dimension d=all.get(Math.floorMod(maintenanceCursor++,all.size()));
                 maintenance=io.compactResident(d.key);
             }
-            if(tick%2==0&&System.nanoTime()-start<budget&&io.queued()<=8){
-                Dimension d=all.get(Math.floorMod(archiveCursor++,all.size()));d.archive(io,tick);
+            if(work.archiveDue(tick,io.queued())&&!io.failed()&&System.nanoTime()-start<budget){
+                Dimension d=all.get(Math.floorMod(archiveCursor++,all.size()));d.archive(io,tick,work.archiveBatch());
             }
         }
         void stop(){
