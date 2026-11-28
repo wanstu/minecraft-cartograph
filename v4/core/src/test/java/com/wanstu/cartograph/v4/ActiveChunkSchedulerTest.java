@@ -99,6 +99,27 @@ public final class ActiveChunkSchedulerTest {
             pump2.tick(1_000_000_000L,0,0);
             check(scheduler2.metrics().queuedDirty()==0&&scheduler2.metrics().queuedReview()==1,"receipt-only durable ack");
         }
+        // First-open priority is independent of viewport, and cannot starve remote active work.
+        var focused=new ActiveChunkScheduler(t->null,1000,10,8);
+        for(int i=0;i<20;i++)focused.loaded(-100+i,0,true);
+        for(int z=-3;z<=3;z++)for(int x=-3;x<=3;x++)focused.loaded(x,z,true);
+        focused.focus(new ActiveChunkScheduler.Position(0,0));
+        for(int i=0;i<20;i++){
+            var near=focused.poll();
+            check(Math.abs(near.chunkX())<=3&&Math.abs(near.chunkZ())<=3,"bounded local priority");
+            if(i==0)check(near.chunkX()==0&&near.chunkZ()==0,"player chunk first");
+            focused.finish(near,Outcome.COMMITTED);
+            var remote=focused.poll();
+            check(remote.chunkX()==-100+i,"global age order remains fair");
+            focused.finish(remote,Outcome.COMMITTED);
+        }
+        focused.focus(new ActiveChunkScheduler.Position(Integer.MAX_VALUE,Integer.MAX_VALUE));
+        focused.loaded(Integer.MIN_VALUE,Integer.MIN_VALUE,true);
+        var global=focused.poll();check(global.chunkX()==Integer.MIN_VALUE,"no coordinate wrap");
+        focused.finish(global,Outcome.COMMITTED);
+        focused.focus(null);
+        while((global=focused.poll())!=null)focused.finish(global,Outcome.COMMITTED);
+        check(focused.metrics().queuedDirty()==0&&focused.metrics().queuedReview()==70,"all active work still completed");
         // Loaded chunk count does not create a per-tick scan or a queue entry per event.
         var large=new ActiveChunkScheduler(t->null,12000,20,8);
         for(int i=0;i<50000;i++)large.loaded(i,0,false);

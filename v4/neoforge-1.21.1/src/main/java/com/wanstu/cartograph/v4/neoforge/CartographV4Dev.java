@@ -109,7 +109,16 @@ public final class CartographV4Dev {
         CompletableFuture<WorldIoService.ArchiveProgress> archive;
         WorldIoService.ArchiveProgress progress;
         long nextArchive;
+        final ServerLevel level;
+        int focusCursor;
+        void prioritizePlayers(){
+            var players=level.players();
+            if(players.isEmpty()){scheduler.focus(null);return;}
+            var p=players.get(Math.floorMod(focusCursor++,players.size())).chunkPosition();
+            scheduler.focus(new ActiveChunkScheduler.Position(p.x,p.z));
+        }
         Dimension(ServerLevel level,WorldIoService io){
+            this.level=level;
             key=level.dimension().location().toString();
             gate=io.gate(key);
             regions=DimensionType.getStorageFolder(level.dimension(),level.getServer().getWorldPath(LevelResource.ROOT)).resolve("region");
@@ -189,6 +198,7 @@ public final class CartographV4Dev {
             while(visited<all.size()&&visited<4&&columns>0&&System.nanoTime()-start<budget){
                 Dimension d=all.get(Math.floorMod(cursor++,all.size()));visited++;
                 d.transfer(io);
+                d.prioritizePlayers();
                 long remaining=budget-(System.nanoTime()-start);
                 if(remaining<=0)break;
                 // Drain receipts even if sampling is temporarily blocked by IO pressure.

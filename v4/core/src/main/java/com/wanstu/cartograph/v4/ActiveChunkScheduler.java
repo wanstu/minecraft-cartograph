@@ -45,6 +45,27 @@ public final class ActiveChunkScheduler implements Source {
     private final int dirtyBurst;
     private long now,sequence,dirtyStarts,reviewStarts,staleReceipts;
     private int consecutiveDirty,reserved;
+    private Position focus;
+    private boolean preferLocal=true;
+    private static final List<Position> LOCAL_OFFSETS=localOffsets();
+    private static List<Position> localOffsets(){
+        List<Position> offsets=new ArrayList<>(49);
+        for(int z=-3;z<=3;z++)for(int x=-3;x<=3;x++)offsets.add(new Position(x,z));
+        offsets.sort(Comparator.comparingInt(p->p.x*p.x+p.z*p.z));
+        return List.copyOf(offsets);
+    }
+    /** Scheduling hint only, independent of viewport and capture eligibility. */
+    public void focus(Position position){owner();focus=position;}
+    private State localDue(){
+        if(focus==null)return null;
+        for(Position offset:LOCAL_OFFSETS){
+            long x=(long)focus.x+offset.x,z=(long)focus.z+offset.z;
+            if(x<Integer.MIN_VALUE||x>Integer.MAX_VALUE||z<Integer.MIN_VALUE||z>Integer.MAX_VALUE)continue;
+            State s=active.get(new Position((int)x,(int)z));
+            if(s!=null&&s.dirty&&s.ticket==null&&s.due<=now)return s;
+        }
+        return null;
+    }
     public ActiveChunkScheduler(LoadedCapture factory,long reviewInterval,long retryInterval,int dirtyBurst){
         this.factory=Objects.requireNonNull(factory);
         if(reviewInterval<1||retryInterval<1||dirtyBurst<1)throw new IllegalArgumentException("Intervals");
@@ -151,6 +172,11 @@ public final class ActiveChunkScheduler implements Source {
         owner();State urgent=due(dirtyQueue),review=due(reviewQueue);
         State s=review!=null&&(urgent==null||consecutiveDirty>=dirtyBurst)?review:urgent;
         if(s==null)return null;
+        if(s.dirty){
+            // At least every other dirty reservation retains global age order.
+            if(preferLocal){State near=localDue();if(near!=null)s=near;}
+            preferLocal=!preferLocal;
+        }
         removeQueued(s);
         if(s.dirty){dirtyStarts++;if(consecutiveDirty<dirtyBurst)consecutiveDirty++;}
         else{reviewStarts++;consecutiveDirty=0;}
