@@ -6,7 +6,7 @@ import java.util.function.Function;
 import static com.wanstu.cartograph.v4.RegionPageStore.Key;
 
 /** Render-thread-owned, nonblocking CPU page residency. No world or filesystem calls. */
-public final class MapPresentationClient {
+public final class MapPresentationClient implements AutoCloseable {
     private static final class Pending{
         final CompletableFuture<MapRaster> future;
         boolean obsolete;
@@ -20,6 +20,7 @@ public final class MapPresentationClient {
     private final Map<Key,Pending> pending=new HashMap<>();
     private final Map<Key,Long> retry=new HashMap<>();
     private long seen,requests,accepted,discarded,failures,frame,revision;
+    private boolean closed;
     private final Thread owner=Thread.currentThread();
     public MapPresentationClient(PresentationChanges changes,Function<Key,CompletableFuture<MapRaster>> source,int capacity,int concurrency){
         this.changes=Objects.requireNonNull(changes);this.source=Objects.requireNonNull(source);
@@ -38,7 +39,7 @@ public final class MapPresentationClient {
     private void touch(Key key){var r=cache.get(key);if(r!=null)cache.putLast(key,r);}
     /** Only plan requests. Previously resident pages remain available across pans and styles. */
     public void tick(List<Key> wanted){
-        owner();if(wanted.size()>capacity)throw new IllegalArgumentException("View exceeds residency");
+        owner();if(closed)throw new IllegalStateException("Presentation closed");if(wanted.size()>capacity)throw new IllegalArgumentException("View exceeds residency");
         frame++;synchronizeChanges();
         var desired=new HashSet<>(wanted);
         retry.keySet().removeIf(k->!desired.contains(k));
@@ -73,4 +74,10 @@ public final class MapPresentationClient {
     }
     public long revision(){owner();return revision;}
     public Metrics metrics(){owner();return new Metrics(cache.size(),pending.size(),requests,accepted,discarded,failures);}
+    @Override public void close(){
+        owner();if(closed)return;closed=true;
+        // Drop references immediately; the shared IO owner may finish its read jobs.
+        // Do not interrupt the worker or cancel durable operations.
+        discarded+=pending.size();pending.clear();cache.clear();retry.clear();revision++;
+    }
 }

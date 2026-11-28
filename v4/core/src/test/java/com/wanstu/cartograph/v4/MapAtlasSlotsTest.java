@@ -87,6 +87,18 @@ public final class MapAtlasSlotsTest {
             check(pan.size()==Math.min(512,i+1),"bounded atlas");
         }
         System.out.println("PASS: 2048-page pan, 512 slots, five palettes, inspection does not change eviction order");
+        // Release all capacity, including staged revisions and style bits.
+        for(int cycle=0;cycle<100;cycle++){
+            var ids=new HashSet<Integer>();
+            pan.clear();
+            check(pan.size()==0,"atlas release");
+            for(int i=0;i<512;i++){
+                var p=page(i,cycle+100);
+                int id=pan.reserve(p,Set.of());
+                check(ids.add(id)&&!pan.ready(p,SATELLITE_MODERN),"unique clean slot");
+                pan.uploaded(p,id,SATELLITE_MODERN);
+            }
+        }
         var random=new Random(1701);var keys=new ArrayList<MapAtlasSlots.Page>();
         for(int i=0;i<31;i++)keys.add(page(i-16,i+1));
         var slots=new MapAtlasSlots(16);

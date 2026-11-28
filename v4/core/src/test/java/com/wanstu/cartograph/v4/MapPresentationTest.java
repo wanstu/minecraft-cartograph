@@ -43,6 +43,19 @@ public final class MapPresentationTest {
         for(int i=0;i<1000;i++){check(small.get(a)!=null,"inspection");}
         small.tick(List.of(b,c));small.tick(List.of(b,c));
         check(small.get(a)==null&&small.get(b)!=null&&small.get(c)!=null,"inspection never promotes offscreen CPU page");
+        // Repeated session close must drop resident data and pending references
+        // even if an asynchronous read completes after release.
+        for(int i=0;i<1000;i++){
+            var late=new CompletableFuture<MapRaster>();
+            var closing=new MapPresentationClient(new PresentationChanges(),k->k.equals(a)?CompletableFuture.completedFuture(raster(a,1)):late,2,2);
+            closing.tick(List.of(a,b));closing.tick(List.of(a,b));
+            check(closing.metrics().resident()==1&&closing.metrics().pending()==1,"close fixture");
+            closing.close();closing.close();
+            check(closing.metrics().resident()==0&&closing.metrics().pending()==0&&closing.get(a)==null,"released presentation");
+            late.complete(raster(b,2));
+            check(closing.get(b)==null&&closing.metrics().resident()==0,"late result not retained");
+            try{closing.tick(List.of(a));throw new AssertionError("closed presentation reused");}catch(IllegalStateException expected){}
+        }
         var water=new FeatureDictionary.Feature("minecraft:water[level=0]","minecraft:ocean",FeatureDictionary.Terrain.WATER);
         var shallow=Entry.leaf(water,62,61,1,20000,30000,65535);
         var deep=Entry.leaf(water,62,42,20,20000,30000,65535);

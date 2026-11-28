@@ -10,8 +10,10 @@ public final class MapAtlasSlots {
     private final LinkedHashMap<Page,Resident> entries=new LinkedHashMap<>();
     private final ArrayDeque<Integer> free=new ArrayDeque<>();
     private final Map<Key,Page> spatial=new HashMap<>();
+    private final int capacity;
     public MapAtlasSlots(int count){
         if(count<1)throw new IllegalArgumentException("Atlas capacity");
+        capacity=count;
         for(int i=0;i<count;i++)free.add(i);
     }
     /** Read-only inspection must not turn offscreen entries into recent ones. */
@@ -69,5 +71,6 @@ public final class MapAtlasSlots {
         }
         spatial.remove(key);
     }
+    public void clear(){entries.clear();spatial.clear();free.clear();for(int i=0;i<capacity;i++)free.add(i);}
     public int size(){return entries.size();}
 }

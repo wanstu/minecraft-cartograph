@@ -566,6 +566,7 @@ final class V4MapSession implements AutoCloseable {
         shoreDependencies=List.of();shorePages=List.of();landformPages=List.of();
         meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();clearAnchors();
         for(var plane:planes.values())Minecraft.getInstance().getTextureManager().release(plane.id());
-        planes.clear();published.clear();presentedGroups=List.of();
+        planes.clear();slots.clear();published.clear();presentedGroups=List.of();
+        pages.close();branchCache=Set.of();requested=List.of();uploadOrder=List.of();previousVisible=null;lastDrawKeys=null;lastRenderedCamera=null;
     }
 }
