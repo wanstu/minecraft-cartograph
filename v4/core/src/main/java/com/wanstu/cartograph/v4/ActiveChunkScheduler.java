@@ -25,7 +25,7 @@ public final class ActiveChunkScheduler implements Source {
     private static final class State {
         final Position pos;
         long revision,due,eligible;
-        boolean dirty;
+        boolean dirty,mutation;
         Ticket ticket;
         long reservedRevision;
         State(Position pos,long revision){this.pos=pos;this.revision=revision;}
@@ -35,7 +35,7 @@ public final class ActiveChunkScheduler implements Source {
     private final Map<Position,State> active=new HashMap<>();
     private static final int CLEAN_LIMIT=8192;
     private final LinkedHashMap<Position,Boolean> cleanUnloaded=new LinkedHashMap<>();
-    private final NavigableSet<State> dirtyQueue=new TreeSet<>(ORDER),reviewQueue=new TreeSet<>(ORDER);
+    private final NavigableSet<State> dirtyQueue=new TreeSet<>(ORDER),reviewQueue=new TreeSet<>(ORDER),mutationQueue=new TreeSet<>(ORDER);
     private final LinkedHashMap<Position,Long> inactive=new LinkedHashMap<>();
     private record Handoff(long revision,CompletableFuture<SavedDirtyIndex.Work> receipt){}
     private final Map<Position,Handoff> handoffs=new HashMap<>();
@@ -46,7 +46,7 @@ public final class ActiveChunkScheduler implements Source {
     private long now,sequence,dirtyStarts,reviewStarts,staleReceipts;
     private int consecutiveDirty,reserved;
     private Position focus;
-    private boolean preferLocal=true;
+    private boolean preferLocal=true,preferMutation=true;
     private static final List<Position> LOCAL_OFFSETS=localOffsets();
     private static List<Position> localOffsets(){
         List<Position> offsets=new ArrayList<>(49);
@@ -75,10 +75,11 @@ public final class ActiveChunkScheduler implements Source {
     private long next(){return sequence=Math.incrementExact(sequence);}
     private static long plus(long a,long b){return a>Long.MAX_VALUE-b?Long.MAX_VALUE:a+b;}
     public void advance(long tick){owner();if(tick<now)throw new IllegalArgumentException("Tick moved backwards");now=tick;}
-    private void removeQueued(State s){if(s.dirty)dirtyQueue.remove(s);else reviewQueue.remove(s);}
+    private void removeQueued(State s){if(s.dirty){dirtyQueue.remove(s);mutationQueue.remove(s);}else reviewQueue.remove(s);}
     private void schedule(State s,long due){
         if(s.ticket!=null)throw new IllegalStateException("Reserved");
         s.due=due;(s.dirty?dirtyQueue:reviewQueue).add(s);
+        if(s.dirty&&s.mutation)mutationQueue.add(s);
     }
     /** Same-session verified clean unloads may skip immediate recapture; no persisted trust. */
     public void loadedObserved(int x,int z){owner();Position p=new Position(x,z);if(active.containsKey(p))return;loaded(x,z,!cleanUnloaded.containsKey(p));}
@@ -106,6 +107,16 @@ public final class ActiveChunkScheduler implements Source {
         s.revision=next();s.dirty=true;
         if(s.ticket==null)schedule(s,Math.max(now,s.eligible));
     }
+    /** Observed relevant block mutation, unlike conservative periodic save notifications.
+     * Give actual changes bounded priority even in a dimension with no players.
+     */
+    public void surfaceChanged(int x,int z){
+        changed(x,z);
+        State s=active.get(new Position(x,z));
+        if(s==null)return;
+        s.mutation=true;
+        if(s.ticket==null)mutationQueue.add(s);
+    }
     public void unloaded(int x,int z){
         owner();Position p=new Position(x,z);State s=active.remove(p);
         if(s==null)return;
@@ -125,7 +136,7 @@ public final class ActiveChunkScheduler implements Source {
     public void prepareShutdown(){
         owner();
         for(State s:active.values())if(s.dirty||s.ticket!=null)inactive.put(s.pos,next());
-        active.clear();dirtyQueue.clear();reviewQueue.clear();cleanUnloaded.clear();reserved=0;
+        active.clear();dirtyQueue.clear();reviewQueue.clear();mutationQueue.clear();cleanUnloaded.clear();reserved=0;
     }
     /** Bounded handoff. The receiver must retain work until the matching saved revision is processed. */
     public int drainInactive(int max,SavedHandoff handoff){
@@ -174,7 +185,14 @@ public final class ActiveChunkScheduler implements Source {
         if(s==null)return null;
         if(s.dirty){
             // At least every other dirty reservation retains global age order.
-            if(preferLocal){State near=localDue();if(near!=null)s=near;}
+            if(preferLocal){
+                State changed=due(mutationQueue),near=localDue();
+                // Half the reservations always keep global age order. On the other
+                // half, alternate observed mutation and player proximity preference.
+                if(changed!=null&&(preferMutation||near==null))s=changed;
+                else if(near!=null)s=near;
+                preferMutation=!preferMutation;
+            }
             preferLocal=!preferLocal;
         }
         removeQueued(s);
@@ -205,6 +223,7 @@ public final class ActiveChunkScheduler implements Source {
         if(s==null){staleReceipts++;return;}
         s.ticket=null;reserved--;
         s.dirty=outcome!=Outcome.COMMITTED||s.revision!=s.reservedRevision;
+        if(!s.dirty)s.mutation=false;
         s.eligible=plus(now,retryInterval);
         schedule(s,s.dirty?s.eligible:plus(now,reviewInterval));
     }

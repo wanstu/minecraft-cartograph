@@ -87,7 +87,7 @@ public final class CartographV4Dev {
                 }catch(RuntimeException ignored){/* fall back to dirty capture */}
             }
         }
-        ChunkPos p=chunk.getPos();onServer(level,r->r.dimension(level).scheduler.changed(p.x,p.z));
+        ChunkPos p=chunk.getPos();onServer(level,r->r.dimension(level).scheduler.surfaceChanged(p.x,p.z));
     }
     private static void beforeTick(ServerTickEvent.Pre e){
         Runtime current=runtime;if(current!=null&&current.server==e.getServer())current.tickStarted=System.nanoTime();

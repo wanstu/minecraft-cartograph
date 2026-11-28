@@ -120,6 +120,29 @@ public final class ActiveChunkSchedulerTest {
         focused.focus(null);
         while((global=focused.poll())!=null)focused.finish(global,Outcome.COMMITTED);
         check(focused.metrics().queuedDirty()==0&&focused.metrics().queuedReview()==70,"all active work still completed");
+        // Remote surface mutations must not wait behind every new chunk. Actual
+        // mutation priority respects due/cooldown and leaves global discovery fair.
+        var remote=new ActiveChunkScheduler(t->null,1000,10,8);
+        remote.loaded(2000,2000,true);
+        remote.finish(remote.poll(),Outcome.COMMITTED);
+        for(int i=0;i<1000;i++)remote.loaded(-1000+i,0,true);
+        remote.advance(10);
+        for(int i=0;i<10000;i++)remote.surfaceChanged(2000,2000);
+        var oldest=remote.poll();check(oldest.chunkX()==-1000,"global fairness");
+        remote.finish(oldest,Outcome.COMMITTED);
+        var changed=remote.poll();check(changed.chunkX()==2000,"remote mutation ahead of initial capture backlog");
+        remote.surfaceChanged(2000,2000);
+        remote.finish(changed,Outcome.COMMITTED);
+        check(remote.metrics().queuedDirty()==1000,"new mutation remains dirty");
+        remote.advance(20);
+        oldest=remote.poll();check(oldest.chunkX()==-999,"global fairness after mutation");
+        remote.finish(oldest,Outcome.COMMITTED);
+        changed=remote.poll();check(changed.chunkX()==2000,"new mutation eligible");
+        remote.unloaded(2000,2000);
+        remote.finish(changed,Outcome.COMMITTED);
+        check(remote.metrics().inactivePending()==1,"unload keeps dirty handoff");
+        while((oldest=remote.poll())!=null)remote.finish(oldest,Outcome.COMMITTED);
+        check(remote.metrics().queuedDirty()==0,"no duplicate mutation queue node");
         // Loaded chunk count does not create a per-tick scan or a queue entry per event.
         var large=new ActiveChunkScheduler(t->null,12000,20,8);
         for(int i=0;i<50000;i++)large.loaded(i,0,false);
