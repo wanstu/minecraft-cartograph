@@ -125,6 +125,8 @@ public final class FreshRegionBuilder implements AutoCloseable {
         Key key;
         final long[][] data;
         final Columns[] leaves;
+        // One exact-sized raw buffer per recursive level. The codec returns an owned copy.
+        byte[] rawScratch;
         int count;
         Packed(Key key){
             this.key=key;
@@ -212,9 +214,13 @@ public final class FreshRegionBuilder implements AutoCloseable {
             boolean dense=count==N;
             int stride=stride(lod)-(dense?2:0);
             Map<FeatureDictionary.Feature,Integer> palette=new LinkedHashMap<>();
-            if(lod==0)for(int slot=0;slot<N;slot++){
-                Columns c=chunkAt(slot);if(c==null)continue;
-                var f=c.features[columnAt(slot)];if(f!=null)palette.computeIfAbsent(f,k->palette.size()+1);
+            if(lod==0){
+                FeatureDictionary.Feature last=null;
+                for(int slot=0;slot<N;slot++){
+                    Columns c=chunkAt(slot);if(c==null)continue;
+                    var f=c.features[columnAt(slot)];
+                    if(f!=null&&f!=last){palette.computeIfAbsent(f,k->palette.size()+1);last=f;}
+                }
             }
             ByteArrayOutputStream head=new ByteArrayOutputStream();
             try(var out=new DataOutputStream(head)){
@@ -223,7 +229,12 @@ public final class FreshRegionBuilder implements AutoCloseable {
                 for(var f:palette.keySet()){out.writeUTF(f.materialKey());out.writeUTF(f.biomeKey());out.writeByte(f.terrain().ordinal());}
                 out.writeInt(count);
             }
-            byte[] prefix=head.toByteArray(),body=Arrays.copyOf(prefix,prefix.length+count*stride);
+            byte[] prefix=head.toByteArray();
+            int length=prefix.length+count*stride;
+            if(rawScratch==null||rawScratch.length!=length)rawScratch=new byte[length];
+            byte[] body=rawScratch;
+            // All planes below are fully overwritten for both dense and sparse pages.
+            System.arraycopy(prefix,0,body,0,prefix.length);
             int n=count,row=0,base=prefix.length;
             FeatureDictionary.Feature previous=null;int previousId=0;
             if(lod==0){
