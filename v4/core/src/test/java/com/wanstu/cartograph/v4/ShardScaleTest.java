@@ -116,6 +116,21 @@ public final class ShardScaleTest {
             System.out.printf(Locale.ROOT,"worldOverviewPages=%d coldOverviewMs=%.3f sourcePages=%d logScanBytes=%d warmRequests=%d warmMs=%.3f additionalReads=%d additionalAssemblies=%d residentShards=%d residentPages=%d residentPageBytes=%d%n",
                 keys.size(),overviewMs,before.sourceReads(),before.recoveryScanBytes(),requests,warmMs,after.sourceReads()-before.sourceReads(),after.assemblies()-before.assemblies(),
                 after.residentShards(),after.residentPages(),after.residentPageBytes());
+            // A fresh owner must reopen the persisted coarse overview without
+            // touching the source shards. Compare every aggregate, not just coverage.
+            long persistedStart=System.nanoTime();
+            var reopened=new WorldGeography(root,8,32,8L*1024*1024,8L*1024*1024);
+            for(var item:overview.entrySet()){
+                var actual=reopened.read(item.getKey());
+                check(actual.data().entries().equals(item.getValue().data().entries()),"persisted exact aggregate equality");
+            }
+            double persistedMs=(System.nanoTime()-persistedStart)/1e6;
+            var persisted=reopened.metrics();
+            check(persisted.overviewHits()==keys.size()&&persisted.sourceReads()==0&&persisted.assemblies()==0&&persisted.residentShards()==0,"persisted cold overview avoids shards");
+            long overviewBytes;
+            try(var files=Files.walk(root.resolve("overview-v1"))){overviewBytes=files.filter(Files::isRegularFile).mapToLong(p->{try{return Files.size(p);}catch(Exception e){throw new RuntimeException(e);}}).sum();}
+            System.out.printf(Locale.ROOT,"persistedOverviewMs=%.3f hits=%d sourceReads=%d assemblies=%d residentShards=%d overviewBytes=%d%n",
+                persistedMs,persisted.overviewHits(),persisted.sourceReads(),persisted.assemblies(),persisted.residentShards(),overviewBytes);
             long bytes;
             try(var files=Files.walk(root)){bytes=files.filter(Files::isRegularFile).mapToLong(p->{try{return Files.size(p);}catch(Exception e){throw new RuntimeException(e);}}).sum();}
             System.out.printf(Locale.ROOT,"fresh=%s unique=%s shards=%d workers=%d chunks=%d batch=%d seconds=%.3f chunks/s=%.1f cpuSeconds=%.3f avgCpuCores=%.2f cpuMicrosPerChunk=%.2f pageWrites=%d flushes=%d diskBytes=%d overviewReads=%d coverage=%d%n",
