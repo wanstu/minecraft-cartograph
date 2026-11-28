@@ -25,12 +25,14 @@ final class V4MapSession implements AutoCloseable {
     MapRaster.Style style=MapRaster.Style.SATELLITE_MODERN;
     MapCamera camera;
     MapPreferences preferences(){return MapPreferences.capture(style,layers,display);}
-    private static final int SIZE=1024,EDGE=32,COUNT=512;
-    private record TextureKey(Key key,MapRaster.Style style,long generation){}
-    private final LinkedHashMap<TextureKey,Integer> slots=new LinkedHashMap<>(16,.75f,true);
-    private final ArrayDeque<Integer> free=new ArrayDeque<>();
-    private DynamicTexture texture;
-    private ResourceLocation textureId;
+    private static final int WIDTH=1024,HEIGHT=512,EDGE=32,COUNT=512,MAX_PLANES=3;
+    private final MapAtlasSlots slots=new MapAtlasSlots(COUNT);
+    private record Plane(DynamicTexture texture,ResourceLocation id){}
+    private final LinkedHashMap<MapRaster.Style,Plane> planes=new LinkedHashMap<>(8,.75f,true);
+    private final MapWorkBudget workBudget=new MapWorkBudget();
+    private boolean previousPrefetch;
+    void recordWork(long nanos){workBudget.sample(nanos);}
+    String pressureStatus(){return "Budget "+workBudget.pressure()+" | planes "+planes.size()+" | slots "+slots.size();}
     private List<Key> previousVisible;
     private List<Key> requested=List.of(),uploadOrder=List.of();
     private long uploads;
@@ -39,67 +41,64 @@ final class V4MapSession implements AutoCloseable {
         this.camera=camera;this.style=preferences.style();preferences.apply(layers,display);
         this.io=io;this.dimension=dimension;markers=new V4MarkerState(io,dimension);regions=new V4RegionState(io,dimension);structureView=new StructureView((b,mask)->io.structures(dimension,b,mask));
         pages=new MapPresentationClient(io.presentationChanges(dimension),k->io.raster(dimension,k),512,4);
-        for(int i=0;i<COUNT;i++)free.add(i);
     }
-    private void ensureAtlas(){
-        if(texture!=null)return;
-        texture=new DynamicTexture(SIZE,SIZE,true);
-        texture.setFilter(false,false);
-        textureId=Minecraft.getInstance().getTextureManager().register("cartograph_v4_atlas",texture);
+    private Plane ensureAtlas(){
+        Plane plane=planes.get(style);if(plane!=null)return plane;
+        while(planes.size()>=MAX_PLANES){
+            var it=planes.entrySet().iterator();var old=it.next();
+            slots.clearStyle(old.getKey());Minecraft.getInstance().getTextureManager().release(old.getValue().id());it.remove();
+        }
+        var texture=new DynamicTexture(WIDTH,HEIGHT,true);texture.setFilter(false,false);
+        var id=Minecraft.getInstance().getTextureManager().register("cartograph_v4_atlas_"+style.name().toLowerCase(Locale.ROOT),texture);
+        plane=new Plane(texture,id);planes.put(style,plane);return plane;
     }
-    private TextureKey key(MapRaster raster){return new TextureKey(raster.key(),style,raster.generation());}
+    private MapAtlasSlots.Page key(MapRaster raster){return new MapAtlasSlots.Page(raster.key(),raster.generation());}
     private int abgr(int argb){return (argb&0xff00ff00)|((argb&0xff)<<16)|((argb>>>16)&0xff);}
     private MapTileCoverage.State state(Key k){
         var r=pages.get(k);
         if(r==null)return MapTileCoverage.State.MISSING;
         if(r.empty())return MapTileCoverage.State.EMPTY;
-        return slots.containsKey(key(r))?MapTileCoverage.State.READY:MapTileCoverage.State.MISSING;
+        return slots.ready(key(r),style)?MapTileCoverage.State.READY:MapTileCoverage.State.MISSING;
     }
     /** Parent preview first; visible exact tiles next. Neighbor ring is CPU prefetch only. */
     void prepare(List<Key> visible){
-        if(visible!=previousVisible){
-            previousVisible=visible;
-            requested=MapTileCoverage.requests(visible,Math.min(480,visible.size()+64));
+        boolean prefetch=workBudget.prefetchNeighbors();
+        if(visible!=previousVisible||prefetch!=previousPrefetch){
+            previousVisible=visible;previousPrefetch=prefetch;
+            requested=MapTileCoverage.requests(visible,Math.min(480,visible.size()+64),prefetch);
             Set<Key> urgent=new HashSet<>(visible);
             for(Key k:visible){Key p=MapTileCoverage.parent(k);if(p!=null)urgent.add(p);}
             uploadOrder=requested.stream().filter(urgent::contains).toList();
         }
         pages.tick(requested);
-        Set<TextureKey> protectedKeys=new HashSet<>(),previewKeys=new LinkedHashSet<>();
+        Set<MapAtlasSlots.Page> protectedKeys=new HashSet<>(),previewKeys=new LinkedHashSet<>();
         for(Key k:visible){
             var r=pages.get(k);
-            if(r!=null&&!r.empty()){var tk=key(r);protectedKeys.add(tk);slots.get(tk);}
+            if(r!=null&&!r.empty()){var tk=key(r);protectedKeys.add(tk);slots.slot(tk);}
             // Retain existing parent previews unless exact coverage is already uploaded.
             if(state(k)==MapTileCoverage.State.MISSING){
                 for(var patch:MapTileCoverage.resolve(k,this::state)){
                     var source=pages.get(patch.source());
-                    if(source!=null){var tk=key(source);previewKeys.add(tk);slots.get(tk);}
+                    if(source!=null){var tk=key(source);previewKeys.add(tk);slots.slot(tk);}
                 }
             }
         }
         // Leave free eviction candidates even when many finer previews occupy the atlas.
         for(var tk:previewKeys){if(protectedKeys.size()>=448)break;protectedKeys.add(tk);}
-        int budget=4;
+        int budget=workBudget.textureUploads();
         long started=System.nanoTime();
         for(Key k:uploadOrder){
-            if(budget==0||System.nanoTime()-started>1_000_000)break;
+            if(budget==0||(budget<workBudget.textureUploads()&&System.nanoTime()-started>workBudget.sliceNanos()))break;
             var raster=pages.get(k);if(raster==null||raster.empty())continue;
-            var key=key(raster);if(slots.containsKey(key))continue;
-            ensureAtlas();
-            Integer slot=free.pollFirst();
-            if(slot==null){
-                var it=slots.entrySet().iterator();
-                while(it.hasNext()){
-                    var e=it.next();
-                    if(!protectedKeys.contains(e.getKey())){slot=e.getValue();it.remove();break;}
-                }
-            }
+            var key=key(raster);if(slots.ready(key,style))continue;
+            Integer slot=slots.reserve(key,protectedKeys);
             if(slot==null)break;
+            var texture=ensureAtlas().texture();
             int ox=slot%32*EDGE,oy=slot/32*EDGE;
             var image=texture.getPixels();
             for(int i=0;i<1024;i++)image.setPixelRGBA(ox+i%EDGE,oy+i/EDGE,abgr(raster.argb(style,i)));
             texture.bind();image.upload(0,ox,oy,ox,oy,EDGE,EDGE,false,false);
-            slots.put(key,slot);budget--;uploads++;
+            slots.uploaded(key,slot,style);budget--;uploads++;
         }
     }
     private record Part(Key target,MapTileCoverage.Patch patch,MapRaster raster,int slot){}
@@ -141,7 +140,7 @@ final class V4MapSession implements AutoCloseable {
             if(isExact)exact++;else if(!patches.isEmpty())fallback++;
             for(var patch:patches){
                 var raster=pages.get(patch.source());if(raster==null)continue;
-                Integer slot=slots.get(key(raster));if(slot==null)continue;
+                Integer slot=slots.slot(key(raster));if(slot==null)continue;
                 next.add(new Part(k,patch,raster,slot));
                 upper+=raised?raster.relief().topCount()+raster.relief().wallCount():1;
             }
@@ -156,7 +155,7 @@ final class V4MapSession implements AutoCloseable {
             }
         }
         // Drop stale invisible groups too, so their raster/neighbor references cannot accumulate.
-        meshes.retainValid(g->g.parts.stream().allMatch(p->Objects.equals(slots.get(key(p.raster)),p.slot)&&pages.get(p.raster.key())==p.raster));
+        meshes.retainValid(g->g.parts.stream().allMatch(p->Objects.equals(slots.slot(key(p.raster)),p.slot)&&pages.get(p.raster.key())==p.raster));
         if(!modeChanged&&retained.equals(next))return;
         retained=List.copyOf(next);exactPages=exact;
         fallbackPages=(int)next.stream().filter(p->!p.patch.source().equals(p.target)).map(Part::target).distinct().count();
@@ -183,8 +182,8 @@ final class V4MapSession implements AutoCloseable {
         int[] count={0};
         var buffer=Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,DefaultVertexFormat.POSITION_TEX_COLOR);
         emit(group.parts,group.raised,null,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->{
-            float u=(part.slot%32*EDGE)/(float)SIZE,v=(part.slot/32*EDGE)/(float)SIZE;
-            float a=u+(float)(u0/SIZE),b=v+(float)(v0/SIZE),c=u+(float)(u1/SIZE),d=v+(float)(v1/SIZE);
+            float u=(part.slot%32*EDGE)/(float)WIDTH,v=(part.slot/32*EDGE)/(float)HEIGHT;
+            float a=u+(float)(u0/WIDTH),b=v+(float)(v0/HEIGHT),c=u+(float)(u1/WIDTH),d=v+(float)(v1/HEIGHT);
             if(y0==y1){
                 vertex(buffer,x0-ox,y0,z0-oz,a,b,light);
                 vertex(buffer,x0-ox,y0,z1-oz,a,d,light);
@@ -283,7 +282,7 @@ final class V4MapSession implements AutoCloseable {
                 var k=seamParts.getFirst().target;seamOriginX=k.x()*32.0*(1<<k.lod());seamOriginZ=k.z()*32.0*(1<<k.lod());
                 var builder=Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,DefaultVertexFormat.POSITION_TEX_COLOR);
                 seamFaces((part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->{
-                    float u=(float)((part.slot%32*EDGE+u0)/SIZE),v=(float)((part.slot/32*EDGE+v0)/SIZE);
+                    float u=(float)((part.slot%32*EDGE+u0)/WIDTH),v=(float)((part.slot/32*EDGE+v0)/HEIGHT);
                     vertex(builder,x0-seamOriginX,y0,z0-seamOriginZ,u,v,light);
                     vertex(builder,x0-seamOriginX,y1,z0-seamOriginZ,u,v,light);
                     vertex(builder,x1-seamOriginX,y1,z1-seamOriginZ,u,v,light);
@@ -331,17 +330,18 @@ final class V4MapSession implements AutoCloseable {
     /** Static world-relative vertices. Each camera movement changes just the affine transform. */
     void draw(GuiGraphics graphics,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height,MapHudLayout hud){
         drawCalls=quads=0;lastRenderedCamera=null;drawnParts=List.of();
-        if(texture==null){clearAnchors();return;}
+        Plane plane=planes.get(style);
+        if(plane==null){clearAnchors();clearSeams();return;}
         boolean raised=camera.elevationDegrees()!=90;
         graphics.flush();refresh(visible,raised);
-        long start=System.nanoTime();int budget=2;
+        long start=System.nanoTime();int budget=workBudget.meshUploads();
         for(Group group:wantedGroups){
             if(meshes.get(group)!=null)continue;
-            if(budget==0||System.nanoTime()-start>=1_000_000)break;
+            if(budget==0||(budget<workBudget.meshUploads()&&System.nanoTime()-start>=workBudget.sliceNanos()))break;
             if(meshes.ensure(group,estimate(group),protectedGroups,this::build))budget--;
         }
         double depthScale=Math.min(1,70.0/(Math.hypot(width,height)/camera.pixelsPerBlock()*2+8192));
-        RenderSystem.setShaderTexture(0,textureId);
+        RenderSystem.setShaderTexture(0,plane.id());
         RenderSystem.setShaderColor(1,1,1,1);
         RenderSystem.enableBlend();RenderSystem.defaultBlendFunc();
         if(raised){RenderSystem.depthMask(true);RenderSystem.clear(256,Minecraft.ON_OSX);RenderSystem.enableDepthTest();RenderSystem.disableCull();}
@@ -458,7 +458,7 @@ final class V4MapSession implements AutoCloseable {
         if(landforms!=null){landforms.close();landforms=null;}
         shoreDependencies=List.of();shorePages=List.of();landformPages=List.of();
         meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();clearAnchors();
-        if(textureId!=null)Minecraft.getInstance().getTextureManager().release(textureId);
-        texture=null;textureId=null;slots.clear();free.clear();
+        for(var plane:planes.values())Minecraft.getInstance().getTextureManager().release(plane.id());
+        planes.clear();
     }
 }

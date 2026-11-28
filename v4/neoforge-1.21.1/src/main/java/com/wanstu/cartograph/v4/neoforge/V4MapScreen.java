@@ -71,8 +71,9 @@ final class V4MapScreen extends Screen {
         graphics.fill(0,0,width,height,0xff242b30);
         if(minecraft.level==null||!session.dimension.equals(minecraft.level.dimension().location().toString())||
             session.io!=CartographV4Dev.localPresentation(minecraft.getSingleplayerServer()))return;
-        updatePlan();session.prepare(plan.keys());
+        updatePlan();long mapStarted=System.nanoTime();session.prepare(plan.keys());
         session.draw(graphics,plan.keys(),camera,projection,width,height,hud());
+        session.recordWork(System.nanoTime()-mapStarted);
         labelLayout.begin(hud());pendingLabels.clear();
         drawRegions(graphics,mouseX,mouseY);
         if(minecraft!=null&&minecraft.player!=null){
@@ -148,7 +149,7 @@ final class V4MapScreen extends Screen {
             panel(g,d,0xf3212e37);
             String[] lines={"LOD "+plan.lod()+" | pages "+session.exactPages()+"+"+session.fallbackPages()+"/"+plan.keys().size(),
                 "Draw "+session.drawCalls()+" | quads "+session.quads(),
-                "Tex "+session.uploads()+" | mesh "+session.meshUploads(),
+                "Tex "+session.uploads()+" | mesh "+session.meshUploads()+" | "+session.pressureStatus(),
                 session.contourStatus()+" | "+session.shoreStatus(),structureStatus,
                 picked==null?"Pick —":"Pick "+(int)Math.floor(picked.world().x())+" "+(int)Math.floor(picked.world().y())+" "+(int)Math.floor(picked.world().z())+" | LOD "+picked.lod()};
             for(int i=0;i<lines.length&&i*11+14<=d.h();i++)g.drawString(font,font.plainSubstrByWidth(lines[i],Math.max(1,d.w()-12)),d.x()+6,d.y()+5+i*11,0xffc3d4df);

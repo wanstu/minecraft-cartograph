@@ -50,7 +50,8 @@ public final class MapTileCoverage {
     /** Visible pages first, with their immediate parent interleaved; then a one-page neighbor ring.
      * The ring is only a residency hint, not a terrain collection boundary.
      */
-    public static List<Key> requests(List<Key> visible,int limit){
+    public static List<Key> requests(List<Key> visible,int limit){return requests(visible,limit,true);}
+    public static List<Key> requests(List<Key> visible,int limit,boolean neighbors){
         if(visible.size()>limit)throw new IllegalArgumentException("Request budget");
         LinkedHashSet<Key> out=new LinkedHashSet<>();
         // Reserve enough space for every exact page, even at high viewport resolution.
@@ -61,6 +62,7 @@ public final class MapTileCoverage {
             if(p!=null&&inserted.size()<parents&&inserted.add(p))out.add(p);
             out.add(k);
         }
+        if(!neighbors)return List.copyOf(out);
         for(Key k:visible){
             if(out.size()>=limit)break;
             for(int dz=-1;dz<=1;dz++)for(int dx=-1;dx<=1;dx++){
