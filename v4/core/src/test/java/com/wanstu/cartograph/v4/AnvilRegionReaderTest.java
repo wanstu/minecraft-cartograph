@@ -39,6 +39,28 @@ public final class AnvilRegionReaderTest {
                 try(var out=new RandomAccessFile(path.toFile(),"rw")){out.seek(4);out.writeInt((2<<8)|1);}
                 reject(region::discover);
             }
+            // Real open Minecraft files may not pad their final sector until close.
+            Path tail=dir.resolve("r.3.4.mca");
+            try(var out=new RandomAccessFile(tail.toFile(),"rw")){
+                out.setLength(8192);out.seek(0);out.writeInt((2<<8)|1);
+                out.seek(8192);out.writeInt(compressed.length+1);out.writeByte(2);out.write(compressed);
+            }
+            try(var region=new AnvilRegionReader(tail,3,4)){
+                var saved=region.discover().getFirst();
+                check(Arrays.equals(region.load(saved).nbt(),nbt),"unpadded complete final payload");
+                try(var out=new RandomAccessFile(tail.toFile(),"rw")){out.setLength(out.length()-1);}
+                reject(region::discover);reject(()->region.load(saved));
+                try(var out=new RandomAccessFile(tail.toFile(),"rw")){
+                    out.seek(0);out.writeInt((2<<8)|2);
+                    out.seek(8192);out.writeInt(compressed.length+1);out.writeByte(2);out.write(compressed);
+                }
+                reject(region::discover); // an entire allocated sector is missing
+                try(var out=new RandomAccessFile(tail.toFile(),"rw")){
+                    out.seek(0);out.writeInt((2<<8)|1);out.seek(8192);out.writeInt(4096);
+                }
+                reject(region::discover); // length exceeds allocation
+            }
+            Files.delete(tail);
             // A broken region must not prevent traversal of unrelated valid files.
             Files.write(dir.resolve("r.1.1.mca"),new byte[]{1,2,3});
             try(var cursor=new SavedArchiveCursor(dir)){

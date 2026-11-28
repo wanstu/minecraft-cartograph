@@ -46,8 +46,17 @@ public final class AnvilRegionReader implements AutoCloseable {
     private SavedChunk entry(int slot,int location,int timestamp)throws IOException{
         if(location==0)return null;
         int sector=location>>>8,sectors=location&255;
-        if(sector<2||sectors==0||(sector+(long)sectors)*SECTOR>channel.size())
+        long size=channel.size(),start=(long)sector*SECTOR,end=(sector+(long)sectors)*SECTOR;
+        // Vanilla may leave the final allocated sector unpadded until closing the file.
+        // Allow only the missing tail padding, never missing payload bytes or whole sectors.
+        if(sector<2||sectors==0||start+5>size||end-size>=SECTOR)
             throw new IOException("Invalid Anvil sector range");
+        if(end>size){
+            ByteBuffer prefix=ByteBuffer.allocate(5);read(prefix,start);
+            int length=prefix.getInt();
+            if(length<1||length>sectors*(long)SECTOR-4||start+4L+length>size)
+                throw new IOException("Incomplete Anvil tail payload");
+        }
         return new SavedChunk(rx*32+slot%32,rz*32+slot/32,sector,sectors,Integer.toUnsignedLong(timestamp));
     }
     public List<SavedChunk> discover()throws IOException{
