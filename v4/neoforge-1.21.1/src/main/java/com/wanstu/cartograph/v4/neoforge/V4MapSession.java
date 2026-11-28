@@ -102,7 +102,7 @@ final class V4MapSession implements AutoCloseable {
             slots.put(key,slot);budget--;uploads++;
         }
     }
-    private record Part(Key target,MapTileCoverage.Patch patch,MapRaster raster,int slot,List<MapRaster> adjacent){}
+    private record Part(Key target,MapTileCoverage.Patch patch,MapRaster raster,int slot){}
     @FunctionalInterface private interface Faces{
         void face(Part part,double x0,double y0,double z0,double x1,double y1,double z1,
                   double u0,double v0,double u1,double v1,int light);
@@ -142,17 +142,8 @@ final class V4MapSession implements AutoCloseable {
             for(var patch:patches){
                 var raster=pages.get(patch.source());if(raster==null)continue;
                 Integer slot=slots.get(key(raster));if(slot==null)continue;
-                List<MapRaster> neighbors=List.of();
-                if(raised&&isExact){
-                    MapRaster[] adjacent=new MapRaster[4];
-                    for(int dir=0;dir<4;dir++){
-                        Key other=new Key(k.lod(),k.x()+(dir==0?-1:dir==1?1:0),k.z()+(dir==2?-1:dir==3?1:0));
-                        if(state(other)==MapTileCoverage.State.READY)adjacent[dir]=pages.get(other);
-                    }
-                    neighbors=Arrays.asList(adjacent);
-                }
-                next.add(new Part(k,patch,raster,slot,neighbors));
-                upper+=raised?raster.relief().topCount()+raster.relief().wallCount()+(isExact?128:0):1;
+                next.add(new Part(k,patch,raster,slot));
+                upper+=raised?raster.relief().topCount()+raster.relief().wallCount():1;
             }
         }
         // Exact raised pages fit even at the 64-page worst case. Bound unusually dense
@@ -165,7 +156,7 @@ final class V4MapSession implements AutoCloseable {
             }
         }
         // Drop stale invisible groups too, so their raster/neighbor references cannot accumulate.
-        meshes.retainValid(g->g.parts.stream().allMatch(p->Objects.equals(slots.get(key(p.raster)),p.slot)&&pages.get(p.raster.key())==p.raster&&p.adjacent.stream().allMatch(n->n==null||pages.get(n.key())==n)));
+        meshes.retainValid(g->g.parts.stream().allMatch(p->Objects.equals(slots.get(key(p.raster)),p.slot)&&pages.get(p.raster.key())==p.raster));
         if(!modeChanged&&retained.equals(next))return;
         retained=List.copyOf(next);exactPages=exact;
         fallbackPages=(int)next.stream().filter(p->!p.patch.source().equals(p.target)).map(Part::target).distinct().count();
@@ -182,7 +173,7 @@ final class V4MapSession implements AutoCloseable {
     }
     private static long estimate(Group group){
         long faces=0;
-        for(Part p:group.parts)faces+=group.raised?p.raster.relief().topCount()+p.raster.relief().wallCount()+128:1;
+        for(Part p:group.parts)faces+=group.raised?p.raster.relief().topCount()+p.raster.relief().wallCount():1;
         return faces*96;
     }
     private static double originX(Group group){return group.x*32.0*(1<<group.lod)*(group.raised?2:8);}
@@ -233,14 +224,13 @@ final class V4MapSession implements AutoCloseable {
             double x0=patch.u()*32,z0=patch.v()*32,x1=x0+patch.uvSize()*32,z1=z0+patch.uvSize()*32;
             if(picker!=null){
                 double min=raised?raster.minSurface():0,max=raised?raster.maxSurface():0;
-                if(raised)for(var neighbor:part.adjacent)if(neighbor!=null)min=Math.min(min,neighbor.minSurface());
                 if(!picker.mayHit(bx+x0*cell,bz+z0*cell,bx+x1*cell,bz+z1*cell,min,max))continue;
             }
             if(!raised){
                 top(sink,part,bx,bz,cell,x0,z0,x1,z1,0);continue;
             }
             var mesh=raster.relief();
-            workBudget-=mesh.topCount()+mesh.wallCount()+part.adjacent.size()*32;
+            workBudget-=mesh.topCount()+mesh.wallCount();
             if(workBudget<0)return false;
             for(int i=0;i<mesh.topCount();i++){
                 double left=Math.max(x0,mesh.topX(i)),right=Math.min(x1,mesh.topX(i)+mesh.topWidth(i));
@@ -249,20 +239,11 @@ final class V4MapSession implements AutoCloseable {
             }
             for(int i=0;i<mesh.wallCount();i++){
                 int x=mesh.wallX(i),z=mesh.wallZ(i),dir=mesh.wallDirection(i);
-                var seg=ReliefMesh.clipWall(x,z,dir,x0,z0,x1,z1);
-                if(seg!=null)wall(sink,part,bx,bz,cell,x,z,dir,mesh.wallTop(i),mesh.wallBottom(i),seg.x(),seg.z(),seg.length());
+                var seg=ReliefMesh.clipInteriorWall(x,z,dir,x0,z0,x1,z1);
+                if(seg!=null)
+                    wall(sink,part,bx,bz,cell,x,z,dir,mesh.wallTop(i),mesh.wallBottom(i),seg.x(),seg.z(),seg.length());
             }
-            for(int dir=0;dir<part.adjacent.size();dir++){
-                MapRaster adjacent=part.adjacent.get(dir);if(adjacent==null)continue;
-                for(int i=0;i<32;i++){
-                    int x=dir==0?0:dir==1?31:i,z=dir==2?0:dir==3?31:i;
-                    int nx=dir==0?31:dir==1?0:i,nz=dir==2?31:dir==3?0:i;
-                    int at=z*32+x,n=nz*32+nx;
-                    float top=raster.surface(at),bottom=adjacent.surface(n);
-                    if(raster.coverage(at)==0||adjacent.coverage(n)==0||!Float.isFinite(top)||!Float.isFinite(bottom)||top<=bottom)continue;
-                    wall(sink,part,bx,bz,cell,x,z,dir,top,bottom,x+(dir==1?1:0),z+(dir==3?1:0),1);
-                }
-            }
+
         }
         return true;
     }
@@ -274,18 +255,77 @@ final class V4MapSession implements AutoCloseable {
         sink.face(p,ax,top,az,ax+(dir>=2?cell*length:0),bottom,az+(dir<2?cell*length:0),
             x+.5,z+.5,x+.5,z+.5,dir==0||dir==2?172:211);
     }
+    private List<Part> seamParts=List.of();
+    private List<ReliefSeams.Wall> seamWalls=List.of();
+    private VertexBuffer seamBuffer;
+    private double seamOriginX,seamOriginZ;
+    private long seamUploads;
+    private boolean seamLimited;
+    private void clearSeams(){
+        if(seamBuffer!=null){seamBuffer.close();seamBuffer=null;}
+        seamParts=List.of();seamWalls=List.of();seamLimited=false;
+    }
+    private void seamFaces(Faces sink){
+        for(var w:seamWalls){
+            var p=seamParts.get(w.owner());double u=w.slot()%32+.5,v=w.slot()/32+.5;
+            sink.face(p,w.x(),w.top(),w.z(),w.x()+(w.direction()>=2?w.length():0),w.bottom(),
+                w.z()+(w.direction()<2?w.length():0),u,v,u,v,w.direction()==0||w.direction()==2?172:211);
+        }
+    }
+    private void drawSeams(GuiGraphics graphics,MapCamera camera,int width,int height,double depthScale){
+        if(camera.elevationDegrees()==90){clearSeams();return;}
+        if(!seamParts.equals(drawnParts)){
+            clearSeams();seamParts=drawnParts;
+            if(seamParts.isEmpty())return;
+            var result=ReliefSeams.plan(seamParts.stream().map(p->new ReliefSeams.Input(p.target,p.patch,p.raster)).toList(),ReliefSeams.MAX_WALLS);
+            seamWalls=result.walls();seamLimited=result.limited();
+            if(!seamWalls.isEmpty()){
+                var k=seamParts.getFirst().target;seamOriginX=k.x()*32.0*(1<<k.lod());seamOriginZ=k.z()*32.0*(1<<k.lod());
+                var builder=Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,DefaultVertexFormat.POSITION_TEX_COLOR);
+                seamFaces((part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->{
+                    float u=(float)((part.slot%32*EDGE+u0)/SIZE),v=(float)((part.slot/32*EDGE+v0)/SIZE);
+                    vertex(builder,x0-seamOriginX,y0,z0-seamOriginZ,u,v,light);
+                    vertex(builder,x0-seamOriginX,y1,z0-seamOriginZ,u,v,light);
+                    vertex(builder,x1-seamOriginX,y1,z1-seamOriginZ,u,v,light);
+                    vertex(builder,x1-seamOriginX,y0,z1-seamOriginZ,u,v,light);
+                });
+                var data=builder.build();
+                if(data!=null){
+                    var next=new VertexBuffer(VertexBuffer.Usage.STATIC);next.bind();
+                    try{next.upload(data);seamBuffer=next;seamUploads++;}
+                    catch(RuntimeException|Error ex){next.close();throw ex;}
+                    finally{VertexBuffer.unbind();}
+                }
+            }
+        }
+        if(seamBuffer==null)return;
+        double[] m=MapTransform.coefficients(camera,seamOriginX,0,seamOriginZ,width,height,depthScale,true);
+        var affine=new org.joml.Matrix4f().set(
+            (float)m[0],(float)m[4],(float)m[8],0,
+            (float)m[1],(float)m[5],(float)m[9],0,
+            (float)m[2],(float)m[6],(float)m[10],0,
+            (float)m[3],(float)m[7],(float)m[11],1);
+        var matrix=new org.joml.Matrix4f(RenderSystem.getModelViewMatrix()).mul(graphics.pose().last().pose()).mul(affine);
+        seamBuffer.bind();
+        try{seamBuffer.drawWithShader(matrix,RenderSystem.getProjectionMatrix(),GameRenderer.getPositionTexColorShader());drawCalls++;quads+=seamWalls.size();}
+        finally{VertexBuffer.unbind();}
+    }
+    String seamStatus(){return "Seams "+seamWalls.size()+" | VBO "+seamUploads+(seamLimited?" | limited":"");}
     MapRayPicker.Hit pick(MapCamera camera,double sx,double sy){
         if(!camera.equals(lastRenderedCamera)||lastRaised!=(camera.elevationDegrees()!=90))return null;
         var picker=new MapRayPicker(camera,sx,sy);
         emit(drawnParts,lastRaised,picker,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->picker.face(part.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1));
+        if(lastRaised&&seamBuffer!=null)seamFaces((p,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->picker.face(p.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1));
         return picker.result();
     }
     private boolean contourAnchorVisible(MapCamera camera,ContourLabelVisibility.Anchor anchor){
         if(!camera.equals(lastRenderedCamera))return false;
         var screen=camera.project(new MapCamera.World(anchor.x(),anchor.y(),anchor.z()));
         var picker=new MapRayPicker(camera,screen.x(),screen.y(),screen.depth()+.0001);
+        int remaining=8192-seamWalls.size();if(remaining<=0)return false;
+        if(seamBuffer!=null)seamFaces((p,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->picker.face(p.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1));
         boolean complete=emit(drawnParts,true,picker,(part,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1,light)->
-            picker.face(part.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1),8192);
+            picker.face(part.raster,x0,y0,z0,x1,y1,z1,u0,v0,u1,v1),remaining);
         return complete&&picker.result()==null;
     }
     /** Static world-relative vertices. Each camera movement changes just the affine transform. */
@@ -329,6 +369,7 @@ final class V4MapSession implements AutoCloseable {
                     anchorParts=index;anchorDependencies=drawnParts;
                 }
             }else clearAnchors();
+            drawSeams(graphics,camera,width,height,depthScale);
             drawShorelines(graphics,camera,width,height);
             drawContours(graphics,Minecraft.getInstance().font,visible,camera,projection,width,height,depthScale);
         }finally{
@@ -411,7 +452,7 @@ final class V4MapSession implements AutoCloseable {
     int quads(){return quads;}
     long uploads(){return uploads;}
     @Override public void close(){
-        icons.close();
+        icons.close();clearSeams();
         if(contours!=null){contours.close();contours=null;}
         if(shores!=null){shores.close();shores=null;}
         if(landforms!=null){landforms.close();landforms=null;}

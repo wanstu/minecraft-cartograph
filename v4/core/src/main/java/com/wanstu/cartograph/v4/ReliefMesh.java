@@ -5,7 +5,7 @@ import java.util.Arrays;
 /**
  * Immutable height-field topology built once per raster generation, independent of style and camera.
  * Top rectangles greedily merge equal known heights. Interior risers use the higher cell's color.
- * Missing neighbors never invent a cliff. Page-boundary risers are resolved with adjacent rasters.
+ * Missing neighbors never invent a cliff. Patch-boundary risers are resolved from actually drawn patches by ReliefSeams.
  */
 public final class ReliefMesh {
     public static final int EDGE=32;
@@ -66,6 +66,11 @@ public final class ReliefMesh {
         if(dir==2?(edge<z0||edge>=z1):(edge<=z0||edge>z1))return null;
         double start=Math.max(x,x0),end=Math.min(x+1,x1);
         return end>start?new Segment(start,edge,end-start):null;
+    }
+    /** Patch perimeter belongs exclusively to ReliefSeams, including clipped ancestor cells. */
+    public static Segment clipInteriorWall(int x,int z,int dir,double x0,double z0,double x1,double z1){
+        Segment s=clipWall(x,z,dir,x0,z0,x1,z1);
+        return s!=null&&(dir<2?s.x()>x0&&s.x()<x1:s.z()>z0&&s.z()<z1)?s:null;
     }
     public int topCount(){return tops.length;}
     public int topX(int i){return tops[i]&63;}

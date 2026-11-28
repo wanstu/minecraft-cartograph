@@ -43,6 +43,10 @@ public final class ReliefMeshTest{
             }
             check(sum==1,"unique full wall coverage");
         }
+        for(int dir=0;dir<4;dir++){
+            check(ReliefMesh.clipInteriorWall(1,1,dir,0,0,3,3)!=null,"interior wall remains");
+            check(ReliefMesh.clipInteriorWall(1,1,dir,1,1,2,2)==null,"perimeter wall belongs only to seam planner");
+        }
         System.out.println("PASS: flat page one quad, 100 randomized relief pages, exact coverage/heights, no duplicate or unknown walls, subcell fallback clipping");
     }
 }
