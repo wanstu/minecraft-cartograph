@@ -8,7 +8,7 @@ import static com.wanstu.cartograph.v4.ActiveChunkScheduler.Position;
 
 /** Bounded saved-world reconciliation, run exclusively by the world IO owner. */
 final class ArchiveReconciler implements AutoCloseable {
-    record Progress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending,int waitingActive){}
+    record Progress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending,int waitingActive,String lastSourceError){}
     private record Candidate(Path file,int rx,int rz,int x,int z,SavedDirtyIndex.Work work){}
     private record Ready(Candidate candidate,byte[] hash,Entry[] columns,boolean alreadyMatches,List<StructureIndex.Start> starts){}
     private final Path regions;
@@ -19,8 +19,17 @@ final class ArchiveReconciler implements AutoCloseable {
     private final Runnable structureChanged;
     private SavedArchiveCursor cursor;
     private boolean discovered;
+    private static final int MAX_FAILED_REGIONS=256;
+    private final Set<Path> failedRegions=new LinkedHashSet<>();
+    private boolean rescan=true;
     private int sinceFlush;
     private long decoded,unchanged,committed,deferred,errors;
+    private String lastSourceError="";
+    static String describe(String where,Throwable error){
+        String message=(where+": "+error.getClass().getSimpleName()+": "+Objects.toString(error.getMessage(),"")).replace('\n',' ').replace('\r',' ');
+        return message.substring(0,Math.min(240,message.length()));
+    }
+    private void sourceError(String where,Throwable error){errors++;lastSourceError=describe(where,error);}
     ArchiveReconciler(Path regions,Path index,int minY,int height,OfflineRegionBackfill.Mapper mapper)throws IOException{
         this(regions,index,minY,height,mapper,null,()->{});
     }
@@ -28,7 +37,7 @@ final class ArchiveReconciler implements AutoCloseable {
         this.regions=regions;this.minY=minY;this.height=height;this.mapper=Objects.requireNonNull(mapper);this.structures=structures;this.structureChanged=structureChanged;
         fingerprints=new SourceFingerprints(index);
     }
-    Progress progress(SavedDirtyIndex dirty){return new Progress(decoded,unchanged,committed,deferred,errors,discovered,dirty.size(),dirty.waitingActive());}
+    Progress progress(SavedDirtyIndex dirty){return new Progress(decoded,unchanged,committed,deferred,errors,discovered,dirty.size(),dirty.waitingActive(),lastSourceError);}
     private Candidate dirty(SavedDirtyIndex.Work w){
         int x=w.position().x(),z=w.position().z(),rx=Math.floorDiv(x,32),rz=Math.floorDiv(z,32);
         return new Candidate(regions.resolve("r."+rx+"."+rz+".mca"),rx,rz,x,z,w);
@@ -40,19 +49,35 @@ final class ArchiveReconciler implements AutoCloseable {
         // Reserve capacity for initial discovery even with a permanently deferred dirty item.
         for(var w:dirty.peek(discovered?max:Math.max(1,max/4)))candidates.add(dirty(w));
         if(!discovered&&candidates.size()<max){
-            if(Files.isDirectory(regions)){
-                if(cursor==null)cursor=new SavedArchiveCursor(regions);
-                try{
+            try{
+                if(cursor==null){
+                    if(rescan){
+                        // Only known absence counts as empty; inaccessible sources remain retryable.
+                        if(Files.notExists(regions))discovered=true;
+                        else cursor=new SavedArchiveCursor(regions);
+                    }else cursor=new SavedArchiveCursor(failedRegions);
+                    failedRegions.clear();rescan=false;
+                }
+                if(cursor!=null){
                     var step=cursor.step(2,max-candidates.size());
                     errors+=step.failedRegions().size();
+                    if(!step.failedRegions().isEmpty())lastSourceError=cursor.lastFailure();
+                    for(Path path:step.failedRegions()){
+                        if(failedRegions.size()<MAX_FAILED_REGIONS)failedRegions.add(path);
+                        else rescan=true; // bounded memory; overflow requires a fresh pass
+                    }
                     for(var c:step.candidates())candidates.add(new Candidate(c.path(),c.regionX(),c.regionZ(),c.chunk().x(),c.chunk().z(),null));
-                    if(step.exhausted()){discovered=true;cursor.close();cursor=null;}
-                }catch(IOException e){
-                    // Do not treat a failed region as successfully discovered. Report and
-                    // retry a new discovery pass on a later call (runtime backs off).
-                    errors++;cursor.close();cursor=null;return progress(dirty);
+                    if(step.exhausted()){
+                        cursor.close();cursor=null;
+                        discovered=!rescan&&failedRegions.isEmpty();
+                    }
                 }
-            }else discovered=true;
+            }catch(IOException e){
+                // Source discovery failures must not poison the geography IO owner.
+                sourceError("region discovery",e);rescan=true;
+                if(cursor!=null){try{cursor.close();}catch(IOException ignored){}cursor=null;}
+                // Still process the durable dirty candidates already selected.
+            }
         }
         Map<RegionShard.Id,List<Ready>> batches=new LinkedHashMap<>();
         Set<Position> seen=new HashSet<>();
@@ -75,7 +100,7 @@ final class ArchiveReconciler implements AutoCloseable {
                         var identity=reader.identity(c.x,c.z);
                         if(identity==null){deferred++;if(c.work!=null)retry.add(c.work);continue;}
                         encoded=reader.encoded(identity);
-                    }catch(IOException e){errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    }catch(IOException e){sourceError("region read "+c.x+","+c.z,e);if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
                     byte[] hash=encoded.fingerprint();
                     long revision=world.chunkPageRevision(c.x,c.z);
                     // A terrain revision alone cannot prove the saved structure starts
@@ -93,7 +118,7 @@ final class ArchiveReconciler implements AutoCloseable {
                     }catch(SavedChunkSurface.NotFullyGeneratedException e){
                         deferred++;if(c.work!=null)retry.add(c.work);continue;
                     }catch(IOException|RuntimeException e){
-                        errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;
+                        sourceError("chunk decode "+c.x+","+c.z,e);if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;
                     }
                     if(!gate.valid(c.x,c.z)){deferred++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
                     boolean equal=world.matchesChunk(c.x,c.z,columns);
@@ -101,7 +126,7 @@ final class ArchiveReconciler implements AutoCloseable {
                     // server session. Never replace it with a conflicting disk snapshot.
                     boolean sameStarts=true;
                     if(structures!=null&&gate.protectedLive(c.x,c.z))try{sameStarts=structures.matches(c.x,c.z,starts);}
-                    catch(IOException ex){errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    catch(IOException ex){sourceError("structure match "+c.x+","+c.z,ex);if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
                     if(gate.protectedLive(c.x,c.z)&&(!equal||!sameStarts)){
                         deferred++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;
                     }
@@ -127,7 +152,7 @@ final class ArchiveReconciler implements AutoCloseable {
                     if(r.alreadyMatches)unchanged++;else committed++;
                     if(!gate.valid(c.x,c.z)){if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
                     if(structures!=null)try{if(structures.replace(c.x,c.z,r.starts))structureChanged.run();}
-                    catch(IOException e){errors++;if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
+                    catch(IOException e){sourceError("structure write "+c.x+","+c.z,e);if(c.work!=null)retry.add(c.work);else newRetry.add(new Position(c.x,c.z));continue;}
                     fingerprints.record(c.x,c.z,world.chunkPageRevision(c.x,c.z),r.hash);sinceFlush++;
                     if(c.work!=null)ack.add(c.work);
                 }

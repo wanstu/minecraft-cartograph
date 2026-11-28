@@ -17,9 +17,15 @@ public final class SavedArchiveCursor implements AutoCloseable {
     private Path current;
     private int rx,rz;
     private boolean exhausted,closed;
+    private String lastFailure="";
+    String lastFailure(){return lastFailure;}
     public SavedArchiveCursor(Path regionDirectory)throws IOException{
         directory=Files.newDirectoryStream(regionDirectory,"r.*.mca");
         files=directory.iterator();
+    }
+    /** Retry only failed region headers, without enumerating healthy regions again. */
+    SavedArchiveCursor(Collection<Path> retry){
+        directory=null;files=List.copyOf(retry).iterator();
     }
     private void owner(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Archive IO owner");}
     /** At most maxRegions directory entries inspected and maxChunks candidates returned. */
@@ -35,18 +41,19 @@ public final class SavedArchiveCursor implements AutoCloseable {
                 if(!files.hasNext()){exhausted=true;break;}
                 Path next=files.next();inspected++;
                 String[] parts=next.getFileName().toString().split("\\.");
-                if(parts.length!=4||!parts[0].equals("r")||!parts[3].equals("mca")||!Files.isRegularFile(next))continue;
+                if(parts.length!=4||!parts[0].equals("r")||!parts[3].equals("mca"))continue;
                 int x,z;
                 try{x=Integer.parseInt(parts[1]);z=Integer.parseInt(parts[2]);}
                 catch(NumberFormatException e){continue;}
-                if(!next.getFileName().toString().equals("r."+x+"."+z+".mca"))continue;
+                if(!next.getFileName().toString().equals("r."+x+"."+z+".mca")||x<Integer.MIN_VALUE/32||x>Integer.MAX_VALUE/32||z<Integer.MIN_VALUE/32||z>Integer.MAX_VALUE/32)continue;
+                if(Files.isDirectory(next))continue;
                 try(var reader=new AnvilRegionReader(next,x,z)){
                     chunks=reader.discover().iterator();
-                }catch(IOException e){failed.add(next);continue;}
+                }catch(IOException e){failed.add(next);lastFailure=ArchiveReconciler.describe(next.getFileName().toString(),e);continue;}
                 current=next;rx=x;rz=z;opened++;
             }
         }catch(DirectoryIteratorException e){throw e.getCause();}
         return new Step(result,opened,exhausted&&!chunks.hasNext(),failed);
     }
-    @Override public void close()throws IOException{owner();if(!closed){closed=true;directory.close();}}
+    @Override public void close()throws IOException{owner();if(!closed){closed=true;if(directory!=null)directory.close();}}
 }

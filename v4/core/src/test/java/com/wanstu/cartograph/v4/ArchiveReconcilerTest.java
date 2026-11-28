@@ -141,6 +141,38 @@ public final class ArchiveReconcilerTest{
                 var p=drain(archive,world,dirty,gate);
                 check(p.decoded()==1&&p.unchanged()==1&&p.committed()==0,"neighbor revision reverified");
             }
+            // A failed region header must never count as completed discovery.
+            Path retryRegions=Files.createDirectory(root.resolve("retry-regions")),retryTarget=root.resolve("retry-geo");
+            Path broken=retryRegions.resolve("r.-1.0.mca");
+            Files.write(broken,new byte[8]);
+            Files.write(retryRegions.resolve("r.0.0.mca"),new byte[8192]);
+            var retryWorld=new WorldGeography(retryTarget,2,8,4*1024*1024,4*1024*1024);
+            var retryDirty=new SavedDirtyIndex(retryTarget);var retryGate=new LiveArchiveGate();
+            try(var archive=open(retryRegions,retryTarget)){
+                for(int i=0;i<5;i++){
+                    var p=archive.step(retryWorld,retryDirty,retryGate,16);
+                    check(!p.discovered()&&p.sourceErrors()>0&&p.lastSourceError().contains("r.-1.0.mca"),"failed header remains pending with diagnostics");
+                }
+                // Healthy region must not be enumerated again on the failed-header retry pass.
+                Files.write(retryRegions.resolve("r.0.0.mca"),new byte[8]);
+                write(broken,nbt);
+                var p=drain(archive,retryWorld,retryDirty,retryGate);
+                check(p.committed()==1&&retryWorld.matchesChunk(-2,3,expected),"repaired header discovered exactly");
+            }
+            // An inaccessible/non-directory region path must not abort the IO owner or
+            // falsely mark discovery complete; it can become readable in a later step.
+            Path blocked=root.resolve("blocked-regions");
+            Files.write(blocked,new byte[1]);
+            Path blockedTarget=root.resolve("blocked-geo");
+            var blockedWorld=new WorldGeography(blockedTarget,2,8,4*1024*1024,4*1024*1024);
+            var blockedDirty=new SavedDirtyIndex(blockedTarget);
+            try(var archive=open(blocked,blockedTarget)){
+                var p=archive.step(blockedWorld,blockedDirty,new LiveArchiveGate(),16);
+                check(!p.discovered()&&p.sourceErrors()==1,"directory open failure stays retryable");
+                Files.delete(blocked);Files.createDirectory(blocked);write(blocked.resolve("r.-1.0.mca"),nbt);
+                p=drain(archive,blockedWorld,blockedDirty,new LiveArchiveGate());
+                check(p.committed()==1&&blockedWorld.matchesChunk(-2,3,expected),"directory recovery");
+            }
             // A same-session clean unload avoids immediate duplicate capture.
             var scheduler=new ActiveChunkScheduler(t->null,12000,20,8);
             scheduler.loadedObserved(8,8);var ticket=scheduler.poll();scheduler.finish(ticket,CapturePump.Outcome.COMMITTED);

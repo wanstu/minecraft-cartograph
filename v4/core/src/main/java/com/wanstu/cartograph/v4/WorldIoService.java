@@ -20,7 +20,7 @@ public final class WorldIoService {
     private final Map<String,LiveArchiveGate> gates=new ConcurrentHashMap<>();
     private final Map<String,PresentationChanges> presentations=new ConcurrentHashMap<>();
     private final Map<String,java.util.concurrent.atomic.AtomicLong> structureRevisions=new ConcurrentHashMap<>();
-    public record ArchiveProgress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending,int waitingActive){}
+    public record ArchiveProgress(long decoded,long unchanged,long committed,long deferred,long sourceErrors,boolean discovered,int pending,int waitingActive,String lastSourceError){}
     private volatile Throwable failure;
     private volatile Thread ownerThread;
     public WorldIoService(Path root,int dimensionLimit,int queueLimit){
@@ -99,7 +99,7 @@ public final class WorldIoService {
             var d=open(dimension);
             if(d.archive==null)d.archive=new ArchiveReconciler(regions,root.resolve(directory(dimension)).resolve("source-structures-v2"),minY,height,mapper,d.structures,()->structureCounter(dimension).incrementAndGet());
             var p=d.archive.step(d.world,d.dirty,gate(dimension),max);
-            return new ArchiveProgress(p.decoded(),p.unchanged(),p.committed(),p.deferred(),p.sourceErrors(),p.discovered(),p.pending(),p.waitingActive());
+            return new ArchiveProgress(p.decoded(),p.unchanged(),p.committed(),p.deferred(),p.sourceErrors(),p.discovered(),p.pending(),p.waitingActive(),p.lastSourceError());
         });
     }
     public CompletableFuture<Integer> pendingDirty(String dimension){
