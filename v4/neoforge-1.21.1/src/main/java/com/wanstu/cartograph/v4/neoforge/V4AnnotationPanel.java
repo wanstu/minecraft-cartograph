@@ -30,7 +30,10 @@ abstract class V4AnnotationPanel extends V4ScaledScreen {
         place();
     }
     final EditBox field(int row,int col,int cols,String key,int max,String value){
-        var f=new EditBox(font,0,0,1,20,label(key));f.setMaxLength(max);f.setValue(value);
+        int space=Math.max(1,Math.min(316,ui.width())-8);
+        int initialWidth=Math.max(1,(col+1)*space/cols-col*space/cols-3);
+        var f=new EditBox(font,0,0,initialWidth,20,label(key));
+        f.setMaxLength(max);f.setValue(value);f.moveCursorToStart(false);
         items.add(new Item(addRenderableWidget(f),row,col,cols,key));return f;
     }
     final Button button(int row,int col,int cols,Component name,Button.OnPress press){
@@ -74,7 +77,10 @@ abstract class V4AnnotationPanel extends V4ScaledScreen {
     @Override protected void backdrop(GuiGraphics g,float partial){
         if(parent.width==width&&parent.height==height){parent.render(g,-10000,-10000,partial);g.flush();}
         else g.fill(0,0,width,height,0xff20262d);
-        g.fill(0,0,width,height,0x99111920);
+        // Parent map has its own raised GUI layers. Keep the modal dimmer above them.
+        g.pose().pushPose();
+        try{g.pose().translate(0,0,250);g.fill(0,0,width,height,0x99111920);g.flush();}
+        finally{g.pose().popPose();}
     }
     @Override protected void renderUi(GuiGraphics g,int mx,int my,float partial){
         if(lastWaiting!=waiting())place();
@@ -85,6 +91,7 @@ abstract class V4AnnotationPanel extends V4ScaledScreen {
         if(layout.header()>=15&&r.w()>=32)g.drawString(font,font.plainSubstrByWidth(title.getString(),Math.max(1,r.w()-12)),r.x()+6,r.y()+7,0xffeef4f7);
         for(var item:items)if(item.label()!=null&&item.widget().visible)
             g.drawString(font,font.plainSubstrByWidth(label(item.label()).getString(),item.widget().getWidth()),item.widget().getX(),item.widget().getY()-10,0xffc1cad0);
+        g.flush(); // panel background and labels precede native widget sprites
         super.renderUi(g,mx,my,partial);
         if(layout.footer()>=38){
             String msg=status();

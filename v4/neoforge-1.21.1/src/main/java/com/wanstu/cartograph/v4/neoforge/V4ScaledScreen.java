@@ -13,10 +13,13 @@ abstract class V4ScaledScreen extends Screen {
     @Override protected final void init(){ui=MapDisplaySettings.Ui.of(map.displaySettings(),width,height);initUi();}
     protected abstract void initUi();
     protected void backdrop(GuiGraphics g,float partial){g.fill(0,0,width,height,0xff20262d);}
-    protected void renderUi(GuiGraphics g,int mx,int my,float partial){super.render(g,mx,my,partial);}
+    // Screen.render also renders its vanilla background (including blur). Our backdrop
+    // has already been drawn; a second background would obscure custom editor labels.
+    protected void renderUi(GuiGraphics g,int mx,int my,float partial){for(var widget:renderables)widget.render(g,mx,my,partial);}
     @Override public final void render(GuiGraphics g,int mx,int my,float partial){
         backdrop(g,partial);g.flush();g.pose().pushPose();
         try{
+            g.pose().translate(0,0,300);
             g.pose().scale((float)ui.scale(),(float)ui.scale(),1);
             renderUi(g,(int)Math.floor(ui.logical(mx)),(int)Math.floor(ui.logical(my)),partial);g.flush();
         }finally{g.pose().popPose();}

@@ -96,9 +96,13 @@ final class V4MapScreen extends Screen {
         try{
             graphics.pose().scale((float)ui.scale(),(float)ui.scale(),1);
             drawHud(graphics,mx,my,ui.width(),ui.height());
+            // Finish the HUD's deferred text before drawing opaque modal/popover backgrounds.
+            session.icons.flush(graphics);graphics.flush();
+            graphics.pose().translate(0,0,100);
             layerPanel.render(graphics,font,ui.width(),ui.height(),mx,my);
             viewPanel.render(graphics,font,ui.width(),ui.height(),mx,my,session.style,camera,selectingRegion);
             displayPanel.render(graphics,font,ui.width(),ui.height(),mx,my,ui.scale());
+            graphics.flush();graphics.pose().translate(0,0,100);
             contextMenu.render(graphics,font,ui.width(),ui.height(),mx,my,session.icons);
             session.icons.flush(graphics);graphics.flush();
         }finally{graphics.pose().popPose();}
