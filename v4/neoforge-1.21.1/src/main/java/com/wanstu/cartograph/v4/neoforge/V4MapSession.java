@@ -357,23 +357,31 @@ final class V4MapSession implements AutoCloseable {
     long meshBytes(){return meshes.bytes();}
     private V4ContourLayer contours;
     private V4ShorelineLayer shores;
+    private V4LandformLayer landforms;
+    private List<MapLandforms> landformPages=List.of();
     private List<Part> shoreDependencies=List.of();
     private List<MapShorelines> shorePages=List.of();
     private void drawShorelines(GuiGraphics graphics,MapCamera camera,int width,int height){
         if(camera.elevationDegrees()!=90||!V4ShorelineLayer.supported(style)){
             if(shores!=null){shores.close();shores=null;}
-            shoreDependencies=List.of();shorePages=List.of();return;
+            if(landforms!=null){landforms.close();landforms=null;}
+            shoreDependencies=List.of();shorePages=List.of();landformPages=List.of();return;
         }
         if(!shoreDependencies.equals(drawnParts)){
             shoreDependencies=drawnParts;
             shorePages=drawnParts.stream().filter(p->p.target.equals(p.patch.source()))
                 .map(p->p.raster.shorelines()).sorted(Comparator.comparingInt((MapShorelines p)->p.key().lod())
                     .thenComparingInt(p->p.key().x()).thenComparingInt(p->p.key().z())).toList();
+            landformPages=drawnParts.stream().filter(p->p.target.equals(p.patch.source()))
+                .map(p->p.raster.landforms()).filter(p->!p.symbols().isEmpty())
+                .sorted(Comparator.comparingInt((MapLandforms p)->p.key().lod()).thenComparingInt(p->p.key().x()).thenComparingInt(p->p.key().z())).toList();
         }
         if(shores==null)shores=new V4ShorelineLayer();
         shores.draw(graphics,shorePages,style,camera,width,height);
+        if(landforms==null)landforms=new V4LandformLayer();
+        landforms.draw(graphics,landformPages,style,camera,width,height);
     }
-    String shoreStatus(){return shores==null?"Shore off":shores.status();}
+    String shoreStatus(){return shores==null?"Shore off":shores.status()+(landforms==null?"":" | "+landforms.status());}
     void drawContours(GuiGraphics graphics,net.minecraft.client.gui.Font font,List<Key> visible,MapCamera camera,MapProjection projection,int width,int height,double depthScale){
         if(!layers.visible(MapLayers.Layer.CONTOURS))return;
         if(contours==null)contours=new V4ContourLayer();
@@ -405,7 +413,9 @@ final class V4MapSession implements AutoCloseable {
     @Override public void close(){
         icons.close();
         if(contours!=null){contours.close();contours=null;}
-        if(shores!=null){shores.close();shores=null;}shoreDependencies=List.of();shorePages=List.of();
+        if(shores!=null){shores.close();shores=null;}
+        if(landforms!=null){landforms.close();landforms=null;}
+        shoreDependencies=List.of();shorePages=List.of();landformPages=List.of();
         meshes.close();retained=List.of();wantedGroups=List.of();protectedGroups=Set.of();drawnParts=List.of();clearAnchors();
         if(textureId!=null)Minecraft.getInstance().getTextureManager().release(textureId);
         texture=null;textureId=null;slots.clear();free.clear();
