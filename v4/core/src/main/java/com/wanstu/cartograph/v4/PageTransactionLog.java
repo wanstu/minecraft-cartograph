@@ -13,6 +13,8 @@ final class PageTransactionLog {
     private static final int MAX_PAGE=4*1024*1024+32*1024;
     record Pointer(long offset,int length,long revision) {}
     private static final int INDEX_MAGIC=0x43563449, INDEX_MAX=4096;
+    private static final int COMPACT_MAGIC=0x43563443,HEADER_BYTES=16;
+    private long logIdentity;
     private final Path file,indexFile;
     private final Map<RegionPageStore.Key,Pointer> index=new HashMap<>();
     private long flushes,scanBytes;
@@ -20,7 +22,66 @@ final class PageTransactionLog {
     PageTransactionLog(Path root)throws IOException{
         file=root.resolve("pages.cv4log");indexFile=root.resolve("pages.cv4idx");
         if(Files.notExists(file))Files.createFile(file);
-        recover(loadCheckpoint());
+        logIdentity=readIdentity();
+        recover(Math.max(logIdentity==0?0:HEADER_BYTES,loadCheckpoint()));
+    }
+    /** Create a private replacement log using the same existing frame format. */
+    private PageTransactionLog(Path file,Path indexFile,long identity)throws IOException{
+        this.file=file;this.indexFile=indexFile;this.logIdentity=identity;
+        try(var out=new RandomAccessFile(file.toFile(),"rw")){
+            out.writeInt(COMPACT_MAGIC);out.writeInt(1);out.writeLong(identity);
+        }
+    }
+    private long readIdentity()throws IOException{
+        try(var in=new RandomAccessFile(file.toFile(),"r")){
+            if(in.length()<4||in.readInt()!=COMPACT_MAGIC)return 0;
+            if(in.length()<HEADER_BYTES||in.readInt()!=1)throw new IOException("Invalid compact log header");
+            long id=in.readLong();if(id==0)throw new IOException("Invalid compact log identity");return id;
+        }
+    }
+    record Compaction(long before,long after,int pages,boolean compacted){}
+    @FunctionalInterface interface Verify {void page(RegionPageStore.Key key,long revision,byte[] data)throws IOException;}
+    /**
+     * Reclaim superseded frames, retaining every latest revision including empty tombstones.
+     * Only the owning store calls this, with no concurrent readers/writers.
+     * The old log remains authoritative until the forced replacement is atomically moved.
+     */
+    Compaction compact(long minReclaim,long maxLiveBytes,Verify verify)throws IOException{
+        if(staging!=null)throw new IOException("Cannot compact staged writer");
+        if(minReclaim<1||maxLiveBytes<1)throw new IllegalArgumentException("Compaction budget");
+        long before=Files.size(file),live=HEADER_BYTES;
+        for(Pointer p:index.values())live+=44L+p.length;
+        // Conservative upper bound: even one frame per live page fits. Skip low benefit or oversized work.
+        if(index.isEmpty()||index.size()>INDEX_MAX||live>maxLiveBytes||before-live<minReclaim||live>before/2)
+            return new Compaction(before,before,index.size(),false);
+        Path tmp=Files.createTempFile(file.getParent(),".compact-",".tmp");
+        try{
+            long identity;do{identity=java.util.concurrent.ThreadLocalRandom.current().nextLong();}while(identity==0||identity==logIdentity);
+            var replacement=new PageTransactionLog(tmp,indexFile,identity);
+            var keys=new ArrayList<>(index.keySet());
+            keys.sort(Comparator.comparingInt(RegionPageStore.Key::lod)
+                .thenComparingInt(RegionPageStore.Key::x).thenComparingInt(RegionPageStore.Key::z));
+            List<Encoded> batch=new ArrayList<>();long bytes=4;
+            try{
+                for(var key:keys){
+                    long rev=revision(key);byte[] data=read(key);verify.page(key,rev,data);
+                    if(!batch.isEmpty()&&(bytes+24L+data.length>4L*1024*1024||batch.size()>=128)){
+                        replacement.appendStaged(batch);batch.clear();bytes=4;
+                    }
+                    batch.add(new Encoded(key,rev,data));bytes+=24L+data.length;
+                }
+                if(!batch.isEmpty())replacement.appendStaged(batch);
+                replacement.forceStaged();
+            }finally{replacement.closeStaged();}
+            long after=Files.size(tmp);
+            if(after>=before)throw new IOException("Compaction did not reduce log");
+            // Old checkpoints cannot match the replacement identity, even after interruption.
+            Files.move(tmp,file,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+            logIdentity=identity;index.clear();index.putAll(replacement.index);flushes+=replacement.flushes;
+            // A failed optional index write must not invalidate a valid replacement.
+            try{checkpoint();}catch(IOException ignored){/* the old index is identity-mismatched */}
+            return new Compaction(before,after,index.size(),true);
+        }finally{Files.deleteIfExists(tmp);}
     }
     long flushes(){return flushes;}
     long scanBytes(){return scanBytes;}
@@ -125,8 +186,10 @@ final class PageTransactionLog {
             in.seek(length-8);tail=in.readInt();
             if(in.readInt()!=END)throw new IOException("Checkpoint requires complete log");
         }
-        ByteBuffer bytes=ByteBuffer.allocate(24+32*index.size());
-        bytes.putInt(INDEX_MAGIC).putInt(1).putLong(length).putInt(tail).putInt(index.size());
+        ByteBuffer bytes=ByteBuffer.allocate((logIdentity==0?24:32)+32*index.size());
+        bytes.putInt(INDEX_MAGIC).putInt(logIdentity==0?1:2);
+        if(logIdentity!=0)bytes.putLong(logIdentity);
+        bytes.putLong(length).putInt(tail).putInt(index.size());
         for(var e:index.entrySet()){
             var k=e.getKey();var p=e.getValue();
             bytes.putInt(k.lod()).putInt(k.x()).putInt(k.z()).putLong(p.offset).putInt(p.length).putLong(p.revision);
@@ -144,12 +207,14 @@ final class PageTransactionLog {
         if(!Files.isRegularFile(indexFile))return 0;
         try{
             long indexLength=Files.size(indexFile);
-            if(indexLength<28||indexLength>28L+32L*INDEX_MAX)return 0;
+            if(indexLength<28||indexLength>36L+32L*INDEX_MAX)return 0;
             byte[] raw=Files.readAllBytes(indexFile);
             byte[] body=Arrays.copyOf(raw,raw.length-4);
             if(checksum(body)!=ByteBuffer.wrap(raw,raw.length-4,4).getInt())return 0;
             ByteBuffer in=ByteBuffer.wrap(body);
-            if(in.getInt()!=INDEX_MAGIC||in.getInt()!=1)return 0;
+            if(in.getInt()!=INDEX_MAGIC)return 0;
+            int version=in.getInt();
+            if(logIdentity==0?version!=1:version!=2||in.getLong()!=logIdentity)return 0;
             long end=in.getLong();int tail=in.getInt(),count=in.getInt();
             if(end<16||end>Files.size(file)||count<0||count>INDEX_MAX||in.remaining()!=count*32)return 0;
             try(var log=new RandomAccessFile(file.toFile(),"r")){

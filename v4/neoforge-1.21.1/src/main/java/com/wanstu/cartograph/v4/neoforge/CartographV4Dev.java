@@ -148,7 +148,8 @@ public final class CartographV4Dev {
         final MinecraftServer server;
         final WorldIoService io;
         final Map<ServerLevel,Dimension> dimensions=new LinkedHashMap<>();
-        int cursor,archiveCursor;
+        int cursor,archiveCursor,maintenanceCursor;
+        CompletableFuture<RegionPageStore.Compaction> maintenance;
         long tick;
         Runtime(MinecraftServer server){
             this.server=server;
@@ -171,6 +172,17 @@ public final class CartographV4Dev {
                 long remaining=budget-(System.nanoTime()-start);
                 if(remaining<=0)break;
                 columns-=d.pump.tick(remaining,columns,1);
+            }
+            if(maintenance!=null&&maintenance.isDone()){
+                try{
+                    var result=maintenance.join();
+                    if(result.compacted())LOG.info("V4 compacted {} -> {} bytes ({} pages)",result.beforeBytes(),result.afterBytes(),result.pages());
+                }catch(CompletionException ex){LOG.warn("V4 geographic maintenance deferred",ex.getCause());}
+                maintenance=null;
+            }
+            if(tick%1200==0&&maintenance==null&&!io.failed()&&io.queued()==0&&System.nanoTime()-start<budget){
+                Dimension d=all.get(Math.floorMod(maintenanceCursor++,all.size()));
+                maintenance=io.compactResident(d.key);
             }
             if(tick%2==0&&System.nanoTime()-start<budget&&io.queued()<=8){
                 Dimension d=all.get(Math.floorMod(archiveCursor++,all.size()));d.archive(io,tick);

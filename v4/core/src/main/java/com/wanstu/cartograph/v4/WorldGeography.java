@@ -155,5 +155,12 @@ public final class WorldGeography {
         changes.changed(changed);
         return writes;
     }
+    private int maintenanceCursor;
+    /** At most one already resident shard, without opening cold shards or invalidating render pages. */
+    public RegionPageStore.Compaction compactResident(long minReclaim,long maxLiveBytes)throws IOException{
+        available();if(shards.isEmpty())return new RegionPageStore.Compaction(0,0,0,false);
+        var candidates=new ArrayList<>(shards.values());
+        return candidates.get(Math.floorMod(maintenanceCursor++,candidates.size())).compact(minReclaim,maxLiveBytes);
+    }
     public void clearPresentationCache(){owner();pages.clear();bytes=0;}
 }

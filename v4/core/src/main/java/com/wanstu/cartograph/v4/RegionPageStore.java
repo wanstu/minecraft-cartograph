@@ -194,6 +194,16 @@ public final class RegionPageStore {
     public synchronized void checkpoint()throws IOException{
         if(recoveryRequired)throw new IOException("Recover pending transaction first");log.checkpoint();
     }
+    public record Compaction(long beforeBytes,long afterBytes,int pages,boolean compacted){}
+    /** Exclusive owner maintenance; never re-encodes or changes geographic revisions. */
+    public synchronized Compaction compact(long minReclaim,long maxLiveBytes)throws IOException{
+        if(recoveryRequired)throw new IOException("Recover pending transaction first");
+        var result=log.compact(minReclaim,maxLiveBytes,(key,revision,data)->{
+            Page page=decode(data,key);
+            if(page.revision()!=revision)throw new IOException("Compaction page revision mismatch");
+        });
+        return new Compaction(result.before(),result.after(),result.pages(),result.compacted());
+    }
     public synchronized long durableFlushes(){return log.flushes();}
     public synchronized long startupScanBytes(){return log.scanBytes();}
     public synchronized long diskReads(){return diskReads;}

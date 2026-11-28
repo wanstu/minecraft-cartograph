@@ -40,6 +40,7 @@ public final class RegionShard {
     }
     long revision(Key key){return store.revision(key);}
     Page readPage(Key key)throws IOException{return store.read(key);}
+    RegionPageStore.Compaction compact(long minReclaim,long maxLiveBytes)throws IOException{return store.compact(minReclaim,maxLiveBytes);}
     public long diskWrites(){return store.diskWrites();}
     public long diskReads(){return store.diskReads();}
     public long flushes(){return store.durableFlushes();}

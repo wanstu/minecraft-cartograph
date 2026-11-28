@@ -133,6 +133,18 @@ public final class WorldIoService {
         directory(dimension);Objects.requireNonNull(change);
         return submit(()->{try{return regionStore(dimension).apply(expected,change);}catch(IOException ex){throw new java.io.UncheckedIOException(ex);}});
     }
+    /** Best-effort low-priority maintenance. A busy queue never initiates compaction. */
+    public CompletableFuture<RegionPageStore.Compaction> compactResident(String dimension){
+        directory(dimension);
+        return submit(()->{
+            var d=dimensions.get(dimension);
+            if(d==null||!io.getQueue().isEmpty())return new RegionPageStore.Compaction(0,0,0,false);
+            // Maintenance failure (disk full, unsupported atomic move) is reported without
+            // treating an otherwise readable original log as a failed geographic write.
+            try{return d.world.compactResident(8L*1024*1024,8L*1024*1024);}
+            catch(IOException e){throw new java.io.UncheckedIOException(e);}
+        });
+    }
     public int queued(){return io.getQueue().size();}
     public boolean failed(){return failure!=null;}
     /** Call only at world stop, not normal ticks. Existing queued IO is drained. */
