@@ -39,10 +39,10 @@ public final class WorldGeographyTest {
             // Unknown render reads stay read-only and cache remains bounded.
             for(int i=0;i<32;i++)world.read(new Key(10,1000+i,1000));
             check(world.metrics().residentPages()<=8&&world.metrics().residentShards()<=2&&world.metrics().residentPageBytes()<=4L*1024*1024,"budgets");
-            try(var dirs=Files.list(root)){check(dirs.count()==2,"no directories from unknown reads");}
+            try(var dirs=Files.list(root)){check(dirs.count()==3,"two shards and one overview directory; no directories from unknown reads");}
             var reopened=new WorldGeography(root,1,4,2L*1024*1024,1024*1024);
             check(reopened.read(coarse).data().entryAt(31+31*32).stats().surfaceSum()==90L*256,"reopen after changes");
-            check(reopened.metrics().residentShards()==1,"shard eviction");
+            check(reopened.metrics().residentShards()==0&&reopened.metrics().overviewHits()==1&&reopened.metrics().sourceReads()==0,"persisted overview bypasses shard reads");
             System.out.println("PASS: cross-shard overview, 3000 unchanged reads without IO/assembly, no-op upload reuse, local invalidation, unknown read-only, bounded caches, reopen");
         }finally{ScaleTest.delete(root);}
     }

@@ -15,9 +15,10 @@ public final class WorldGeography {
     public record RenderPage(long generation,Page data){}
     public record Metrics(int residentShards,int residentPages,long residentPageBytes,
                           long pageHits,long assemblies,long sourceReads,long recoveryScanBytes,
-                          long invalidatedPages,int publishedShards){}
+                          long invalidatedPages,int publishedShards,long overviewHits,long overviewWrites,long overviewFailures){}
     private record Cached(RenderPage page,long weight){}
     private final Path root;
+    private final WorldOverviewStore overview;
     private final PresentationChanges changes;
     private final int shardLimit,pageLimit;
     private final long pageBudget,perShardBudget;
@@ -25,7 +26,7 @@ public final class WorldGeography {
     private final LinkedHashMap<RegionShard.Id,RegionShard> shards=new LinkedHashMap<>(16,.75f,true);
     private final LinkedHashMap<Key,Cached> pages=new LinkedHashMap<>(16,.75f,true);
     private static final java.util.concurrent.atomic.AtomicLong GENERATIONS=new java.util.concurrent.atomic.AtomicLong();
-    private long bytes,hits,assemblies,sourceReads,scanBytes,invalidations;
+    private long bytes,hits,assemblies,sourceReads,scanBytes,invalidations,overviewHits,overviewWrites,overviewFailures;
     private IOException failure;
     private final Thread owner=Thread.currentThread();
     public WorldGeography(Path root,int shardLimit,int pageLimit,long pageBudget,long shardBudget)throws IOException{
@@ -34,7 +35,7 @@ public final class WorldGeography {
     WorldGeography(Path root,int shardLimit,int pageLimit,long pageBudget,long shardBudget,PresentationChanges changes)throws IOException{
         this.changes=Objects.requireNonNull(changes);
         if(shardLimit<1||pageLimit<1||pageBudget<1||shardBudget<shardLimit)throw new IllegalArgumentException("Cache budget");
-        this.root=root;this.shardLimit=shardLimit;this.pageLimit=pageLimit;
+        this.root=root;this.overview=new WorldOverviewStore(root);this.shardLimit=shardLimit;this.pageLimit=pageLimit;
         this.pageBudget=pageBudget;perShardBudget=shardBudget/shardLimit;
         Files.createDirectories(root);
         // One catalog pass per world open, not one scan per render request.
@@ -53,7 +54,7 @@ public final class WorldGeography {
     }
     private void owner(){if(Thread.currentThread()!=owner)throw new IllegalStateException("Geography IO owner");}
     private void available()throws IOException{owner();if(failure!=null)throw new IOException("Reopen geographic store after failed write",failure);}
-    public Metrics metrics(){owner();return new Metrics(shards.size(),pages.size(),bytes,hits,assemblies,sourceReads,scanBytes,invalidations,published.size());}
+    public Metrics metrics(){owner();return new Metrics(shards.size(),pages.size(),bytes,hits,assemblies,sourceReads,scanBytes,invalidations,published.size(),overviewHits,overviewWrites,overviewFailures);}
     private RegionShard open(RegionShard.Id id)throws IOException{
         RegionShard s=shards.get(id);if(s!=null)return s;
         if(!Files.isRegularFile(id.directory(root).resolve("pages.cv4log")))throw new IOException("Missing published shard");
@@ -70,6 +71,16 @@ public final class WorldGeography {
         long lastX=bx+EDGE-1,lastZ=bz+EDGE-1;
         if(bx<Integer.MIN_VALUE||lastX>Integer.MAX_VALUE||bz<Integer.MIN_VALUE||lastZ>Integer.MAX_VALUE)
             throw new IllegalArgumentException("Page coordinates");
+        if(WorldOverviewStore.supports(key)){
+            Page stored=null;
+            try{stored=overview.read(key);}
+            catch(IOException e){overviewFailures++;}
+            if(stored!=null){
+                overviewHits++;
+                long token=GENERATIONS.updateAndGet(Math::incrementExact);
+                return remember(new RenderPage(token,Page.fromSlots(key,token,stored.copySlots())));
+            }
+        }
         int minX=(int)Math.floorDiv(bx,cellsPerShard),maxX=(int)Math.floorDiv(lastX,cellsPerShard);
         int minZ=(int)Math.floorDiv(bz,cellsPerShard),maxZ=(int)Math.floorDiv(lastZ,cellsPerShard);
         Entry[] slots=new Entry[EDGE*EDGE];
@@ -87,7 +98,14 @@ public final class WorldGeography {
         // Generation is a process-local upload token. Changes and evictions get new tokens.
         long token=GENERATIONS.updateAndGet(Math::incrementExact);assemblies++;
         Page p=Page.fromSlots(key,token,slots);
-        RenderPage result=new RenderPage(token,p);
+        if(WorldOverviewStore.supports(key)&&p.size()>0){
+            try{overview.write(p);overviewWrites++;}
+            catch(IOException e){overviewFailures++;}
+        }
+        return remember(new RenderPage(token,p));
+    }
+    private RenderPage remember(RenderPage result){
+        Page p=result.data();Key key=p.key();
         long weight=RegionPageStore.estimatedWeight(p);
         if(weight<=pageBudget){
             while(!pages.isEmpty()&&(pages.size()>=pageLimit||bytes>pageBudget-weight)){
@@ -120,6 +138,11 @@ public final class WorldGeography {
     public FreshRegionBuilder.Result buildFresh(RegionShard.Id id,FreshRegionBuilder.PackedSource source)throws IOException{
         available();
         if(published.contains(id))throw new IOException("Shard already published");
+        // Even a previously missing shard can change a persisted overview. Invalidate before publication.
+        for(int lod=WorldOverviewStore.MIN_LOD;lod<=10;lod++){
+            int divisor=1<<(lod-5);
+            overview.invalidate(new Key(lod,Math.floorDiv(id.x(),divisor),Math.floorDiv(id.z(),divisor)));
+        }
         var result=FreshRegionBuilder.buildPacked(root,id,source);
         published.add(id);
         if(result.chunks()>0)changes.reset();
@@ -140,7 +163,7 @@ public final class WorldGeography {
         if(!published.contains(id))throw new IOException("Fresh shard must be published first");
         var shard=open(id);
         int writes;
-        try{writes=shard.updateChunks(chunks);}
+        try{writes=shard.updateChunks(chunks,keys->{for(Key key:keys)overview.invalidate(key);});}
         catch(IOException e){failure=e;clearPresentationCache();throw e;}
         if(writes==0)return 0;
         Set<Key> changed=new HashSet<>();

@@ -29,10 +29,11 @@ public final class RegionShard {
         store=new RegionPageStore(id.directory(root),pageLimit,cacheBytes);
         pyramid=new DiskGeographicPyramid(store,MAX_LOD);
     }
-    public int updateChunks(List<DiskGeographicPyramid.ChunkSnapshot> chunks)throws IOException{
+    public int updateChunks(List<DiskGeographicPyramid.ChunkSnapshot> chunks)throws IOException{return updateChunks(chunks,keys->{});}
+    int updateChunks(List<DiskGeographicPyramid.ChunkSnapshot> chunks,DiskGeographicPyramid.BeforeCommit beforeCommit)throws IOException{
         for(var chunk:chunks)if(!id.equals(Id.ofChunk(chunk.x(),chunk.z())))
             throw new IllegalArgumentException("Chunk outside shard");
-        return pyramid.updateChunks(chunks);
+        return pyramid.updateChunks(chunks,beforeCommit);
     }
     public Entry get(GeographicPyramid.Cell cell)throws IOException{
         if(!id.equals(Id.ofCell(cell)))throw new IllegalArgumentException("Cell outside shard");

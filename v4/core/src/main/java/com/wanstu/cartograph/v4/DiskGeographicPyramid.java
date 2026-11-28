@@ -62,7 +62,9 @@ public final class DiskGeographicPyramid {
     public synchronized int updateChunk(int chunkX,int chunkZ,Entry[] columns)throws IOException{
         return updateChunks(List.of(new ChunkSnapshot(chunkX,chunkZ,columns)));
     }
-    public synchronized int updateChunks(List<ChunkSnapshot> chunks)throws IOException{
+    public synchronized int updateChunks(List<ChunkSnapshot> chunks)throws IOException{return updateChunks(chunks,keys->{});}
+    @FunctionalInterface interface BeforeCommit {void invalidate(List<Key> keys)throws IOException;}
+    synchronized int updateChunks(List<ChunkSnapshot> chunks,BeforeCommit beforeCommit)throws IOException{
         if(chunks.size()>MAX_BATCH_CHUNKS)throw new IllegalArgumentException("Chunk batch limit");
         Map<Key,WorkPage> pages=new HashMap<>();
         for(var snapshot:chunks){
@@ -74,9 +76,10 @@ public final class DiskGeographicPyramid {
                 p.put((startZ+dz)*EDGE+startX+dx,e);
             }
         }
-        return apply(pages);
+        return apply(pages,beforeCommit);
     }
-    private int apply(Map<Key,WorkPage> pages)throws IOException{
+    private int apply(Map<Key,WorkPage> pages)throws IOException{return apply(pages,keys->{});}
+    private int apply(Map<Key,WorkPage> pages,BeforeCommit beforeCommit)throws IOException{
         List<Page> writes=new ArrayList<>();
         BitSet parents=new BitSet(SLOTS/4);
         ArrayList<Aggregate> children=new ArrayList<>(4);
@@ -105,6 +108,7 @@ public final class DiskGeographicPyramid {
             }
             pages=next;
         }
+        if(!writes.isEmpty())beforeCommit.invalidate(writes.stream().map(Page::key).toList());
         store.writeBatch(writes);
         return writes.size();
     }
